@@ -10,6 +10,11 @@ import (
 	"net/url"
 )
 
+// AppToken 显式获取/复用缓存的 AppToken（诊断与运维用途；业务 API 会自动携带）。
+func (c *Client) AppToken(ctx context.Context) (string, error) {
+	return c.tok.get(ctx)
+}
+
 // ---- 接收通道 ----
 
 type wsEndpointData struct {

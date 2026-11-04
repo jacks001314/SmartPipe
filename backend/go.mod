@@ -3,6 +3,7 @@ module smartpipe/backend
 go 1.24
 
 require (
+	github.com/gorilla/websocket v1.5.1
 	github.com/kataras/iris/v12 v12.2.11
 	smartpipe/sdks/lanxin v0.0.0
 )
@@ -21,7 +22,6 @@ require (
 	github.com/gomarkdown/markdown v0.0.0-20240328165702-4d01890c35c0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/css v1.0.0 // indirect
-	github.com/gorilla/websocket v1.5.1 // indirect
 	github.com/iris-contrib/schema v0.0.6 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/kataras/blocks v0.0.8 // indirect
