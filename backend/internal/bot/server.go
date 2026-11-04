@@ -4,7 +4,16 @@ import (
 	"github.com/kataras/iris/v12"
 )
 
-// NewServer 管理面 HTTP 服务：健康检查与后续管理接口（M1 极简）。
+// ReplyRequest 编排层经 bot 内网接口发蓝信消息的请求体。
+type ReplyRequest struct {
+	ChatType string `json:"chatType"` // "p2p" | "group"
+	TargetID string `json:"targetId"` // staffId 或 groupId
+	RefMsgID string `json:"refMsgId,omitempty"`
+	Text     string `json:"text"`
+}
+
+// NewServer 管理面 HTTP 服务：/healthz + /internal/reply（编排层回复入口）。
+// 蓝信凭证只在本进程内使用，编排层经此接口间接发送（最小授权）。
 func NewServer(cfg Config, h *Handler) *iris.Application {
 	app := iris.New()
 	app.Get("/healthz", func(ctx iris.Context) {
@@ -15,6 +24,23 @@ func NewServer(cfg Config, h *Handler) *iris.Application {
 			"dispatcher": dispatcherName(cfg),
 		})
 	})
+	app.Post("/internal/reply", internalTokenGuard(cfg.InternalToken), func(ctx iris.Context) {
+		var req ReplyRequest
+		if err := ctx.ReadJSON(&req); err != nil || req.Text == "" || req.TargetID == "" {
+			ctx.StatusCode(400)
+			ctx.JSON(map[string]string{"error": "bad request: targetId/text required"})
+			return
+		}
+		if req.ChatType == "" {
+			req.ChatType = "p2p"
+		}
+		if err := h.SendText(ctx, req.ChatType, req.TargetID, req.RefMsgID, req.Text); err != nil {
+			ctx.StatusCode(500)
+			ctx.JSON(map[string]string{"error": err.Error()})
+			return
+		}
+		ctx.JSON(map[string]any{"ok": true})
+	})
 	return app
 }
 
@@ -23,4 +49,15 @@ func dispatcherName(cfg Config) string {
 		return "orchestrator"
 	}
 	return "ack"
+}
+
+func internalTokenGuard(token string) iris.Handler {
+	return func(ctx iris.Context) {
+		if token == "" || ctx.GetHeader("X-Internal-Token") == token {
+			ctx.Next()
+			return
+		}
+		ctx.StatusCode(401)
+		_, _ = ctx.WriteString("unauthorized")
+	}
 }

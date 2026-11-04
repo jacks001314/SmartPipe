@@ -127,19 +127,36 @@ func (h *Handler) dispatch(ctx context.Context, m *lanxin.InboundMessage, text s
 	return nil
 }
 
-// reply 回复消息：群聊引用原消息，私聊直接回复；Markdown 失败回退纯文本（官方 11.9 建议）。
+// reply 回复触发消息（群聊引用原消息）。
 func (h *Handler) reply(ctx context.Context, m *lanxin.InboundMessage, text string) error {
+	target := m.GroupID
 	if m.ChatType == "p2p" {
-		if _, err := h.snd.SendP2PMessage(ctx, m.From, lanxin.FormatTextMessage(text)); err == nil {
+		target = m.From
+	}
+	return h.SendText(ctx, m.ChatType, target, m.MsgID, text)
+}
+
+// SendText 发送文本回复：Markdown 失败回退纯文本（官方 11.9 建议）；群聊可引用原消息。
+// 供消息处理与 /internal/reply 管理接口复用。
+func (h *Handler) SendText(ctx context.Context, chatType, targetID, refMsgID, text string) error {
+	if chatType == "p2p" {
+		if _, err := h.snd.SendP2PMessage(ctx, targetID, lanxin.FormatTextMessage(text)); err == nil {
 			return nil
 		}
-		_, err := h.snd.SendP2PMessage(ctx, m.From, lanxin.TextMessage(text))
+		_, err := h.snd.SendP2PMessage(ctx, targetID, lanxin.TextMessage(text))
 		return err
 	}
-	g := lanxin.FormatTextMessage(text).Quote(m.MsgID)
-	if _, err := h.snd.SendGroupMessage(ctx, m.GroupID, g); err == nil {
+	g := lanxin.FormatTextMessage(text)
+	if refMsgID != "" {
+		g.Quote(refMsgID)
+	}
+	if _, err := h.snd.SendGroupMessage(ctx, targetID, g); err == nil {
 		return nil
 	}
-	_, err := h.snd.SendGroupMessage(ctx, m.GroupID, lanxin.TextMessage(text).Quote(m.MsgID))
+	t := lanxin.TextMessage(text)
+	if refMsgID != "" {
+		t.Quote(refMsgID)
+	}
+	_, err := h.snd.SendGroupMessage(ctx, targetID, t)
 	return err
 }

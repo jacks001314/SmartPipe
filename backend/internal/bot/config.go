@@ -24,6 +24,9 @@ type Config struct {
 
 	// RequireAtMe 群聊是否仅在 @机器人 时响应（默认 true）。
 	RequireAtMe bool
+
+	// InternalToken 内网接口共享令牌（bot 与 orchestrator 一致；为空则不校验）。
+	InternalToken string
 }
 
 func LoadFromEnv() (Config, error) {
@@ -34,6 +37,7 @@ func LoadFromEnv() (Config, error) {
 		HTTPAddr:        getenv("BOT_HTTP_ADDR", ":8091"),
 		OrchestratorURL: os.Getenv("ORCHESTRATOR_URL"),
 		RequireAtMe:     getenv("BOT_REQUIRE_AT_ME", "true") != "false",
+		InternalToken:   os.Getenv("INTERNAL_TOKEN"),
 	}
 	if cfg.AppID == "" || cfg.AppSecret == "" {
 		return cfg, fmt.Errorf("bot: LANXIN_APP_ID / LANXIN_APP_SECRET 必填（蓝信桌面端获取）")

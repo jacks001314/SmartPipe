@@ -51,6 +51,7 @@ func (d AckDispatcher) Dispatch(ctx context.Context, msg Inbound) error {
 // HTTPDispatcher 把消息转发给 Orchestrator（ORCHESTRATOR_URL 配置后启用）。
 type HTTPDispatcher struct {
 	BaseURL string
+	Token   string
 	Client  *http.Client
 }
 
@@ -65,6 +66,9 @@ func (d *HTTPDispatcher) Dispatch(ctx context.Context, msg Inbound) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if d.Token != "" {
+		req.Header.Set("X-Internal-Token", d.Token)
+	}
 	client := d.Client
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
@@ -82,7 +86,7 @@ func (d *HTTPDispatcher) Dispatch(ctx context.Context, msg Inbound) error {
 
 func NewDispatcher(cfg Config, snd Sender) Dispatcher {
 	if cfg.OrchestratorURL != "" {
-		return &HTTPDispatcher{BaseURL: cfg.OrchestratorURL}
+		return &HTTPDispatcher{BaseURL: cfg.OrchestratorURL, Token: cfg.InternalToken}
 	}
 	return AckDispatcher{Snd: snd}
 }

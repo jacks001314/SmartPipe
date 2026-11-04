@@ -22,3 +22,27 @@ docs/       设计文档与架构图源文件
 ```
 
 > 技术选型依据见设计文档第 10 节：后端全 Go（复用 Syntropy `api/client`），前端 React + TS。
+
+## 本地运行（M1 端到端）
+
+三个终端，顺序启动：
+
+```powershell
+# 1) Issue 管理服务（内存存储）
+Set-Location backend; go run ./cmd/issue-service
+
+# 2) 编排服务
+$env:ISSUE_SERVICE_URL = 'http://127.0.0.1:8092'
+$env:BOT_URL = 'http://127.0.0.1:8091'
+$env:INTERNAL_TOKEN = 'dev-token'
+go run ./cmd/orchestrator
+
+# 3) 蓝信机器人（凭证见 deploy/bot.local.env）
+$env:ORCHESTRATOR_URL = 'http://127.0.0.1:8090'
+$env:INTERNAL_TOKEN = 'dev-token'
+# 加载 LANXIN_APP_ID / LANXIN_APP_SECRET / LANXIN_API_BASE 后：
+go run ./cmd/bot
+```
+
+群内 @机器人 提问 -> Orchestrator 归档 -> 蓝信收到 Issue 编号回复。
+连通性自检（只读）：`go run ./cmd/botdiag`。
