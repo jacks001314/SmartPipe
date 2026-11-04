@@ -1,0 +1,6 @@
+.syntropy/
+node_modules/
+web/dist/
+*.exe
+*.test
+coverage.out

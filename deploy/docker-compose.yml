@@ -1,0 +1,19 @@
+# SmartPipe 部署骨架（占位，随 M1 落地补全）
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: smartpipe
+      POSTGRES_USER: smartpipe
+      POSTGRES_PASSWORD: changeme
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+
+  # backend 各服务镜像从 backend/cmd/* 构建：
+  # bot / orchestrator / issue-service / patch-verifier / ci-adapter / release-service / mcp-gateway
+
+volumes:
+  pgdata:
