@@ -5,6 +5,7 @@
 ## 目录结构
 
 ```
+sdks/       独立 SDK（lanxin：蓝信个人机器人 Go SDK，backend 通过 replace 引用）
 backend/    Go 后端（单模块多服务：cmd/ 入口 + internal/ 实现）
   cmd/bot             蓝信机器人服务
   cmd/orchestrator    Orchestrator 编排服务
