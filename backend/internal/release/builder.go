@@ -31,6 +31,8 @@ var commitPattern = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 // Request 是一次发版构建的输入。
 type Request struct {
 	Repo          string            `json:"repo"`
+	// CloneURL 是带凭据的克隆地址；为空时用 Repo（公开仓库）。
+	CloneURL      string            `json:"clone_url,omitempty"`
 	Commit        string            `json:"commit"`
 	Version       string            `json:"version"`
 	ProfileName   string            `json:"profile_name"`
@@ -132,7 +134,11 @@ func Build(ctx context.Context, req Request, workRoot string) (*Report, error) {
 	defer os.RemoveAll(tmp)
 	repoDir := filepath.Join(tmp, "repo")
 
-	if _, err := runGit(ctx, "", "clone", "--no-hardlinks", "--quiet", req.Repo, repoDir); err != nil {
+	cloneURL := strings.TrimSpace(req.CloneURL)
+	if cloneURL == "" {
+		cloneURL = req.Repo
+	}
+	if _, err := runGit(ctx, "", "clone", "--no-hardlinks", "--quiet", cloneURL, repoDir); err != nil {
 		rep.Error = "clone failed: " + err.Error()
 		rep.DurationMS = time.Since(started).Milliseconds()
 		return rep, nil

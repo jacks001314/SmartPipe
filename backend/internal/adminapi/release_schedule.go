@@ -124,11 +124,15 @@ func (a *API) executeReleaseRun(ctx context.Context, project *store.Project, in 
 		branch = strings.TrimSpace(project.GitHubDefaultBranch)
 	}
 	ready, released := a.releaseLabels(project, in.ReadyLabel)
+	// 私有仓库的构建需要凭据：复用推送用的鉴权地址；公开仓库或本地裸库会原样返回。
+	cloneURL := repo
+	if u, cerr := a.resolvePushRemote(ctx, project, repo); cerr == nil { cloneURL = u }
+
 	run, _ := release.Execute(ctx, release.RunRequest{
 		ProjectID: project.ID, Repo: repo, Version: strings.TrimSpace(in.Version),
 		Commit: strings.TrimSpace(in.Commit), Branch: branch,
 		ReadyLabel: ready, ReleasedLabel: released,
-		ArtifactGlobs: in.ArtifactGlobs, Notes: in.Notes, DryRun: in.DryRun, Trigger: in.Trigger,
+		CloneURL: cloneURL, ArtifactGlobs: in.ArtifactGlobs, Notes: in.Notes, DryRun: in.DryRun, Trigger: in.Trigger,
 	}, client, a.releaseNotifier(), release.Build, "")
 	if run == nil {
 		return nil, nil, fmt.Errorf("adminapi: release run produced no result")

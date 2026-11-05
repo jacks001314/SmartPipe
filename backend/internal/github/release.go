@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"time"
+	"strings"
 )
 
 // Release 是 GitHub Release 的响应子集。
@@ -183,6 +184,25 @@ type Asset struct {
 
 // UploadReleaseAsset 把制品作为 Release 附件上传（octet-stream）。
 // 用 /repos/{owner}/{repo}/releases/{id}/assets?name= 形式，api.github.com 与 GitHub Enterprise 都支持。
+
+// uploadBase 返回 Release 附件上传用的基地址：GitHub.com 是 uploads.github.com，
+// 企业版把 api.<host> 换成 uploads.<host>；本地假服务保持原地址。
+func (c *Client) uploadBase() string {
+	base := strings.TrimRight(strings.TrimSpace(c.BaseURL), "/")
+	u, err := url.Parse(base)
+	if err != nil || u.Host == "" {
+		return base
+	}
+	switch {
+	case u.Host == "api.github.com":
+		u.Host = "uploads.github.com"
+	case strings.HasPrefix(u.Host, "api."):
+		u.Host = "uploads." + strings.TrimPrefix(u.Host, "api.")
+	default:
+		return base
+	}
+	return u.String()
+}
 func (c *Client) UploadReleaseAsset(ctx context.Context, repo string, releaseID int64, name string, data []byte) (*Asset, error) {
 	owner, name0, err := SplitRepo(repo)
 	if err != nil {
@@ -190,7 +210,7 @@ func (c *Client) UploadReleaseAsset(ctx context.Context, repo string, releaseID 
 	}
 	q := url.Values{"name": {name}}
 	path := fmt.Sprintf("/repos/%s/%s/releases/%d/assets?%s", owner, name0, releaseID, q.Encode())
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.uploadBase()+path, bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}

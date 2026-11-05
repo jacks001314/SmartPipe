@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"net/url"
 )
 
 // DefaultAPIBase 是 GitHub.com 的 REST 入口。
@@ -162,8 +163,57 @@ func (c *Client) AddLabels(ctx context.Context, repo string, number int, labels 
 	if err != nil {
 		return err
 	}
-	return c.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/issues/%d/labels", owner, name, number),
-		map[string]any{"labels": labels}, nil)
+	add := func() error {
+		return c.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/issues/%d/labels", owner, name, number),
+			map[string]any{"labels": labels}, nil)
+	}
+	err = add()
+	if err == nil {
+		return nil
+	}
+	// 真实 GitHub 对"给已有 Issue 打不存在的标签"返回 422；先补建标签再重试一次。
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusUnprocessableEntity {
+		return err
+	}
+	for _, label := range labels {
+		if err := c.EnsureLabel(ctx, repo, label); err != nil {
+			return err
+		}
+	}
+	return add()
+}
+
+// EnsureLabel 保证仓库里存在该标签：已存在直接返回，不存在则创建。
+func (c *Client) EnsureLabel(ctx context.Context, repo, label string) error {
+	owner, name, err := SplitRepo(repo)
+	if err != nil {
+		return err
+	}
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return nil
+	}
+	var existing struct {
+		Name string `json:"name"`
+	}
+	getErr := c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/labels/%s", owner, name, url.PathEscape(label)), nil, &existing)
+	if getErr == nil {
+		return nil
+	}
+	var apiErr *APIError
+	if !errors.As(getErr, &apiErr) || apiErr.Status != http.StatusNotFound {
+		return getErr
+	}
+	createErr := c.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/labels", owner, name),
+		map[string]any{"name": label, "color": "ededed"}, nil)
+	if createErr == nil {
+		return nil
+	}
+	if errors.As(createErr, &apiErr) && apiErr.Status == http.StatusUnprocessableEntity {
+		return nil // 并发创建时可能已经存在
+	}
+	return createErr
 }
 
 // GetIssue 读取 Issue。

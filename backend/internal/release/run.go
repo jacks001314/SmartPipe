@@ -47,6 +47,8 @@ type Candidate struct {
 type RunRequest struct {
 	ProjectID     string   `json:"project_id"`
 	Repo          string   `json:"repo"`
+	// CloneURL 是带凭据的克隆地址（私有仓库用）；为空时退回 Repo。
+	CloneURL string `json:"clone_url,omitempty"`
 	Version       string   `json:"version"`
 	Commit        string   `json:"commit"`
 	Branch        string   `json:"branch"`
@@ -243,7 +245,7 @@ func Execute(ctx context.Context, req RunRequest, forge Forge, notify Notifier, 
 		build = Build
 	}
 	report, err := build(ctx, Request{
-		Repo: req.Repo, Commit: commit, Version: run.Version,
+		Repo: req.Repo, CloneURL: req.CloneURL, Commit: commit, Version: run.Version,
 		ArtifactGlobs: req.ArtifactGlobs, Notes: notes,
 	}, workRoot)
 	if err != nil {
