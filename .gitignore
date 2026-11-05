@@ -8,3 +8,6 @@ coverage.out
 deploy/bot.local.env
 .dev/
 backend/bin/
+
+# 附件是只读输入，不进仓库
+attachments/

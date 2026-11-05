@@ -37,6 +37,10 @@ func (a *API) createCredential(c iris.Context) {
 		a.badRequest(c, "请求体不是合法 JSON")
 		return
 	}
+	// 全局凭据允许不传 project_id，空字符串也按全局处理（否则会去查一个不存在的项目）。
+	if in.ProjectID != nil && strings.TrimSpace(*in.ProjectID) == "" {
+		in.ProjectID = nil
+	}
 	if !store.ValidKind(in.Kind) {
 		a.badRequest(c, "不支持的凭据类型: "+in.Kind)
 		return
