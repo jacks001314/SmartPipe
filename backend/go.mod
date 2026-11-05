@@ -1,11 +1,13 @@
 module smartpipe/backend
 
-go 1.25
+go 1.26.10
 
 require (
 	github.com/gorilla/websocket v1.5.1
 	github.com/jackc/pgx/v5 v5.7.4
 	github.com/kataras/iris/v12 v12.2.11
+	github.com/pmenglund/codex-sdk-go v0.166.0
+	gopkg.in/yaml.v3 v3.0.1
 	smartpipe/sdks/lanxin v0.0.0
 )
 
@@ -56,7 +58,6 @@ require (
 	golang.org/x/time v0.5.0 // indirect
 	google.golang.org/protobuf v1.33.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
 replace smartpipe/sdks/lanxin => ../sdks/lanxin

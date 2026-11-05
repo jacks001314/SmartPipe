@@ -92,6 +92,7 @@ try {
     "mcp-gateway" = "./cmd/mcp-gateway"
     "bot" = "./cmd/bot"
     "botdiag" = "./cmd/botdiag"
+    "codex-runner" = "./cmd/codex-runner"
   }
   $Ldflags = "-s -w -X main.version=$Version"
   $Go = (Get-Command go -ErrorAction Stop).Source

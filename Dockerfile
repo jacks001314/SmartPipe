@@ -9,7 +9,7 @@ RUN npm ci --no-audit --no-fund
 COPY web ./
 RUN npm run build
 
-FROM golang:1.25-alpine AS build
+FROM golang:1.26-alpine AS build
 WORKDIR /src
 RUN apk add --no-cache git
 COPY backend ./backend
@@ -29,7 +29,7 @@ RUN LDFLAGS="-s -w -X main.version=${VERSION}" \
  && go build -ldflags="$LDFLAGS" -o /out/botdiag ./cmd/botdiag \
  && printf '%s\n' "version=${VERSION}" "commit=${COMMIT}" "built_at=${BUILD_TIME}" > /out/BUILD-INFO
 
-FROM golang:1.25-alpine
+FROM golang:1.26-alpine
 RUN apk add --no-cache ca-certificates git nodejs npm tzdata \
  && adduser -D -u 10001 smartpipe \
  && mkdir -p /data/runtime /data/verify /data/releases /data/go /data/go-cache /data/npm \

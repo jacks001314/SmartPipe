@@ -89,7 +89,8 @@ LDFLAGS="-s -w -X main.version=$VERSION"
     "patch-verifier ./cmd/patch-verifier" \
     "mcp-gateway ./cmd/mcp-gateway" \
     "bot ./cmd/bot" \
-    "botdiag ./cmd/botdiag"; do
+    "botdiag ./cmd/botdiag" \
+    "codex-runner ./cmd/codex-runner"; do
     set -- $pair
     go build -trimpath -ldflags "$LDFLAGS" -o "$OUT/bin/$1$EXT" "$2"
   done
