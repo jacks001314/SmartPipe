@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api";
-import type { CrashReport } from "../types";
+import type { CrashReport, CrashRetention } from "../types";
 import type { Notify } from "../App";
 
 function when(value: string | null | undefined) {
@@ -23,12 +23,15 @@ export function CrashPage({ notify }: { notify: Notify }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [detail, setDetail] = useState<CrashReport | null>(null);
+  const [retention, setRetention] = useState<CrashRetention | null>(null);
+  const [purging, setPurging] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.listCrashes(100);
+      const [res, ret] = await Promise.all([api.listCrashes(100), api.crashRetention().catch(() => null)]);
       setItems(res);
+      setRetention(ret);
       setError("");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "读取崩溃上报失败");
@@ -62,6 +65,47 @@ export function CrashPage({ notify }: { notify: Notify }) {
           <strong>崩溃入口：</strong><span className="mono">POST /ingest/crash</span>（bridge，<span className="mono">X-Ingest-Token</span>）。
           服务端校验大小、脱敏凭据/邮箱/用户目录、按指纹 24h 去重、按用户每小时限流，然后建
           <span className="mono">crash_report</span> Issue 并派给 pipeline-lead。
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <div className="card-title">原始包保留策略</div>
+            <div className="card-sub">
+              超过 {retention?.bundle_days ?? 30} 天清空包正文（保留指纹与次数），被拒绝的上报保留 {retention?.rejected_days ?? 7} 天
+            </div>
+          </div>
+          <button
+            className="btn"
+            disabled={purging}
+            onClick={async () => {
+              setPurging(true);
+              try {
+                const res = await api.runCrashRetention();
+                notify("已清理：" + res.bundles_cleared + " 个包 / " + res.rejected_deleted + " 条拒绝记录");
+                await load();
+              } catch (err) {
+                notify(err instanceof ApiError ? err.message : "清理失败", "error");
+              } finally {
+                setPurging(false);
+              }
+            }}
+          >
+            立即清理
+          </button>
+        </div>
+        <div className="card-body">
+          <div className="form-grid">
+            <div className="field">
+              <label>记录总数</label>
+              <input readOnly value={retention?.rows ?? "—"} />
+            </div>
+            <div className="field">
+              <label>包体积</label>
+              <input readOnly value={retention ? (retention.bundle_bytes / 1024).toFixed(1) + " KB" : "—"} />
+            </div>
+          </div>
         </div>
       </div>
 

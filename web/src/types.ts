@@ -343,3 +343,13 @@ export type UserIdentity = {
   created_at: string;
   updated_at: string;
 };
+
+export type CrashRetention = {
+  rows: number;
+  bundle_bytes: number;
+  bundle_days: number;
+  rejected_days: number;
+  bundles_cleared?: number;
+  rejected_deleted?: number;
+  ran_at?: string;
+};

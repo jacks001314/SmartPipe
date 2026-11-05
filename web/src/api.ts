@@ -5,6 +5,7 @@ import type {
   AuditEntry,
   BridgeLink,
   CrashReport,
+  CrashRetention,
   Credential,
   Derivation,
   DispatchRecord,
@@ -161,6 +162,8 @@ export const api = {
   updateMCPConfig: (body: { url: string; pool_name: string }) =>
     request<MCPConfig>("/runtime/mcp-config", { method: "PUT", body }),
 
+  crashRetention: () => request<CrashRetention>("/crashes/retention"),
+  runCrashRetention: () => request<CrashRetention>("/crashes/retention/run", { method: "POST" }),
   listCrashes: (limit = 100) => request<CrashReport[]>("/crashes?limit=" + limit),
   getCrash: (id: number) => request<CrashReport>("/crashes/" + id),
   listReleaseCandidates: (projectId: string, label?: string) =>

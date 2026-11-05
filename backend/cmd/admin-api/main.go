@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -82,23 +83,25 @@ func main() {
 	}
 
 	api := adminapi.New(adminapi.Config{
-		Store:          st,
-		Checker:        conncheck.New(),
-		Runtime:        runtimeManager,
-		AdminToken:     adminToken,
-		AllowOrigins:   origins,
-		Version:        version,
-		AppServerBin:   envOr("SMARTPIPE_APPSERVER_BIN", defaultAppServerBinary()),
-		RuntimeDataDir: runtimeData,
-		AppServerToken: strings.TrimSpace(os.Getenv("SMARTPIPE_APPSERVER_TOKEN")),
-		VerifyURL:      envOr("SMARTPIPE_VERIFY_URL", ""),
-		VerifyToken:    strings.TrimSpace(os.Getenv("SMARTPIPE_VERIFY_TOKEN")),
-		ReleaseURL:     envOr("SMARTPIPE_RELEASE_URL", ""),
-		ReleaseToken:   strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_TOKEN")),
-		BotAddr:        envOr("SMARTPIPE_BOT_ADDR", ""),
-		BotToken:       strings.TrimSpace(os.Getenv("SMARTPIPE_BOT_INTERNAL_TOKEN")),
-		MCPURL:         envOr("SMARTPIPE_MCP_URL", ""),
-		MCPPoolName:    envOr("SMARTPIPE_MCP_POOL_NAME", "smartpipe"),
+		Store:                 st,
+		Checker:               conncheck.New(),
+		Runtime:               runtimeManager,
+		AdminToken:            adminToken,
+		AllowOrigins:          origins,
+		Version:               version,
+		AppServerBin:          envOr("SMARTPIPE_APPSERVER_BIN", defaultAppServerBinary()),
+		RuntimeDataDir:        runtimeData,
+		AppServerToken:        strings.TrimSpace(os.Getenv("SMARTPIPE_APPSERVER_TOKEN")),
+		VerifyURL:             envOr("SMARTPIPE_VERIFY_URL", ""),
+		VerifyToken:           strings.TrimSpace(os.Getenv("SMARTPIPE_VERIFY_TOKEN")),
+		ReleaseURL:            envOr("SMARTPIPE_RELEASE_URL", ""),
+		ReleaseToken:          strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_TOKEN")),
+		BotAddr:               envOr("SMARTPIPE_BOT_ADDR", ""),
+		BotToken:              strings.TrimSpace(os.Getenv("SMARTPIPE_BOT_INTERNAL_TOKEN")),
+		MCPURL:                envOr("SMARTPIPE_MCP_URL", ""),
+		CrashRetentionDays:    envInt("SMARTPIPE_CRASH_RETENTION_DAYS", 30),
+		RejectedRetentionDays: envInt("SMARTPIPE_CRASH_REJECT_RETENTION_DAYS", 7),
+		MCPPoolName:           envOr("SMARTPIPE_MCP_POOL_NAME", "smartpipe"),
 	})
 
 	api.ApplyRuntimeSettings(context.Background())
@@ -132,6 +135,9 @@ func main() {
 	if schedule := strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_SCHEDULE")); schedule != "" && schedule != "off" {
 		api.StartReleaseScheduler(context.Background(), schedule)
 	}
+	if os.Getenv("SMARTPIPE_CRASH_RETENTION_SCHEDULE") != "off" {
+		api.StartRetentionWorker(context.Background(), time.Duration(envInt("SMARTPIPE_CRASH_RETENTION_HOURS", 6))*time.Hour)
+	}
 
 	log.Printf("admin-api %s 监听 %s", version, addr)
 	if err := app.Listen(addr, iris.WithOptimizations); err != nil && !errors.Is(err, iris.ErrServerClosed) {
@@ -157,6 +163,15 @@ func defaultAppServerBinary() string {
 func envOr(key, fallback string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func envInt(key string, fallback int) int {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
 	}
 	return fallback
 }

@@ -161,3 +161,36 @@ func (s *Store) UpdateCrashIssue(ctx context.Context, id int64, issueNumber int,
 	}
 	return nil
 }
+
+// PurgeCrashBundles 清空窗口期之前的原始包内容，保留行与统计（证据仍在，体积释放）。
+func (s *Store) PurgeCrashBundles(ctx context.Context, before time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE crash_reports SET bundle = '{}'::jsonb, updated_at = now()
+WHERE created_at < $1 AND bundle <> '{}'::jsonb`, before)
+	if err != nil {
+		return 0, fmt.Errorf("store: purge crash bundles: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+// PurgeRejectedCrashes 删除窗口期之前被拒绝（未建单）的上报行。
+func (s *Store) PurgeRejectedCrashes(ctx context.Context, before time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+DELETE FROM crash_reports WHERE created_at < $1 AND status IN ('rejected','rate_limited')`, before)
+	if err != nil {
+		return 0, fmt.Errorf("store: purge rejected crashes: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+// CrashStorageStats 给出包体积与条数，用于运维页展示保留策略效果。
+func (s *Store) CrashStorageStats(ctx context.Context) (rows int64, bundleBytes int64, err error) {
+	err = s.db.QueryRowContext(ctx, `
+SELECT count(*), COALESCE(sum(length(bundle::text)), 0) FROM crash_reports`).Scan(&rows, &bundleBytes)
+	if err != nil {
+		return 0, 0, fmt.Errorf("store: crash stats: %w", err)
+	}
+	return rows, bundleBytes, nil
+}

@@ -37,6 +37,10 @@ type Config struct {
 	BotToken       string
 	MCPURL         string
 	MCPPoolName    string
+	// CrashRetentionDays 原始崩溃包保留天数（0 表示用默认 30 天）。
+	CrashRetentionDays int
+	// RejectedRetentionDays 被拒绝上报的保留天数（0 表示默认 7 天）。
+	RejectedRetentionDays int
 	// DevOpen 在未配置 token 时允许无鉴权访问，仅供本地开发。
 	DevOpen bool
 	Version string
@@ -44,24 +48,26 @@ type Config struct {
 
 // API 持有处理请求所需的依赖。
 type API struct {
-	store           *store.Store
-	checker         *conncheck.Checker
-	runtime         *rt.Manager
-	token           string
-	origins         []string
-	devOpen         bool
-	version         string
-	appServerBinary string
-	runtimeDataDir  string
-	appServerToken  string
-	verifyURL       string
-	verifyToken     string
-	releaseURL      string
-	releaseToken    string
-	botAddr         string
-	botToken        string
-	mcpURL          string
-	mcpPoolName     string
+	store                 *store.Store
+	checker               *conncheck.Checker
+	runtime               *rt.Manager
+	token                 string
+	origins               []string
+	devOpen               bool
+	version               string
+	appServerBinary       string
+	runtimeDataDir        string
+	appServerToken        string
+	verifyURL             string
+	verifyToken           string
+	releaseURL            string
+	releaseToken          string
+	botAddr               string
+	botToken              string
+	mcpURL                string
+	mcpPoolName           string
+	crashRetentionDays    int
+	rejectedRetentionDays int
 }
 
 // New 构造 API。
@@ -76,24 +82,26 @@ func New(cfg Config) *API {
 	}
 	token := strings.TrimSpace(cfg.AdminToken)
 	return &API{
-		store:           cfg.Store,
-		checker:         checker,
-		runtime:         runtimeManager,
-		token:           token,
-		origins:         cfg.AllowOrigins,
-		devOpen:         cfg.DevOpen || token == "",
-		version:         cfg.Version,
-		appServerBinary: cfg.AppServerBin,
-		runtimeDataDir:  cfg.RuntimeDataDir,
-		appServerToken:  cfg.AppServerToken,
-		verifyURL:       strings.TrimSpace(cfg.VerifyURL),
-		verifyToken:     strings.TrimSpace(cfg.VerifyToken),
-		releaseURL:      strings.TrimSpace(cfg.ReleaseURL),
-		releaseToken:    strings.TrimSpace(cfg.ReleaseToken),
-		botAddr:         strings.TrimSpace(cfg.BotAddr),
-		botToken:        strings.TrimSpace(cfg.BotToken),
-		mcpURL:          strings.TrimSpace(cfg.MCPURL),
-		mcpPoolName:     strings.TrimSpace(cfg.MCPPoolName),
+		store:                 cfg.Store,
+		checker:               checker,
+		runtime:               runtimeManager,
+		token:                 token,
+		origins:               cfg.AllowOrigins,
+		devOpen:               cfg.DevOpen || token == "",
+		version:               cfg.Version,
+		appServerBinary:       cfg.AppServerBin,
+		runtimeDataDir:        cfg.RuntimeDataDir,
+		appServerToken:        cfg.AppServerToken,
+		verifyURL:             strings.TrimSpace(cfg.VerifyURL),
+		verifyToken:           strings.TrimSpace(cfg.VerifyToken),
+		releaseURL:            strings.TrimSpace(cfg.ReleaseURL),
+		releaseToken:          strings.TrimSpace(cfg.ReleaseToken),
+		botAddr:               strings.TrimSpace(cfg.BotAddr),
+		botToken:              strings.TrimSpace(cfg.BotToken),
+		mcpURL:                strings.TrimSpace(cfg.MCPURL),
+		mcpPoolName:           strings.TrimSpace(cfg.MCPPoolName),
+		crashRetentionDays:    cfg.CrashRetentionDays,
+		rejectedRetentionDays: cfg.RejectedRetentionDays,
 	}
 }
 
