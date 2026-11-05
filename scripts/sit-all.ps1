@@ -81,7 +81,7 @@ if (-not $SkipWeb) {
   }
 }
 
-$smokes = @("mcp-smoke", "repo-merge-smoke", "approval-smoke", "bridge-smoke", "crash-smoke", "bot-crash-smoke", "release-smoke")
+$smokes = @("mcp-smoke", "repo-merge-smoke", "approval-smoke", "bridge-smoke", "crash-smoke", "bot-crash-smoke", "release-smoke", "e2e-issue-smoke")
 if ($Only) { $smokes = @($Only) }
 Write-Output "== smokes =="
 foreach ($name in $smokes) {
