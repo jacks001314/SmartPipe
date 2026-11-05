@@ -67,9 +67,10 @@ $tokenID = $tok.Body.data.record.id
 
 # 4) repo.commit
 $patch = [string][IO.File]::ReadAllText((Join-Path $root ".dev\patch-multiply.diff"), [Text.UTF8Encoding]::new($false))
+$branch = "agent/smoke-" + (Get-Date -Format "HHmmss")
 $commit = Tool $leadToken "repo.commit" @{
   repo = $work; base_commit = $base; patch = $patch; issue_ref = "example/release#101"
-  message = "fix: add Multiply (smoke)"; target_branch = ""
+  message = "fix: add Multiply (smoke)"; branch = $branch; target_branch = ""
 }
 Write-Output ("commit ok=" + $commit.ok + " branch=" + $commit.branch + " sha=" + $commit.commit)
 if ($commit.ok -ne $true) { throw ("commit rejected: " + $commit.error) }
@@ -84,6 +85,13 @@ $refName = "refs/heads/" + $commit.branch
 $remoteRef = (& git -C $remoteBare rev-parse $refName 2>$null)
 if ($LASTEXITCODE -ne 0 -or -not $remoteRef) { throw ("branch not on remote: " + $commit.branch) }
 if ($remoteRef.Trim() -ne $commit.commit) { throw ("remote head " + $remoteRef + " != commit " + $commit.commit) }
+
+# 6b) 改写本地分支后重推同一分支：必须被非快进保护拒绝（禁止 force push）
+& git -C $work -c user.name=smoke -c user.email=smoke@example.invalid commit --amend --no-edit -m ("fix: add Multiply (rewrite) " + $branch) | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "amend failed" }
+$rej = PostJson ($api + "/pushes") @{ project_id = $projectID; issue_ref = "example/release#101"; repo = $work; branch = $commit.branch; remote = "origin" } $adminHeaders
+if ($rej.Status -ne 422) { throw ("expected 422 non-fast-forward, got " + $rej.Status + " " + $rej.Text) }
+Write-Output ("non-fast-forward rejected: status=" + $rej.Status + " error=" + $rej.Body.data.error)
 
 # 7) 运维视图能看到两条记录
 $ops = GetJson ($api + "/repo-ops?limit=5") $adminHeaders

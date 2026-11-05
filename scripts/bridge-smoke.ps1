@@ -35,7 +35,7 @@ if ($LeadAgentID) {
 }
 
 # 2. 同一个 message_id 投两次（用增量判断，假 GitHub 可能已有历史数据）
-$beforeCount = @((Invoke-RestMethod -Uri "$FakeGitHub/__issues").issues).Count
+$beforeCount = @((Invoke-RestMethod -Uri "$FakeGitHub/__state").issues).Count
 $msg = @{ message_id = "msg-$stamp"; chat_id = "grp-bridge"; user_id = "u-demo"; title = "启动崩溃 $stamp"; body = "点开就闪退"; project_id = $project.id } | ConvertTo-Json
 $first = Invoke-RestMethod -Method Post -Uri "$BridgeBase/bridge/messages" -Headers (@{ "X-Bridge-Token" = $BridgeToken }) -ContentType "application/json" -Body $msg
 Write-Output ("first: created=" + $first.created + " issue=" + $first.link.issue_number + " dispatch=" + $first.link.dispatch_status)
@@ -45,7 +45,7 @@ $second = Invoke-RestMethod -Method Post -Uri "$BridgeBase/bridge/messages" -Hea
 Write-Output ("second: created=" + $second.created + " issue=" + $second.link.issue_number)
 if ($second.created) { throw "duplicate message created a second issue" }
 
-$issues = @((Invoke-RestMethod -Uri "$FakeGitHub/__issues").issues)
+$issues = @((Invoke-RestMethod -Uri "$FakeGitHub/__state").issues)
 $delta = $issues.Count - $beforeCount
 Write-Output ("github issues delta: " + $delta)
 if ($delta -ne 1) { throw "expected exactly 1 new GitHub issue, got $delta" }
