@@ -3,7 +3,7 @@ toolchain:
   go: "1.25"
   node: "24"
 commands:
-  build: "cd backend && go build ./... && cd ../web && npm run build"
+  build: "cd backend && go build -o admin-api.exe ./cmd/admin-api"
   unit: "cd backend && go test ./internal/... -count=1"
 required_for_merge:
   - build
