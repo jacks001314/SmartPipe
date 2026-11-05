@@ -394,9 +394,33 @@ export function ReleasePage({ notify }: { notify: Notify }) {
               Release：{runDetail?.release_url || "—"} · manifest {runDetail?.manifest_sha256 || "—"} · 耗时 {runDetail?.duration_ms ?? 0} ms
             </div>
             <div className="tiny" style={{ marginBottom: 6 }}>候选 Issue：{(runDetail?.candidates ?? []).map((c) => "#" + c.number).join("、") || "—"}</div>
-            <pre className="mono" style={{ maxHeight: 300, overflow: "auto", background: "#0f172a", color: "#cbd5e1", padding: 10, borderRadius: 8, fontSize: 11, whiteSpace: "pre-wrap" }}>
+            <pre className="mono" style={{ maxHeight: 220, overflow: "auto", background: "#0f172a", color: "#cbd5e1", padding: 10, borderRadius: 8, fontSize: 11, whiteSpace: "pre-wrap" }}>
               {runDetail?.notes || "（无 Release Note）"}
             </pre>
+            {(runDetail?.artifacts ?? []).length > 0 ? (
+              <div style={{ marginTop: 10 }}>
+                <div className="strong" style={{ marginBottom: 6 }}>制品</div>
+                <table className="table">
+                  <thead><tr><th>文件</th><th>大小</th><th>sha256</th><th>Release 附件</th></tr></thead>
+                  <tbody>
+                    {(runDetail?.artifacts ?? []).map((a) => (
+                      <tr key={a.path}>
+                        <td className="mono tiny">{a.path}</td>
+                        <td className="tiny">{a.size}</td>
+                        <td className="mono tiny">{(a.sha256 || "").replace("sha256:", "").slice(0, 16)}</td>
+                        <td className="tiny">
+                          {a.download_url ? (
+                            <a href={a.download_url} target="_blank" rel="noreferrer">下载</a>
+                          ) : (
+                            <span>{a.upload_error ? "上传失败" : "—"}</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
             {runDetail?.build_output ? (
               <details>
                 <summary className="tiny">构建输出</summary>
@@ -423,10 +447,21 @@ export function ReleasePage({ notify }: { notify: Notify }) {
             {detail?.error ? <div className="chip bad" style={{ marginBottom: 10 }}><span className="dot" />{detail.error}</div> : null}
             <div className="tiny" style={{ marginBottom: 8 }}>输出目录：{detail?.output_dir || "—"} · 签名：{detail?.signature || "未签名"}</div>
             <table className="table">
-              <thead><tr><th>制品</th><th>大小</th><th>sha256</th></tr></thead>
+              <thead><tr><th>制品</th><th>大小</th><th>sha256</th><th>下载</th></tr></thead>
               <tbody>
                 {(detail?.artifacts ?? []).map((a) => (
-                  <tr key={a.path}><td className="mono tiny">{a.path}</td><td className="tiny">{a.size}</td><td className="mono tiny">{a.sha256}</td></tr>
+                  <tr key={a.path}>
+                    <td className="mono tiny">{a.path}</td>
+                    <td className="tiny">{a.size}</td>
+                    <td className="mono tiny">{a.sha256}</td>
+                    <td className="tiny">
+                      {a.download_url ? (
+                        <a href={a.download_url} target="_blank" rel="noreferrer">Release 附件</a>
+                      ) : (
+                        <span>{a.upload_error ? "上传失败：" + a.upload_error : "—"}</span>
+                      )}
+                    </td>
+                  </tr>
                 ))}
               </tbody>
             </table>

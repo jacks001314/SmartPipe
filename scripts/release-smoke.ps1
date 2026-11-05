@@ -86,6 +86,11 @@ $state = (Gh GET "/__state" $null)
 $tag = $state.tags | Where-Object { $_.tag -eq $versionOk }
 if (-not $tag -or $tag.sha -ne $head) { throw "tag missing or wrong sha" }
 if (($state.releases | Where-Object { $_.tag_name -eq $versionOk } | Measure-Object).Count -ne 1) { throw "github release missing" }
+$relAssets = ($state.releases | Where-Object { $_.tag_name -eq $versionOk }).assets
+if (-not $relAssets -or ($relAssets | Measure-Object).Count -lt 1) { throw "release assets missing" }
+$relArtifact = $rel.artifacts | Select-Object -First 1
+if (-not $relArtifact.download_url -or $relArtifact.download_url -notmatch "assets") { throw ("artifact download_url missing: " + (ConvertTo-Json $rel.artifacts -Compress)) }
+Write-Output ("STEP assets -> " + $relAssets[0].name + " " + $relArtifact.download_url)
 $i101 = $state.issues | Where-Object { $_.number -eq 101 }
 $i101Labels = ($i101.labels | ForEach-Object { $_.name }) -join ","
 if ($i101Labels -ne "smartpipe:released") { throw ("issue 101 labels = " + $i101Labels) }

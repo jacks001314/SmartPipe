@@ -213,6 +213,8 @@ export type ReleaseArtifact = {
   path: string;
   size: number;
   sha256: string;
+  download_url?: string;
+  upload_error?: string;
 };
 
 export type ReleaseRecord = {

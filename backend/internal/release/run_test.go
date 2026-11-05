@@ -3,6 +3,8 @@ package release
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +24,8 @@ type fakeForge struct {
 	deletedRefs []string
 	deletedRels []int64
 	failAdd     bool
+	uploaded    []string
+	uploadErr   error
 }
 
 func newFakeForge(issues ...github.Issue) *fakeForge {
@@ -56,6 +60,15 @@ func (f *fakeForge) CreateRelease(ctx context.Context, repo, tag, target, title,
 	rel := &github.Release{ID: 9001, HTMLURL: "https://example.test/releases/9001", TagName: tag, Name: title}
 	f.releases = append(f.releases, rel)
 	return rel, nil
+}
+
+func (f *fakeForge) UploadReleaseAsset(ctx context.Context, repo string, releaseID int64, name string, data []byte) (*github.Asset, error) {
+	if f.uploadErr != nil {
+		return nil, f.uploadErr
+	}
+	f.uploaded = append(f.uploaded, name)
+	return &github.Asset{ID: 1, Name: name, Size: int64(len(data)),
+		BrowserDownloadURL: "https://example.test/releases/9001/assets/" + name}, nil
 }
 
 func (f *fakeForge) DeleteRelease(ctx context.Context, repo string, id int64) error {
@@ -93,9 +106,13 @@ func (n *fakeNotifier) Notify(ctx context.Context, projectID, text string) error
 
 func stubBuilder(ok bool, err string) BuilderFunc {
 	return func(ctx context.Context, req Request, workRoot string) (*Report, error) {
+		dir := filepath.Join(workRoot, "dist")
+		_ = os.MkdirAll(dir, 0o755)
+		path := filepath.Join(dir, "app.zip")
+		_ = os.WriteFile(path, []byte("artifact-bytes"), 0o644)
 		rep := &Report{OK: ok, Version: req.Version, Commit: req.Commit, Error: err,
 			ManifestSHA256: "sha256:deadbeef", OutputDir: "out/v1",
-			Artifacts: []Artifact{{Path: "dist/app.zip", Size: 42, SHA256: "sha256:cafe"}}}
+			Artifacts: []Artifact{{Path: path, Size: 14, SHA256: "sha256:cafe"}}}
 		return rep, nil
 	}
 }
@@ -222,5 +239,42 @@ func TestRollbackRejectsUnreleasedRun(t *testing.T) {
 	err := Rollback(context.Background(), &Run{ID: 1, Status: "failed"}, "acme/core", newFakeForge(), nil, "", "")
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestExecuteUploadsReleaseAssets(t *testing.T) {
+	forge := newFakeForge(sampleIssues()...)
+	run, err := Execute(context.Background(), RunRequest{ProjectID: "prj", Repo: "acme/core", Version: "v1.2.0"},
+		forge, &fakeNotifier{}, stubBuilder(true, ""), t.TempDir())
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if run.Status != "released" {
+		t.Fatalf("status = %s (%s)", run.Status, run.Error)
+	}
+	if len(forge.uploaded) != 1 || forge.uploaded[0] != "app.zip" {
+		t.Fatalf("uploaded = %v", forge.uploaded)
+	}
+	if len(run.Artifacts) != 1 || run.Artifacts[0].DownloadURL == "" {
+		t.Fatalf("artifact download url missing: %+v", run.Artifacts)
+	}
+	if run.Artifacts[0].UploadError != "" {
+		t.Fatalf("unexpected upload error: %s", run.Artifacts[0].UploadError)
+	}
+}
+
+func TestExecuteKeepsReleaseWhenUploadFails(t *testing.T) {
+	forge := newFakeForge(sampleIssues()...)
+	forge.uploadErr = errors.New("asset upload 413")
+	run, err := Execute(context.Background(), RunRequest{ProjectID: "prj", Repo: "acme/core", Version: "v1.3.0"},
+		forge, &fakeNotifier{}, stubBuilder(true, ""), t.TempDir())
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if run.Status != "released" {
+		t.Fatalf("release should still succeed, got %s (%s)", run.Status, run.Error)
+	}
+	if len(run.Artifacts) != 1 || run.Artifacts[0].UploadError == "" || run.Artifacts[0].DownloadURL != "" {
+		t.Fatalf("artifact state = %+v", run.Artifacts)
 	}
 }

@@ -172,6 +172,23 @@ const server = createServer((req, res) => {
       json(201, release);
       return;
     }
+    const assetUpload = /^\/repos\/[^/]+\/[^/]+\/releases\/(\d+)\/assets$/.exec(path);
+    if (req.method === "POST" && assetUpload) {
+      const id = Number(assetUpload[1]);
+      const rel = releases.find((r) => r.id === id);
+      if (!rel) return json(404, { message: "Not Found" });
+      const name = url.searchParams.get("name") || "asset";
+      rel.assets = rel.assets || [];
+      const asset = {
+        id: rel.assets.length + 1,
+        name,
+        size: Buffer.byteLength(body),
+        browser_download_url: "http://127.0.0.1:" + port + "/releases/" + id + "/assets/" + encodeURIComponent(name),
+      };
+      rel.assets.push(asset);
+      json(201, asset);
+      return;
+    }
     const releaseDelete = /^\/repos\/[^/]+\/[^/]+\/releases\/(\d+)$/.exec(path);
     if (req.method === "DELETE" && releaseDelete) {
       const id = Number(releaseDelete[1]);

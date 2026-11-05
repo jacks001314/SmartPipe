@@ -43,9 +43,13 @@ type Request struct {
 
 // Artifact 是单个制品文件。
 type Artifact struct {
-	Path   string `json:"path"`
-	Size   int64  `json:"size"`
-	SHA256 string `json:"sha256"`
+	Path        string `json:"path"`
+	Size        int64  `json:"size"`
+	SHA256      string `json:"sha256"`
+	DownloadURL string `json:"download_url,omitempty"`
+	UploadError string `json:"upload_error,omitempty"`
+	// LocalPath 是构建输出目录里的绝对路径，只用于上传附件，不进入 manifest / API。
+	LocalPath string `json:"-"`
 }
 
 // Manifest 是发版清单。
@@ -250,7 +254,7 @@ func collectArtifacts(repoDir string, globs []string, outputRoot, version string
 		if err != nil {
 			return nil, err
 		}
-		artifacts = append(artifacts, Artifact{Path: rel, Size: size, SHA256: sum})
+		artifacts = append(artifacts, Artifact{Path: rel, Size: size, SHA256: sum, LocalPath: dst})
 	}
 	return artifacts, nil
 }

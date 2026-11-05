@@ -3,6 +3,8 @@ package release
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -21,6 +23,7 @@ type Forge interface {
 	CreateTagRef(ctx context.Context, repo, tag, sha string) error
 	DeleteTagRef(ctx context.Context, repo, tag string) error
 	CreateRelease(ctx context.Context, repo, tag, target, title, body string) (*github.Release, error)
+	UploadReleaseAsset(ctx context.Context, repo string, releaseID int64, name string, data []byte) (*github.Asset, error)
 	DeleteRelease(ctx context.Context, repo string, id int64) error
 	RemoveLabel(ctx context.Context, repo string, number int, label string) error
 	AddLabels(ctx context.Context, repo string, number int, labels []string) error
@@ -305,6 +308,26 @@ func Execute(ctx context.Context, req RunRequest, forge Forge, notify Notifier, 
 	}
 	run.ReleaseID = ghRelease.ID
 	run.ReleaseURL = ghRelease.HTMLURL
+
+	// 制品挂到 Release 附件上，用户从 Release 页直接下载；失败只记 warning，不回滚已发布的 tag。
+	for i := range run.Artifacts {
+		art := &run.Artifacts[i]
+		local := art.LocalPath
+		if local == "" {
+			local = art.Path
+		}
+		data, rerr := os.ReadFile(local)
+		if rerr != nil {
+			run.Artifacts[i].UploadError = "read: " + rerr.Error()
+			continue
+		}
+		asset, uerr := forge.UploadReleaseAsset(ctx, req.Repo, ghRelease.ID, filepath.Base(art.Path), data)
+		if uerr != nil {
+			run.Artifacts[i].UploadError = uerr.Error()
+			continue
+		}
+		run.Artifacts[i].DownloadURL = asset.BrowserDownloadURL
+	}
 
 	var warnings []string
 	for _, c := range candidates {
