@@ -1,0 +1,7 @@
+# 跨平台换行：Windows 上 core.autocrlf=true，若不固定 eol，.sh/.py 检出成 CRLF
+# 会导致 Linux 上 "bad interpreter: /usr/bin/env bash^M"。
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
