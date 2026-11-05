@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -88,6 +89,9 @@ func NewDispatcher(cfg Config, snd Sender) Dispatcher {
 	if cfg.OrchestratorURL != "" {
 		return &HTTPDispatcher{BaseURL: cfg.OrchestratorURL, Token: cfg.InternalToken}
 	}
+	if cfg.BridgeURL != "" {
+		return BridgeDispatcher{BaseURL: cfg.BridgeURL, Token: cfg.BridgeToken}
+	}
 	return AckDispatcher{Snd: snd}
 }
 
@@ -103,4 +107,72 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + "…"
+}
+
+// BridgeDispatcher 把蓝信文本直接交给 bridge：建 GitHub Issue、去重、回执都由 bridge 完成。
+// 回执走 bot 的 /internal/reply，所以这里不再重复回复。
+type BridgeDispatcher struct {
+	BaseURL string
+	Token   string
+	Client  *http.Client
+}
+
+func (d BridgeDispatcher) Dispatch(ctx context.Context, msg Inbound) error {
+	chatID := strings.TrimSpace(msg.GroupID)
+	if chatID == "" {
+		chatID = strings.TrimSpace(msg.SenderID)
+	}
+	title := firstLine(msg.Text)
+	if title == "" {
+		title = "蓝信反馈"
+	}
+	body := map[string]any{
+		"message_id": msg.PlatformMessageID,
+		"chat_id":    chatID,
+		"chat_type":  msg.ChatType,
+		"user_id":    msg.SenderID,
+		"title":      title,
+		"body":       msg.Text,
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	client := d.Client
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(d.BaseURL, "/")+"/bridge/messages", bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if d.Token != "" {
+		req.Header.Set("X-Bridge-Token", d.Token)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		log.Printf("[bot] bridge dispatch failed http=%d body=%s", resp.StatusCode, truncate(string(data), 200))
+		return fmt.Errorf("bot: bridge dispatch http %d", resp.StatusCode)
+	}
+	log.Printf("[bot] dispatched to bridge chat=%s msgId=%s", chatID, msg.PlatformMessageID)
+	return nil
+}
+
+func firstLine(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			if len([]rune(line)) > 80 {
+				line = string([]rune(line)[:80])
+			}
+			return line
+		}
+	}
+	return ""
 }
