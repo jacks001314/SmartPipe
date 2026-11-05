@@ -46,6 +46,7 @@ type Outcome struct {
 	IssueNumber int                `json:"issue_number"`
 	IssueURL    string             `json:"issue_url"`
 	Occurrences int                `json:"occurrences"`
+	Similar     []Similar          `json:"similar,omitempty"`
 	Reason      string             `json:"reason,omitempty"`
 }
 
@@ -170,7 +171,8 @@ func (s *Service) Ingest(ctx context.Context, in Ingest) (*Outcome, error) {
 	if err != nil {
 		return nil, err
 	}
-	body := Body(*normalized, in.Source, report.ID, 1, now)
+	similar := s.findSimilar(ctx, projectID, b, normalized.Fingerprint)
+	body := Body(*normalized, in.Source, report.ID, 1, now) + SimilarSection(similar)
 	issue, err := client.CreateIssue(ctx, in.Repo, Title(b), body, labels)
 	if err != nil {
 		_ = s.Store.UpdateCrashIssue(ctx, report.ID, 0, "", "rejected", "issue creation failed: "+err.Error())
@@ -183,7 +185,7 @@ func (s *Service) Ingest(ctx context.Context, in Ingest) (*Outcome, error) {
 	report.IssueURL = issue.HTMLURL
 	report.Status = "created"
 	return &Outcome{Status: "created", Report: report, IssueNumber: issue.Number,
-		IssueURL: issue.HTMLURL, Occurrences: 1}, nil
+		IssueURL: issue.HTMLURL, Occurrences: 1, Similar: similar}, nil
 }
 
 func (s *Service) rejectedRow(in Ingest, projectID *string, now time.Time, reason string) store.CrashReport {
@@ -195,4 +197,34 @@ func (s *Service) rejectedRow(in Ingest, projectID *string, now time.Time, reaso
 		Repo: in.Repo, Status: "rejected", RejectReason: reason, Occurrences: 0,
 		SizeBytes: in.RawSize, Bundle: raw, OccurredAt: &now,
 	}
+}
+
+// findSimilar 在最近 90 天内同应用的已建单崩溃里找栈相似的历史问题。
+func (s *Service) findSimilar(ctx context.Context, projectID *string, b Bundle, fingerprint string) []Similar {
+	if strings.TrimSpace(b.Exception.Stack) == "" {
+		return nil
+	}
+	rows, err := s.Store.ListCrashesByApp(ctx, projectID, b.App, s.now().UTC().AddDate(0, 0, -90), 100)
+	if err != nil {
+		return nil
+	}
+	items := make([]Similar, 0, len(rows))
+	for _, r := range rows {
+		if r.Fingerprint == fingerprint {
+			continue
+		}
+		var prev Bundle
+		if err := json.Unmarshal(r.Bundle, &prev); err != nil {
+			continue
+		}
+		score := StackSimilarity(b, prev)
+		if score <= 0 {
+			continue
+		}
+		items = append(items, Similar{
+			ReportID: r.ID, IssueNumber: r.IssueNumber, IssueURL: r.IssueURL,
+			Fingerprint: r.Fingerprint, Version: r.Version, Score: score,
+		})
+	}
+	return topSimilar(items, 0.5, 3)
 }

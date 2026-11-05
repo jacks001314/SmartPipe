@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -193,4 +194,32 @@ SELECT count(*), COALESCE(sum(length(bundle::text)), 0) FROM crash_reports`).Sca
 		return 0, 0, fmt.Errorf("store: crash stats: %w", err)
 	}
 	return rows, bundleBytes, nil
+}
+
+// ListCrashesByApp 返回某应用在窗口期内已建单的上报，用于相似问题检索。
+func (s *Store) ListCrashesByApp(ctx context.Context, projectID *string, app string, since time.Time, limit int) ([]CrashReport, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	project := ""
+	if projectID != nil {
+		project = *projectID
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+crashColumns+` FROM crash_reports
+WHERE lower(app) = lower($1) AND created_at >= $2 AND issue_number > 0
+  AND ($3 = '' OR project_id = $3)
+ORDER BY id DESC LIMIT $4`, strings.TrimSpace(app), since, project, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: list crashes by app: %w", err)
+	}
+	defer rows.Close()
+	out := make([]CrashReport, 0, limit)
+	for rows.Next() {
+		r, err := scanCrash(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *r)
+	}
+	return out, rows.Err()
 }
