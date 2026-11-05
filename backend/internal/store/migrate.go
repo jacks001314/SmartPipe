@@ -13,6 +13,25 @@ type migration struct {
 
 var migrations = []migration{
 	{
+		version: 13,
+		name:    "agent_tokens",
+		sql: `
+CREATE TABLE IF NOT EXISTS agent_tokens (
+    id          TEXT PRIMARY KEY DEFAULT ('tok_' || substr(md5(random()::text), 1, 12)),
+    project_id  TEXT,
+    role        TEXT NOT NULL DEFAULT 'lead',
+    name        TEXT NOT NULL DEFAULT '',
+    prefix      TEXT NOT NULL DEFAULT '',
+    token_hash  TEXT NOT NULL UNIQUE,
+    enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+    last_used_at TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS agent_tokens_project_idx ON agent_tokens (project_id, created_at DESC);
+`,
+	},
+	{
 		version: 12,
 		name:    "crash_reports",
 		sql: `

@@ -287,3 +287,14 @@ export type CrashReport = {
   created_at: string;
   updated_at: string;
 };
+
+export type AgentToken = {
+  id: string;
+  project_id: string | null;
+  role: string;
+  name: string;
+  prefix: string;
+  enabled: boolean;
+  last_used_at: string | null;
+  created_at: string;
+};

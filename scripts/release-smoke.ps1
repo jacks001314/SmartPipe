@@ -21,7 +21,7 @@ function FixText($t) {
   }
   return $t
 }
-function J($obj) { $obj | ConvertTo-Json -Depth 8 -Compress }
+function J($obj) { $obj | ConvertTo-Json -Depth 5 -Compress }
 function Api($method, $path, $body) {
   $params = @{ Method = $method; Uri = ($api + $path); Headers = $headers; ContentType = "application/json" }
   if ($null -ne $body) { $params.Body = (J $body) }

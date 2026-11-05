@@ -11,7 +11,7 @@ $user = "smoke-user-" + [guid]::NewGuid().ToString("N").Substring(0, 8)
 
 function PostJson($url, $payload, $headers) {
   $tmp = Join-Path $env:TEMP ("smartpipe-crash-" + [guid]::NewGuid().ToString("N") + ".json")
-  [IO.File]::WriteAllText($tmp, ($payload | ConvertTo-Json -Depth 12 -Compress), [Text.UTF8Encoding]::new($false))
+  [IO.File]::WriteAllText($tmp, ($payload | ConvertTo-Json -Depth 4 -Compress), [Text.UTF8Encoding]::new($false))
   $argv = @("-s", "-o", "$tmp.out", "-w", "%{http_code}", "-X", "POST",
     "-H", "Content-Type: application/json")
   foreach ($k in $headers.Keys) { $argv += @("-H", ($k + ": " + $headers[$k])) }

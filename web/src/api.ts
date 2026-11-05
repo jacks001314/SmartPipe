@@ -1,5 +1,6 @@
 import type {
   AgentItem,
+  AgentToken,
   AppServer,
   AuditEntry,
   BridgeLink,
@@ -138,6 +139,11 @@ export const api = {
   createRelease: (body: { project_id?: string; repo?: string; version: string; commit: string; artifact_globs?: string[]; notes?: string }) =>
     request<{ record: ReleaseRecord; report: Record<string, unknown> }>("/releases", { method: "POST", body }),
   listReleaseRuns: (limit = 50) => request<ReleaseRun[]>("/releases/runs?limit=" + limit),
+  listAgentTokens: (projectId?: string) =>
+    request<AgentToken[]>("/agent-tokens" + (projectId ? "?project_id=" + encodeURIComponent(projectId) : "")),
+  createAgentToken: (body: { project_id?: string; role: string; name: string }) =>
+    request<{ token: string; record: AgentToken }>("/agent-tokens", { method: "POST", body }),
+  revokeAgentToken: (id: string) => request<{ id: string; enabled: boolean }>("/agent-tokens/" + id + "/revoke", { method: "POST" }),
   listCrashes: (limit = 100) => request<CrashReport[]>("/crashes?limit=" + limit),
   getCrash: (id: number) => request<CrashReport>("/crashes/" + id),
   listReleaseCandidates: (projectId: string, label?: string) =>
