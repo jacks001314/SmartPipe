@@ -158,3 +158,26 @@ func TestRunLiveCodex(t *testing.T) {
 	}
 	_ = runtime.GOOS
 }
+func TestDiffSkipsExcludedPaths(t *testing.T) {
+	gitAvailable(t)
+	dir := initRepo(t)
+
+	taskPath := filepath.Join(dir, "task.md")
+	if err := os.WriteFile(taskPath, []byte("prompt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	diff, err := Diff(context.Background(), dir, "", taskPath)
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if strings.Contains(diff, "task.md") {
+		t.Fatalf("被排除的任务描述不应进入补丁：\n%s", diff)
+	}
+	if !strings.Contains(diff, "README.md") {
+		t.Fatalf("补丁应保留 README.md：\n%s", diff)
+	}
+}

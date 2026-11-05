@@ -95,7 +95,8 @@ func main() {
 		rep.Error = runErr.Error()
 	}
 
-	diff, diffErr := codexrunner.Diff(ctx, *workDir, "")
+	// 任务描述和补丁输出如果落在工作区里，不能混进模型产出。
+	diff, diffErr := codexrunner.Diff(ctx, *workDir, "", *promptFile, *outPath)
 	if diffErr != nil && rep.Error == "" {
 		rep.Error = diffErr.Error()
 	}

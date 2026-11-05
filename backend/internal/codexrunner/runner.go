@@ -14,6 +14,7 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -151,14 +152,23 @@ func Run(ctx context.Context, spec Spec) (*Result, error) {
 
 // Diff 把工作区当前改动整理成 unified diff：先 git add -A（按 .gitignore 过滤），
 // 再输出暂存区相对 HEAD 的补丁。返回空补丁表示模型没有改任何文件。
-func Diff(ctx context.Context, workDir, gitBin string) (string, error) {
+//
+// exclude 里的路径（相对 workDir 或绝对路径）不会进入补丁，用于排除任务描述、
+// 补丁输出这类执行器自己写进去的辅助文件。
+func Diff(ctx context.Context, workDir, gitBin string, exclude ...string) (string, error) {
 	if strings.TrimSpace(workDir) == "" {
 		return "", fmt.Errorf("%w: work_dir is required", ErrInvalid)
 	}
 	if strings.TrimSpace(gitBin) == "" {
 		gitBin = "git"
 	}
-	if _, err := git(ctx, gitBin, workDir, "add", "-A"); err != nil {
+	addArgs := []string{"add", "-A", "--", "."}
+	for _, raw := range exclude {
+		if rel, ok := relativeTo(workDir, raw); ok {
+			addArgs = append(addArgs, ":(exclude)"+rel)
+		}
+	}
+	if _, err := git(ctx, gitBin, workDir, addArgs...); err != nil {
 		return "", err
 	}
 	out, err := git(ctx, gitBin, workDir, "diff", "--cached", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/")
@@ -182,4 +192,24 @@ func git(ctx context.Context, bin, dir string, args ...string) (string, error) {
 		return "", fmt.Errorf("codexrunner: git %s: %s", strings.Join(args, " "), msg)
 	}
 	return string(out), nil
+}
+
+// relativeTo 把 path 换算成相对 workDir 的 slash 路径；不在工作区内时返回 false。
+func relativeTo(workDir, path string) (string, bool) {
+	if strings.TrimSpace(path) == "" {
+		return "", false
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	base, err := filepath.Abs(workDir)
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(base, abs)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
 }

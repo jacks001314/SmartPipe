@@ -68,18 +68,34 @@ GitHub token 与 force-push 限制都在那一侧。模型进程拿不到仓库 
 | `TestDiffOnCleanWorkspaceIsEmpty` | 干净工作区返回空补丁 |
 
 真实模型测试由 `SMARTPIPE_CODEX_LIVE=1` 门控，避免 CI 依赖模型配额。
-2026-11-05 在本机执行过一次，SDK 链路完整走到模型调用：
+2026-11-05 在本机用 `deepseek-v4-flash` 跑通了两级验证。
 
-- app-server 成功启动并完成 initialize；
-- 线程创建成功，返回 `thread_id=01a1ac02-...`；
-- turn 执行后返回 `turn_id=01a1ac02-...`，状态为失败；
-- 失败原因是上游 provider 的模型名校验：
-  `Invalid model name passed in model=gpt-6.1-sol`，换 `deepseek-v4-pro` 同样被拒。
+执行器级（`TestRunLiveCodex`）：PASS，5.4 秒完成一轮，模型按要求改了
+`README.md`，`Diff` 拿到了改动。
 
-也就是说 spawn、握手、建线程、跑 turn、错误回传都通了，卡在模型凭据/模型名这一层，
-与执行器代码无关。真实跑通模型需要一份可用的 Codex 登录态或 API key，
-并设置 `SMARTPIPE_CODEX_MODEL` 为那个账号实际可用的模型。
+命令行级（`codex-runner.exe`，临时仓库）：
 
+```
+{
+  "ok": true,
+  "status": "completed",
+  "turn_id": "01a1ac20-e96b-7331-8888-9199ae39ce5f",
+  "thread_id": "01a1ac20-e900-7b63-a48e-a6bf006ae338",
+  "response": "已在 `README.md` 的列表末尾追加 `- item two`。未运行测试，未提交。",
+  "patch_bytes": 147,
+  "changed_files": ["README.md"],
+  "duration_ms": 11524
+}
+```
+
+补丁在干净基线上 `git apply --check` 通过。同一轮还暴露并修掉了一个真实缺陷：
+任务描述文件写在 work-dir 里时会被 `git add -A` 收进补丁，现在 `Diff` 接受
+`exclude` 参数，`codex-runner` 会把 `-prompt-file` 和 `-out` 自动排除，
+`TestDiffSkipsExcludedPaths` 覆盖该行为。
+
+模型名要走通需要注意可用性：`deepseek-v4-flash` 可用；`deepseek-flash` 被
+litellm 以 403 `Model is blocked` 拒绝；`gpt-6.1-sol`、`deepseek-v4-pro` 被上游
+判为 `Invalid model name`。这些都表现在模型边界，执行器代码无需改动。
 ## 6. 部署前提
 
 `codex-runner` 依赖本机有 `codex` 可执行文件（默认取 `PATH`，可用

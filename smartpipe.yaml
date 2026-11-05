@@ -1,6 +1,6 @@
 version: 1
 toolchain:
-  go: "1.25"
+  go: "1.26"
   node: "24"
 commands:
   build: "cd backend && go build -o admin-api.exe ./cmd/admin-api"
