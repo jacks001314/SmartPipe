@@ -35,6 +35,8 @@ type Config struct {
 	ReleaseToken   string
 	BotAddr        string
 	BotToken       string
+	MCPURL         string
+	MCPPoolName    string
 	// DevOpen 在未配置 token 时允许无鉴权访问，仅供本地开发。
 	DevOpen bool
 	Version string
@@ -58,6 +60,8 @@ type API struct {
 	releaseToken    string
 	botAddr         string
 	botToken        string
+	mcpURL          string
+	mcpPoolName     string
 }
 
 // New 构造 API。
@@ -88,6 +92,8 @@ func New(cfg Config) *API {
 		releaseToken:    strings.TrimSpace(cfg.ReleaseToken),
 		botAddr:         strings.TrimSpace(cfg.BotAddr),
 		botToken:        strings.TrimSpace(cfg.BotToken),
+		mcpURL:          strings.TrimSpace(cfg.MCPURL),
+		mcpPoolName:     strings.TrimSpace(cfg.MCPPoolName),
 	}
 }
 

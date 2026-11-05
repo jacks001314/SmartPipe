@@ -97,6 +97,8 @@ func main() {
 		ReleaseToken:   strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_TOKEN")),
 		BotAddr:        envOr("SMARTPIPE_BOT_ADDR", ""),
 		BotToken:       strings.TrimSpace(os.Getenv("SMARTPIPE_BOT_INTERNAL_TOKEN")),
+		MCPURL:         envOr("SMARTPIPE_MCP_URL", ""),
+		MCPPoolName:    envOr("SMARTPIPE_MCP_POOL_NAME", "smartpipe"),
 	})
 
 	app := iris.New()

@@ -40,7 +40,7 @@ M0–M4 已在本地环境跑通（Windows + 192.168.1.99 上的 Postgres，Linu
 | M3 | 复杂 Issue 方案登记、`/approve vN` 权限与哈希校验、派生入口强制门禁 | `/admin/derivations` | [M3](docs/M3实施记录.md) |
 | M4 | 发版链路：候选 Issue → 构建 → tag/Release → 标签回写 → 蓝信通知 → 回滚 | `/admin/releases/runs` | [M4](docs/M4实施记录.md) |
 | 崩溃上报 | `crash_bundle` 脱敏、指纹去重、限流、自动建单与派单 | `POST /ingest/crash` | [崩溃上报](docs/崩溃上报实施记录.md) |
-| MCP 网关 | Agent 令牌（角色/项目绑定）、工具裁剪、Issue/验证/派生/发版工具 | `backend/cmd/mcp-gateway`（:8097/mcp） | [MCP 网关](docs/MCP工具网关实施记录.md) |
+| MCP 网关 | Agent 令牌（角色/项目绑定）、工具裁剪、Issue/验证/派生/发版工具；已接入 Syntropy MCP Pool 与 Agent 环境注入 | `backend/cmd/mcp-gateway`（:8097/mcp） | [MCP 网关](docs/MCP工具网关实施记录.md) |
 
 重构方向：
 

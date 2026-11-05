@@ -46,9 +46,14 @@ func (a *API) registerRuntime(p iris.Party) {
 	p.Post("/app-servers/{id}/nodes", a.nodeCreate)
 	p.Get("/app-servers/{id}/agent-templates", a.templateList)
 	p.Post("/app-servers/{id}/agent-templates", a.templateCreate)
+	p.Get("/app-servers/{id}/agent-templates/{name}", a.templateGet)
+	p.Put("/app-servers/{id}/agent-templates/{name}", a.templateUpdate)
 	p.Get("/app-servers/{id}/agents", a.agentList)
 	p.Post("/app-servers/{id}/agents", a.deployAgent)
 	p.Get("/app-servers/{id}/agent-operations/{op}", a.agentOperation)
+	p.Delete("/app-servers/{id}/agents/{agent}", a.deleteAgent)
+
+	a.registerRuntimeMCP(p)
 }
 
 func (a *API) listAppServers(c iris.Context) {
@@ -335,6 +340,49 @@ func (a *API) templateCreate(c iris.Context) {
 	_ = c.JSON(envelope{Data: out})
 }
 
+func (a *API) templateGet(c iris.Context) {
+	client, _, ok := a.clientFor(c)
+	if !ok {
+		return
+	}
+	name := strings.TrimSpace(c.Params().Get("name"))
+	if name == "" {
+		a.badRequest(c, "缺少模板名称")
+		return
+	}
+	out, err := client.TemplateGet(c.Request().Context(), name)
+	if err != nil {
+		a.upstreamFail(c, err)
+		return
+	}
+	_ = c.JSON(envelope{Data: out})
+}
+
+func (a *API) templateUpdate(c iris.Context) {
+	client, id, ok := a.clientFor(c)
+	if !ok {
+		return
+	}
+	name := strings.TrimSpace(c.Params().Get("name"))
+	if name == "" {
+		a.badRequest(c, "缺少模板名称")
+		return
+	}
+	var in syntropyclient.Raw
+	if err := decodeBody(c, &in); err != nil {
+		a.badRequest(c, "请求体不是合法 JSON")
+		return
+	}
+	in["template_name"] = name
+	out, err := client.TemplateUpdate(c.Request().Context(), name, in)
+	if err != nil {
+		a.upstreamFail(c, err)
+		return
+	}
+	a.audit(c.Request().Context(), c, "runtime.template.update", "app_server", id, nil, "ok", map[string]any{"template": name})
+	_ = c.JSON(envelope{Data: out})
+}
+
 func (a *API) agentList(c iris.Context) {
 	client, _, ok := a.clientFor(c)
 	if !ok {
@@ -355,6 +403,9 @@ type deployAgentRequest struct {
 	TemplateName string            `json:"template_name"`
 	TargetNodeID string            `json:"target_node_id"`
 	Labels       map[string]string `json:"labels"`
+	// MCPRole 非空时（lead/dev/test/release）为该 Agent 签发 MCP 令牌并注入
+	// SMARTPIPE_MCP_TOKEN，同时确保全局 MCP Pool 里有 smartpipe 条目。
+	MCPRole string `json:"mcp_role"`
 	// BindLead 为 true 时，部署成功后把该 Agent 绑定为项目的 pipeline-lead。
 	BindLead bool `json:"bind_lead"`
 }
@@ -381,13 +432,52 @@ func (a *API) deployAgent(c iris.Context) {
 		TemplateName: firstNonEmpty(in.TemplateName, "pipeline-lead-v3"),
 		Labels:       in.Labels,
 	}
+	var mcpTokenID string
+	if role := strings.ToLower(strings.TrimSpace(in.MCPRole)); role != "" {
+		switch role {
+		case "lead", "dev", "test", "release":
+		default:
+			a.badRequest(c, "mcp_role 必须是 lead/dev/test/release")
+			return
+		}
+		if a.mcpURL == "" {
+			a.badRequest(c, "未配置 SMARTPIPE_MCP_URL，无法注入 MCP 工具")
+			return
+		}
+		if err := ensureMCPServer(c.Request().Context(), client, a.mcpPoolName, a.mcpURL, "SMARTPIPE_MCP_TOKEN"); err != nil {
+			a.upstreamFail(c, err)
+			return
+		}
+		var projectID *string
+		if strings.TrimSpace(in.ProjectID) != "" {
+			pid := strings.TrimSpace(in.ProjectID)
+			projectID = &pid
+		}
+		record, token, err := a.store.CreateAgentToken(c.Request().Context(), store.AgentToken{
+			ProjectID: projectID, Role: role, Name: "agent-" + in.Name,
+		})
+		if err != nil {
+			a.fail(c, err)
+			return
+		}
+		mcpTokenID = record.ID
+		spec.Environment = append(spec.Environment, syntropyclient.KeyValue{Key: "SMARTPIPE_MCP_TOKEN", Value: token})
+		if spec.Labels == nil {
+			spec.Labels = map[string]string{}
+		}
+		spec.Labels["smartpipe.mcp_role"] = role
+		spec.Labels["smartpipe.token_id"] = record.ID
+	}
 	out, err := client.DeployAgent(c.Request().Context(), spec, c.GetHeader("X-Request-Id"))
 	if err != nil {
+		if mcpTokenID != "" {
+			_ = a.store.RevokeAgentToken(c.Request().Context(), mcpTokenID)
+		}
 		a.upstreamFail(c, err)
 		return
 	}
 	a.audit(c.Request().Context(), c, "runtime.agent.deploy", "agent", in.Name, stringPtr(in.ProjectID), "ok",
-		map[string]any{"app_server_id": id, "template": spec.TemplateName})
+		map[string]any{"app_server_id": id, "template": spec.TemplateName, "mcp_role": in.MCPRole, "token_id": mcpTokenID})
 	if in.BindLead && strings.TrimSpace(in.ProjectID) != "" {
 		if agentID := firstMapString(out, "agentId", "agent_id"); strings.TrimSpace(agentID) != "" {
 			inst, _ := a.runtime.Get(id)
@@ -409,6 +499,24 @@ func (a *API) deployAgent(c iris.Context) {
 	}
 	c.StatusCode(http.StatusAccepted)
 	_ = c.JSON(envelope{Data: out})
+}
+
+func (a *API) deleteAgent(c iris.Context) {
+	client, id, ok := a.clientFor(c)
+	if !ok {
+		return
+	}
+	agentID := strings.TrimSpace(c.Params().Get("agent"))
+	if agentID == "" {
+		a.badRequest(c, "缺少 agent id")
+		return
+	}
+	if err := client.DeleteAgent(c.Request().Context(), agentID); err != nil {
+		a.upstreamFail(c, err)
+		return
+	}
+	a.audit(c.Request().Context(), c, "runtime.agent.delete", "agent", agentID, nil, "ok", map[string]any{"app_server_id": id})
+	c.StatusCode(http.StatusNoContent)
 }
 
 func (a *API) agentOperation(c iris.Context) {

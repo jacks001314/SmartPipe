@@ -284,6 +284,13 @@ type AgentSpec struct {
 	DesiredState string            `json:"desired_state,omitempty"`
 	Workspace    string            `json:"workspace,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
+	Environment  []KeyValue        `json:"environment,omitempty"`
+}
+
+// KeyValue 是 Agent 进程环境变量。
+type KeyValue struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
 }
 
 // DeployAgent 调用 POST /api/agents，返回 AgentOperation。
@@ -327,6 +334,22 @@ func (c *Client) TemplateGet(ctx context.Context, name string) (Raw, error) {
 	return c.GetJSON(ctx, "/api/agent-templates/"+url.PathEscape(name))
 }
 
+// TemplateUpdate 更新已有模板（PUT /api/agent-templates/{name}）。
+func (c *Client) TemplateUpdate(ctx context.Context, name string, settings Raw) (Raw, error) {
+	status, body, err := c.Do(ctx, http.MethodPut, "/api/agent-templates/"+url.PathEscape(name), settings)
+	if err != nil {
+		return nil, err
+	}
+	if status < 200 || status > 299 {
+		return nil, fmt.Errorf("template update: HTTP %d: %s", status, strings.TrimSpace(string(body)))
+	}
+	var out Raw
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentOperation 查询一次 Agent 操作。
 func (c *Client) AgentOperation(ctx context.Context, id string) (Raw, error) {
 	return c.GetJSON(ctx, "/api/agent-operations/"+url.PathEscape(id))
@@ -350,4 +373,30 @@ func (c *Client) DeleteAgent(ctx context.Context, id string) error {
 		return &StatusError{Status: status, Body: string(data)}
 	}
 	return nil
+}
+
+// GetSettings 读取 App Server 系统设置（含 mcpPool）。
+func (c *Client) GetSettings(ctx context.Context) (Raw, error) {
+	return c.GetJSON(ctx, "/api/settings")
+}
+
+// UpdateSettings 以补丁方式更新系统设置。
+func (c *Client) UpdateSettings(ctx context.Context, patch Raw) (Raw, error) {
+	status, body, err := c.Do(ctx, http.MethodPut, "/api/settings", patch)
+	if err != nil {
+		return nil, err
+	}
+	if status < 200 || status > 299 {
+		return nil, fmt.Errorf("settings update: HTTP %d: %s", status, strings.TrimSpace(string(body)))
+	}
+	var out Raw
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// MCPAuthStatuses 读取 Agent 上 MCP Server 的鉴权与工具数量状态。
+func (c *Client) MCPAuthStatuses(ctx context.Context) (Raw, error) {
+	return c.GetJSON(ctx, "/api/settings/mcp/auth-statuses")
 }

@@ -29,7 +29,17 @@ $body = @{
     agent_emoji   = "🧭"
     description   = "SmartPipe $Role template (imported from configs/agents/$Role)"
     markdown_files = @{ "AGENTS.md" = $content }
+    mcp_config = @{ servers = @("smartpipe") }
 } | ConvertTo-Json -Depth 6
 
-$res = Invoke-RestMethod -Method Post -Uri "$Base/admin/runtime/app-servers/$AppServer/agent-templates" -Headers $headers -ContentType "application/json" -Body ([Text.Encoding]::UTF8.GetBytes($body))
+$exists = $false
+try {
+    Invoke-RestMethod -Uri "$Base/admin/runtime/app-servers/$AppServer/agent-templates/$TemplateName" -Headers $headers | Out-Null
+    $exists = $true
+} catch { $exists = $false }
+if ($exists) {
+    $res = Invoke-RestMethod -Method Put -Uri "$Base/admin/runtime/app-servers/$AppServer/agent-templates/$TemplateName" -Headers $headers -ContentType "application/json" -Body ([Text.Encoding]::UTF8.GetBytes($body))
+} else {
+    $res = Invoke-RestMethod -Method Post -Uri "$Base/admin/runtime/app-servers/$AppServer/agent-templates" -Headers $headers -ContentType "application/json" -Body ([Text.Encoding]::UTF8.GetBytes($body))
+}
 Write-Output ("template " + $TemplateName + " -> " + ($res.data.status | Out-String).Trim())

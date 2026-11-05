@@ -111,10 +111,52 @@ go test ./internal/mcp/ -count=1
 | `SMARTPIPE_ADMIN_TOKEN` | 管理接口令牌（仅网关进程持有） |
 | `SMARTPIPE_MCP_TOKEN` | stdio 模式下的 Agent 令牌 |
 
-## 8. 仍待完成
+## 8. 接入 Syntropy Agent 运行环境
+
+Syntropy 的 Agent 模板只能按名称引用全局 MCP Pool（`SystemSettings.mcp_pool`），Pool 里的 HTTP Server 支持
+`bearer_token_env_var`：连接时用 Agent 进程环境里的变量作为 Bearer Token。利用这一点实现「一个网关、每 Agent 一个令牌」：
+
+1. **全局 Pool**：`smartpipe = { http: { url: http://127.0.0.1:8097/mcp, bearerTokenEnvVar: SMARTPIPE_MCP_TOKEN } }`。
+2. **模板**：`pipeline-lead-v3` 的 `mcpConfig.servers = ["smartpipe"]`（导入脚本自动带上）。
+3. **部署 Agent**：`POST /admin/runtime/app-servers/{id}/agents` 带 `mcp_role=lead|dev|test|release` 时，
+   管理台先为该 Agent 签发 `spt_…` 令牌，把 `SMARTPIPE_MCP_TOKEN` 注入 `spec.environment`，
+   并在 `labels` 记录 `smartpipe.mcp_role` 与 `smartpipe.token_id`。
+4. **清理**：删除 Agent 后用记录里的 `token_id` 撤销令牌。
+
+新增管理接口：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/admin/runtime/app-servers/{id}/mcp` | 读取 Pool（隐藏 header 值） |
+| POST | `/admin/runtime/app-servers/{id}/mcp/servers` | 写入/更新 HTTP MCP Server（GET+合并+PUT，保留其它条目） |
+| DELETE | `/admin/runtime/app-servers/{id}/mcp/servers/{name}` | 移除 |
+| GET | `/admin/runtime/app-servers/{id}/mcp/statuses` | Agent 上 MCP 鉴权/工具数量 |
+| GET/PUT | `/admin/runtime/app-servers/{id}/agent-templates/{name}` | 读取/更新模板（导入脚本据此改配置） |
+| DELETE | `/admin/runtime/app-servers/{id}/agents/{agent}` | 删除 Agent |
+
+实测（`scripts/mcp-agent-smoke.ps1`）：
+
+```
+app_server=appsrv-86s6w
+pool=smartpipe http http://127.0.0.1:8097/mcp token_env=SMARTPIPE_MCP_TOKEN
+template.mcp_config.servers=smartpipe
+node=d835265b8ff7530dc874dfa4d40a897e
+agent=agent-13795ad6c110c7d6a62d5dc9 state=4
+agent env SMARTPIPE_MCP_TOKEN=spt_b2a96df9… role=lead
+injected token -> mcp tools=9 (verify.patch/derivation.create/release.run present)
+agent deleted, token revoked: tok_6ea6a6bffdfe
+MCP AGENT SMOKE OK app_server=appsrv-86s6w agent=mcp-lead-6d1a7c tools=9
+```
+
+说明：Agent 状态为 `phase=4`（RUNNING），但沙箱里的 Codex 进程没有模型会话，`/mcp/statuses` 返回
+`agent is killed`、`toolCount=0`；因此这里用「注入给 Agent 的同一个令牌」直接调用网关，验证了 9 个工具可见。
+真实环境里 Agent 建立会话后，`/mcp/statuses` 应能看到 `serverName=smartpipe` 与工具数量。
+
+## 9. 仍待完成
 
 1. **接入 Syntropy Agent**：把 MCP 地址与令牌注入 pipeline-lead 模板的运行环境（App Server 侧工具配置），当前为手工在模板里约定。
 2. **OAuth / 动态令牌**：目前是静态令牌 + 撤销；多租户场景需要短期令牌与刷新。
 3. **更细的权限**：按标签/Issue 限制工具范围（例如 release 令牌只能操作指定项目版本）。
 4. **Streamable HTTP（SSE）**：当前实现单请求 JSON 响应，未实现服务端推送。
 5. **调用审计视图**：网关调用日志目前只在进程日志里，可在管理台增加「工具调用」列表。
+6. **会话级验证**：沙箱缺少模型凭据，无法驱动真实 Codex 会话加载 MCP；需要在有模型的环境里再跑一次 `/mcp/statuses` 断言。
