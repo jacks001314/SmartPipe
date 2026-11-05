@@ -152,7 +152,7 @@ export const api = {
   listReleaseRuns: (limit = 50) => request<ReleaseRun[]>("/releases/runs?limit=" + limit),
   listAgentTokens: (projectId?: string) =>
     request<AgentToken[]>("/agent-tokens" + (projectId ? "?project_id=" + encodeURIComponent(projectId) : "")),
-  createAgentToken: (body: { project_id?: string; role: string; name: string }) =>
+  createAgentToken: (body: { project_id?: string; role: string; name: string; expires_in_hours?: number }) =>
     request<{ token: string; record: AgentToken }>("/agent-tokens", { method: "POST", body }),
   revokeAgentToken: (id: string) => request<{ id: string; enabled: boolean }>("/agent-tokens/" + id + "/revoke", { method: "POST" }),
   listToolCalls: (tool = "", limit = 100) =>

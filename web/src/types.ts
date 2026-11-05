@@ -299,6 +299,7 @@ export type AgentToken = {
   prefix: string;
   enabled: boolean;
   last_used_at: string | null;
+  expires_at: string | null;
   created_at: string;
 };
 

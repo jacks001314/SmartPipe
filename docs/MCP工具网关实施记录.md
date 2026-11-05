@@ -215,9 +215,35 @@ Agent 下次部署会拿到新的 Pool 地址。界面改动会写审计 `runtim
 单元测试 `internal/mcp/recorder_test.go` 覆盖：denied/ok/error 都会记录、principal 信息透传、
 `SummarizeArgs` 丢弃 `patch`/`body` 并保留字节数。
 
-## 10. 仍待完成
+## 10. 令牌有效期
 
-1. **OAuth / 动态令牌**：目前是静态令牌 + 撤销；多租户场景需要短期令牌与刷新。
+静态长期令牌在真实环境里风险偏高。`POST /admin/agent-tokens` 增加 `expires_in_hours`（0 或省略表示长期有效，
+上限 8760 小时），落库到 `agent_tokens.expires_at`（迁移 v18）。
+
+- 校验：`VerifyAgentToken` 的查询带 `(expires_at IS NULL OR expires_at > now())`，过期令牌与撤销令牌一样返回 404/401，
+  网关侧 `verifyToken` 收到 401 后按 `ErrUnauthorized` 拒绝，Agent 拿到的是 `invalid_token`。
+- 返回：`GET /admin/agent-tokens` 带 `expires_at`，管理台「Agent 令牌」页新增有效期下拉（24h/7d/30d/90d/长期）与「到期」列，
+  过期行标红 `expired`。
+- 审计：签发记录里带 `expires_at` 与 `expires_in_hours`。
+
+实测（真实库，ttl-demo 有效期 1 小时）：
+
+```
+POST /admin/agent-tokens {... "expires_in_hours":1}
+→ record.expires_at = 2026-11-05T08:44:47Z，verify 正常返回 ttl-demo
+
+UPDATE agent_tokens SET expires_at = now() - interval '1 hour' WHERE id='tok_ac71ba51a490'
+POST /admin/agent-tokens/verify → HTTP 401 {"code":"invalid_token","message":"令牌无效、已停用或已过期"}
+POST :8097/mcp（同一令牌）→ HTTP 401
+```
+
+![令牌有效期](images/console-tokens-ttl.png)
+
+测试：`internal/store/agent_tokens_test.go` 覆盖未过期可校验、过期拒绝、长期令牌 `expires_at` 为空、列表带到期时间。
+
+## 11. 仍待完成
+
+1. **OAuth / 动态令牌**：已有过期时间，但没有自动续期与 OAuth 授权流程。
 2. **更细的权限**：按标签/Issue 限制工具范围（例如 release 令牌只能操作指定项目版本）。
 3. **Streamable HTTP（SSE）**：当前实现单请求 JSON 响应，未实现服务端推送。
 4. **会话级验证**：沙箱缺少模型凭据，无法驱动真实 Codex 会话加载 MCP；需要在有模型的环境里再跑一次 `/mcp/statuses` 断言。

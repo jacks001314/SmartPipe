@@ -13,6 +13,14 @@ type migration struct {
 
 var migrations = []migration{
 	{
+		version: 18,
+		name:    "agent_token_expiry",
+		sql: `
+ALTER TABLE agent_tokens ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS agent_tokens_expires_idx ON agent_tokens (expires_at);
+`,
+	},
+	{
 		version: 17,
 		name:    "crash_similar",
 		sql: `

@@ -16,7 +16,7 @@ export function TokenPage({ notify }: { notify: Notify }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [issued, setIssued] = useState<{ token: string; record: AgentToken } | null>(null);
-  const [form, setForm] = useState({ project_id: "", role: "lead", name: "" });
+  const [form, setForm] = useState({ project_id: "", role: "lead", name: "", ttl: "0" });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -49,6 +49,7 @@ export function TokenPage({ notify }: { notify: Notify }) {
         project_id: form.project_id || undefined,
         role: form.role,
         name: form.name.trim(),
+        expires_in_hours: Number(form.ttl) || 0,
       });
       setIssued(res);
       notify("已签发令牌（明文只显示一次）");
@@ -122,6 +123,16 @@ export function TokenPage({ notify }: { notify: Notify }) {
               <label>名称</label>
               <input value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} placeholder="lead-issue-123" />
             </div>
+            <div className="field">
+              <label>有效期</label>
+              <select value={form.ttl} onChange={(e) => setForm((p) => ({ ...p, ttl: e.target.value }))}>
+                <option value="0">长期有效</option>
+                <option value="24">24 小时</option>
+                <option value="168">7 天</option>
+                <option value="720">30 天</option>
+                <option value="2160">90 天</option>
+              </select>
+            </div>
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
             <button className="btn primary" disabled={busy} onClick={() => void create()}>{busy ? "签发中…" : "签发令牌"}</button>
@@ -142,7 +153,7 @@ export function TokenPage({ notify }: { notify: Notify }) {
             <div className="empty"><h3>还没有令牌</h3><div className="tiny">签发一个 lead 令牌后，用它连接 :8097/mcp。</div></div>
           ) : (
             <table className="table">
-              <thead><tr><th>名称</th><th>项目</th><th>角色</th><th>前缀</th><th>最近使用</th><th>状态</th><th></th></tr></thead>
+              <thead><tr><th>名称</th><th>项目</th><th>角色</th><th>前缀</th><th>最近使用</th><th>到期</th><th>状态</th><th></th></tr></thead>
               <tbody>
                 {tokens.map((t) => (
                   <tr key={t.id}>
@@ -151,7 +162,16 @@ export function TokenPage({ notify }: { notify: Notify }) {
                     <td className="tiny">{t.role}</td>
                     <td className="mono tiny">{t.prefix}…</td>
                     <td className="tiny">{when(t.last_used_at)}</td>
-                    <td>{t.enabled ? <span className="chip ok"><span className="dot" />active</span> : <span className="chip bad"><span className="dot" />revoked</span>}</td>
+                    <td className="tiny">{t.expires_at ? when(t.expires_at) : "长期"}</td>
+                    <td>
+                      {!t.enabled ? (
+                        <span className="chip bad"><span className="dot" />revoked</span>
+                      ) : t.expires_at && new Date(t.expires_at).getTime() < Date.now() ? (
+                        <span className="chip bad"><span className="dot" />expired</span>
+                      ) : (
+                        <span className="chip ok"><span className="dot" />active</span>
+                      )}
+                    </td>
                     <td>{t.enabled ? <button className="btn small" disabled={busy} onClick={() => void revoke(t)}>撤销</button> : "—"}</td>
                   </tr>
                 ))}

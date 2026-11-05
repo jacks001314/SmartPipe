@@ -21,18 +21,20 @@ type AgentToken struct {
 	Prefix     string     `json:"prefix"`
 	Enabled    bool       `json:"enabled"`
 	LastUsedAt *time.Time `json:"last_used_at"`
+	ExpiresAt  *time.Time `json:"expires_at"`
 	CreatedAt  time.Time  `json:"created_at"`
 }
 
-const agentTokenColumns = `id, project_id, role, name, prefix, enabled, last_used_at, created_at`
+const agentTokenColumns = `id, project_id, role, name, prefix, enabled, last_used_at, expires_at, created_at`
 
 func scanAgentToken(row interface{ Scan(...any) error }) (*AgentToken, error) {
 	var (
 		t        AgentToken
 		project  sql.NullString
 		lastUsed sql.NullTime
+		expires  sql.NullTime
 	)
-	err := row.Scan(&t.ID, &project, &t.Role, &t.Name, &t.Prefix, &t.Enabled, &lastUsed, &t.CreatedAt)
+	err := row.Scan(&t.ID, &project, &t.Role, &t.Name, &t.Prefix, &t.Enabled, &lastUsed, &expires, &t.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -46,6 +48,10 @@ func scanAgentToken(row interface{ Scan(...any) error }) (*AgentToken, error) {
 	if lastUsed.Valid {
 		v := lastUsed.Time
 		t.LastUsedAt = &v
+	}
+	if expires.Valid {
+		v := expires.Time
+		t.ExpiresAt = &v
 	}
 	return &t, nil
 }
@@ -68,10 +74,10 @@ func (s *Store) CreateAgentToken(ctx context.Context, t AgentToken) (*AgentToken
 		t.Role = "lead"
 	}
 	row := s.db.QueryRowContext(ctx, `
-INSERT INTO agent_tokens (project_id, role, name, prefix, token_hash)
-VALUES ($1,$2,$3,$4,$5)
+INSERT INTO agent_tokens (project_id, role, name, prefix, token_hash, expires_at)
+VALUES ($1,$2,$3,$4,$5,$6)
 RETURNING id, enabled, created_at`,
-		t.ProjectID, t.Role, t.Name, t.Prefix, HashAgentToken(token))
+		t.ProjectID, t.Role, t.Name, t.Prefix, HashAgentToken(token), t.ExpiresAt)
 	if err := row.Scan(&t.ID, &t.Enabled, &t.CreatedAt); err != nil {
 		return nil, "", fmt.Errorf("store: create agent token: %w", err)
 	}
@@ -112,7 +118,7 @@ func (s *Store) RevokeAgentToken(ctx context.Context, id string) error {
 // VerifyAgentToken 校验明文令牌并刷新最近使用时间。
 func (s *Store) VerifyAgentToken(ctx context.Context, token string) (*AgentToken, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT `+agentTokenColumns+` FROM agent_tokens
- WHERE token_hash = $1 AND enabled`, HashAgentToken(token))
+ WHERE token_hash = $1 AND enabled AND (expires_at IS NULL OR expires_at > now())`, HashAgentToken(token))
 	t, err := scanAgentToken(row)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
