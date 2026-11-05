@@ -91,6 +91,27 @@ func (m *InboundMessage) TextContent() string {
 	return ""
 }
 
+// MediaAttachment 解析消息里的媒体附件（text 消息带 mediaType/mediaIds）。
+// 返回媒体类型与 mediaId 列表；非媒体消息返回 nil。
+func (m *InboundMessage) MediaAttachment() (MediaType, []string) {
+	if len(m.MsgData) == 0 {
+		return 0, nil
+	}
+	var d struct {
+		Text struct {
+			MediaType MediaType `json:"mediaType"`
+			MediaIDs  []string  `json:"mediaIds"`
+		} `json:"text"`
+	}
+	if err := json.Unmarshal(m.MsgData, &d); err != nil {
+		return 0, nil
+	}
+	if len(d.Text.MediaIDs) == 0 {
+		return 0, nil
+	}
+	return d.Text.MediaType, d.Text.MediaIDs
+}
+
 // ApproveCardCallback 审批卡片按钮回调（eventData 为发送时按钮 callbackInfo 原值）。
 type ApproveCardCallback struct {
 	EventData string `json:"eventData"`

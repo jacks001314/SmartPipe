@@ -11,9 +11,10 @@ import (
 
 // Handler 消费蓝信 WebSocket 事件：归一化 -> 幂等去重 -> 会话命令 -> 分发。
 type Handler struct {
-	cfg  Config
-	snd  Sender
-	disp Dispatcher
+	cfg   Config
+	snd   Sender
+	disp  Dispatcher
+	crash *CrashIntake
 
 	seenMu sync.Mutex
 	seen   map[string]time.Time // msgId -> first seen，幂等键
@@ -22,6 +23,15 @@ type Handler struct {
 func NewHandler(cfg Config, snd Sender, disp Dispatcher) *Handler {
 	return &Handler{cfg: cfg, snd: snd, disp: disp, seen: map[string]time.Time{}}
 }
+
+// WithCrash 挂上"一键上报"：带附件的消息走崩溃上报而不是普通派单。
+func (h *Handler) WithCrash(c *CrashIntake) *Handler {
+	h.crash = c
+	return h
+}
+
+const crashHelp = "发送一个 crash_bundle.json 文件（≤256KB），我会自动建单并回执 Issue 链接。\n" +
+	"字段：app、version、os、arch、exception{type,message,stack}、user_id（可选）。"
 
 // seenTTL 幂等窗口。蓝信正常不会重推，防的是我们自己重连期间的服务端补发。
 const seenTTL = 10 * time.Minute
@@ -77,10 +87,32 @@ func (h *Handler) handleMessage(ctx context.Context, m *lanxin.InboundMessage) e
 	}
 
 	text := m.TextContent()
-	// 只处理文本类；媒体消息后续随"崩溃一键上报"接入。
+	if mediaType, ids := m.MediaAttachment(); len(ids) > 0 {
+		if m.ChatType == "group" && h.cfg.RequireAtMe && (m.Reminder == nil || !m.Reminder.IsAtMe) {
+			return nil
+		}
+		if h.crash == nil {
+			return h.reply(ctx, m, "当前机器人未开启一键上报，请把问题描述发给 pipeline-lead。")
+		}
+		res, msg, err := h.crash.HandleAttachment(ctx, mediaType, ids[0])
+		if replyErr := h.reply(ctx, m, msg); replyErr != nil {
+			log.Printf("[bot] crash reply failed: %v", replyErr)
+		}
+		if err != nil {
+			return err
+		}
+		if res != nil {
+			log.Printf("[bot] crash ingested status=%s issue=%d msgId=%s", res.Status, res.IssueNumber, m.MsgID)
+		}
+		return nil
+	}
+	// 只处理文本类。
 	if m.MsgType != "text" && m.MsgType != "format" && m.MsgType != "formatText" {
 		log.Printf("[bot] skip non-text msgType=%s msgId=%s", m.MsgType, m.MsgID)
 		return nil
+	}
+	if text == "/crash" && h.crash != nil {
+		return h.reply(ctx, m, crashHelp)
 	}
 
 	switch m.ChatType {

@@ -26,6 +26,12 @@ func main() {
 
 	client := lanxin.New(cfg.AppID, cfg.AppSecret, lanxin.WithAPIBase(cfg.APIBase))
 	handler := bot.NewHandler(cfg, client, bot.NewDispatcher(cfg, client))
+	if cfg.CrashIngestURL != "" {
+		handler = handler.WithCrash(&bot.CrashIntake{
+			IngestURL: cfg.CrashIngestURL, Token: cfg.CrashToken, ProjectID: cfg.CrashProject,
+			MaxBytes: cfg.CrashMaxBytes, Media: client,
+		})
+	}
 	ws := lanxin.NewWSClient(client, handler.HandleEvent)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

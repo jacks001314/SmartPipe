@@ -3,6 +3,8 @@ package bot
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 )
 
 // Config 机器人服务配置（全部来自环境变量）。
@@ -27,6 +29,15 @@ type Config struct {
 
 	// InternalToken 内网接口共享令牌（bot 与 orchestrator 一致；为空则不校验）。
 	InternalToken string
+
+	// CrashIngestURL 崩溃上报入口（如 http://127.0.0.1:8090/ingest/crash）；为空表示不开启一键上报。
+	CrashIngestURL string
+	// CrashToken 上报接口的 X-Ingest-Token。
+	CrashToken string
+	// CrashProject 群里没绑项目时的兜底 project_id。
+	CrashProject string
+	// CrashMaxBytes 附件大小上限（默认 256KB）。
+	CrashMaxBytes int
 }
 
 func LoadFromEnv() (Config, error) {
@@ -38,11 +49,22 @@ func LoadFromEnv() (Config, error) {
 		OrchestratorURL: os.Getenv("ORCHESTRATOR_URL"),
 		RequireAtMe:     getenv("BOT_REQUIRE_AT_ME", "true") != "false",
 		InternalToken:   os.Getenv("INTERNAL_TOKEN"),
+		CrashIngestURL:  os.Getenv("CRASH_INGEST_URL"),
+		CrashToken:      os.Getenv("CRASH_INGEST_TOKEN"),
+		CrashProject:    os.Getenv("CRASH_PROJECT_ID"),
+		CrashMaxBytes:   atoiOr(os.Getenv("CRASH_MAX_BYTES"), 256*1024),
 	}
 	if cfg.AppID == "" || cfg.AppSecret == "" {
 		return cfg, fmt.Errorf("bot: LANXIN_APP_ID / LANXIN_APP_SECRET 必填（蓝信桌面端获取）")
 	}
 	return cfg, nil
+}
+
+func atoiOr(raw string, def int) int {
+	if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && n > 0 {
+		return n
+	}
+	return def
 }
 
 func getenv(k, def string) string {
