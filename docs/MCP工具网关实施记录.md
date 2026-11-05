@@ -54,6 +54,8 @@ Agent ──Bearer spt_…──▶ smartpipe-mcp(:8097/mcp)
 | `issue.add_labels` | ✓ | | | | 追加标签（如 ready） |
 | `release.candidates` | ✓ | | | ✓ | ready 候选 Issue |
 | `verify.patch` | ✓ | | | | 干净副本验证（含审批门禁） |
+| `repo.commit` | ✓ | | | | 建分支提交，可合并目标分支（含审批门禁） |
+| `repo.push` | ✓ | | | | 推送分支，远端与凭据由服务端注入，不 force |
 | `derivation.create` | ✓ | | | | 派生子 Agent（含审批门禁） |
 | `release.run` | ✓ | | | ✓ | 构建并发布（支持 dry_run） |
 | `release.rollback` | ✓ | | | ✓ | 回滚版本 |

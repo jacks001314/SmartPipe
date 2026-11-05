@@ -16,6 +16,7 @@ import type {
   ReleaseCandidate,
   ReleaseRecord,
   ReleaseRun,
+  RepoOp,
   MCPConfig,
   TestResult,
   ToolCall,
@@ -148,6 +149,7 @@ export const api = {
   revokeAgentToken: (id: string) => request<{ id: string; enabled: boolean }>("/agent-tokens/" + id + "/revoke", { method: "POST" }),
   listToolCalls: (tool = "", limit = 100) =>
     request<ToolCall[]>("/tool-calls?limit=" + limit + (tool ? "&tool=" + encodeURIComponent(tool) : "")),
+  listRepoOps: (limit = 100) => request<RepoOp[]>("/repo-ops?limit=" + limit),
   getMCPConfig: () => request<MCPConfig>("/runtime/mcp-config"),
   updateMCPConfig: (body: { url: string; pool_name: string }) =>
     request<MCPConfig>("/runtime/mcp-config", { method: "PUT", body }),

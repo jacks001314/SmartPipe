@@ -19,6 +19,10 @@ import (
 )
 
 func newTestAPI(t *testing.T, token string) (*iris.Application, *store.Store) {
+	return newTestAPIWith(t, token, nil)
+}
+
+func newTestAPIWith(t *testing.T, token string, mutate func(*Config)) (*iris.Application, *store.Store) {
 	t.Helper()
 	dsn := os.Getenv("SMARTPIPE_TEST_DSN")
 	if dsn == "" {
@@ -40,14 +44,20 @@ func newTestAPI(t *testing.T, token string) (*iris.Application, *store.Store) {
 	_, _ = st.DB().Exec("DELETE FROM credentials")
 	_, _ = st.DB().Exec("DELETE FROM audit_log")
 	_, _ = st.DB().Exec("DELETE FROM projects")
+	_, _ = st.DB().Exec("DELETE FROM repo_ops")
 	t.Cleanup(func() {
 		_, _ = st.DB().Exec("DELETE FROM credentials")
 		_, _ = st.DB().Exec("DELETE FROM audit_log")
 		_, _ = st.DB().Exec("DELETE FROM projects")
+		_, _ = st.DB().Exec("DELETE FROM repo_ops")
 		_ = st.Close()
 	})
 
-	api := New(Config{Store: st, Checker: conncheck.New(), AdminToken: token, Version: "test"})
+	cfg := Config{Store: st, Checker: conncheck.New(), AdminToken: token, Version: "test"}
+	if mutate != nil {
+		mutate(&cfg)
+	}
+	api := New(cfg)
 	app := iris.New()
 	api.Register(app)
 	if err := app.Build(); err != nil {

@@ -133,6 +133,7 @@ func (a *API) Register(app *iris.Application) {
 	a.registerRuntime(party)
 	a.registerBridge(party)
 	a.registerVerification(party)
+	a.registerMerges(party)
 	a.registerDerivations(party)
 	a.registerReleases(party)
 	a.registerCrashes(party)

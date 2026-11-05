@@ -1,4 +1,4 @@
-﻿# smartpipe-mcp 联调：真实 admin-api + 真实 Postgres + 假 GitHub + 补丁验证服务。
+# smartpipe-mcp 联调：真实 admin-api + 真实 Postgres + 假 GitHub + 补丁验证服务。
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File scripts\mcp-smoke.ps1
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -43,8 +43,8 @@ $init = Rpc $leadToken "initialize" @{ protocolVersion = "2025-06-18"; capabilit
 if ($init.Status -ne 200 -or $init.Body.result.protocolVersion -ne "2025-06-18") { throw ("initialize failed: " + $init.Text) }
 $list = Rpc $leadToken "tools/list" $null
 $toolNames = @($list.Body.result.tools | ForEach-Object { $_.name })
-if ($toolNames.Count -ne 9) { throw ("lead tools = " + ($toolNames -join ",")) }
-foreach ($need in @("project.info", "issue.comment", "verify.patch", "derivation.create", "release.run", "release.rollback")) {
+if ($toolNames.Count -ne 11) { throw ("lead tools = " + ($toolNames -join ",")) }
+foreach ($need in @("project.info", "issue.comment", "verify.patch", "repo.commit", "repo.push", "derivation.create", "release.run", "release.rollback")) {
   if ($toolNames -notcontains $need) { throw ("missing tool " + $need) }
 }
 
@@ -74,7 +74,7 @@ $verify = Tool $leadToken "verify.patch" @{
   base_commit = "ddac226063b9631e05dc752dc319e73a5f1683c5"; patch = $patch; author = "mcp-smoke"
 }
 $verifyText = $verify.content[0].text
-$verifyBody = $verifyText | ConvertFrom-Json
+try { $verifyBody = $verifyText | ConvertFrom-Json } catch { throw ("verify.patch 返回非 JSON: " + $verifyText.Substring(0, [Math]::Min(400, $verifyText.Length))) }
 if ($verify.isError -eq $true) { throw ("verify error: " + $verifyText) }
 if ($verifyBody.report.ok -ne $true) { throw ("verify report not ok: " + $verifyText) }
 

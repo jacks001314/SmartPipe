@@ -13,6 +13,27 @@ type migration struct {
 
 var migrations = []migration{
 	{
+		version: 15,
+		name:    "repo_ops",
+		sql: `
+CREATE TABLE IF NOT EXISTS repo_ops (
+    id            BIGSERIAL PRIMARY KEY,
+    project_id    TEXT,
+    kind          TEXT NOT NULL DEFAULT '',
+    issue_ref     TEXT NOT NULL DEFAULT '',
+    repo          TEXT NOT NULL DEFAULT '',
+    branch        TEXT NOT NULL DEFAULT '',
+    target_branch TEXT NOT NULL DEFAULT '',
+    commit_sha    TEXT NOT NULL DEFAULT '',
+    ok            BOOLEAN NOT NULL DEFAULT false,
+    error         TEXT NOT NULL DEFAULT '',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS repo_ops_at_idx ON repo_ops (created_at DESC);
+CREATE INDEX IF NOT EXISTS repo_ops_issue_idx ON repo_ops (issue_ref, created_at DESC);
+`,
+	}, {
 		version: 14,
 		name:    "tool_calls_settings",
 		sql: `

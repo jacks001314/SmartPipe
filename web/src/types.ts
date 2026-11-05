@@ -317,3 +317,17 @@ export type MCPConfig = {
   url: string;
   pool_name: string;
 };
+
+export type RepoOp = {
+  id: number;
+  project_id: string | null;
+  kind: string;
+  issue_ref: string;
+  repo: string;
+  branch: string;
+  target_branch: string;
+  commit: string;
+  ok: boolean;
+  error: string;
+  created_at: string;
+};

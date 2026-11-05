@@ -130,6 +130,24 @@ func (b *AdminBackend) Call(ctx context.Context, p *Principal, tool string, args
 			return nil, fmt.Errorf("patch 必填")
 		}
 		return b.post(ctx, "/admin/verifications", payload)
+	case "repo.commit":
+		payload := map[string]any{
+			"project_id": projectID, "issue_ref": strArg(args, "issue_ref"), "repo": strArg(args, "repo"),
+			"base_commit": strArg(args, "base_commit"), "branch": strArg(args, "branch"),
+			"message": strArg(args, "message"), "target_branch": strArg(args, "target_branch"),
+			"author_name": strArg(args, "author_name"), "author_email": strArg(args, "author_email"),
+		}
+		if patch, ok := args["patch"]; ok {
+			payload["patch"] = patch
+		} else {
+			return nil, fmt.Errorf("patch 必填")
+		}
+		return b.post(ctx, "/admin/commits", payload)
+	case "repo.push":
+		return b.post(ctx, "/admin/pushes", map[string]any{
+			"project_id": projectID, "issue_ref": strArg(args, "issue_ref"), "repo": strArg(args, "repo"),
+			"branch": strArg(args, "branch"), "remote": strArg(args, "remote"),
+		})
 	case "derivation.create":
 		return b.post(ctx, "/admin/derivations", map[string]any{
 			"project_id": projectID, "issue_ref": strArg(args, "issue_ref"),

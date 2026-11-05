@@ -59,6 +59,34 @@ var Tools = []Tool{
 		Roles:       []string{"lead", "release"},
 	},
 	{
+		Name:        "repo.commit",
+		Description: "由 lead 在干净副本上应用补丁、创建 agent/<issue> 分支并提交（可选合并到目标分支）。复杂 Issue 未批准会返回 approval_required。",
+		InputSchema: obj(map[string]any{
+			"issue_ref":     str("Issue 引用，如 owner/repo#123"),
+			"repo":          str("仓库地址或本地路径"),
+			"base_commit":   str("基线 commit"),
+			"patch":         str("unified diff"),
+			"branch":        str("目标分支名；省略时按 issue 编号生成 agent/<n>"),
+			"message":       str("提交信息"),
+			"target_branch": str("需要同时合并时填目标分支（如 main）"),
+			"author_name":   str("提交人姓名（可选）"),
+			"author_email":  str("提交人邮箱（可选）"),
+			"project_id":    str("项目 ID（可选）"),
+		}, "repo", "base_commit", "patch"),
+		Roles: []string{"lead"},
+	},
+	{
+		Name:        "repo.push",
+		Description: "推送已提交的分支到项目远端。远端地址与 Git 凭据由服务端注入，Agent 不接触 token；禁止 force push。",
+		InputSchema: obj(map[string]any{
+			"issue_ref":  str("Issue 引用（用于回写评论）"),
+			"repo":       str("本地工作副本路径"),
+			"branch":     str("要推送的分支"),
+			"remote":     str("远端名，默认 origin"),
+			"project_id": str("项目 ID（可选）"),
+		}, "repo", "branch"),
+		Roles: []string{"lead"},
+	}, {
 		Name:        "verify.patch",
 		Description: "在干净副本上应用补丁并执行 smartpipe.yaml 的 required 命令；复杂 Issue 未批准会直接返回 approval_required。",
 		InputSchema: obj(map[string]any{

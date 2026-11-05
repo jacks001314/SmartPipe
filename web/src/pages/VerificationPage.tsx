@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api";
-import type { IssueAttempt, Project, VerificationRecord } from "../types";
+import type { IssueAttempt, Project, RepoOp, VerificationRecord } from "../types";
 import type { Notify } from "../App";
 
 function when(value: string | null | undefined) {
@@ -18,6 +18,7 @@ export function VerificationPage({ notify }: { notify: Notify }) {
   const [records, setRecords] = useState<VerificationRecord[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [attempts, setAttempts] = useState<IssueAttempt[]>([]);
+  const [ops, setOps] = useState<RepoOp[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -32,7 +33,7 @@ export function VerificationPage({ notify }: { notify: Notify }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [v, p, a] = await Promise.allSettled([api.listVerifications(50), api.listProjects(), api.listAttempts(100)]);
+    const [v, p, a, o] = await Promise.allSettled([api.listVerifications(50), api.listProjects(), api.listAttempts(100), api.listRepoOps(50)]);
     if (v.status === "fulfilled") {
       setRecords(v.value);
       setError("");
@@ -41,6 +42,7 @@ export function VerificationPage({ notify }: { notify: Notify }) {
     }
     if (p.status === "fulfilled") setProjects(p.value);
     if (a.status === "fulfilled") setAttempts(a.value);
+    if (o.status === "fulfilled") setOps(o.value);
     setLoading(false);
   }, []);
 
@@ -222,6 +224,51 @@ export function VerificationPage({ notify }: { notify: Notify }) {
         </div>
       </div>
 
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <div className="card-title">提交与合并</div>
+            <div className="card-sub">lead 通过 repo.commit / repo.push 落地；远端地址与 Git 凭据由服务端注入</div>
+          </div>
+          <button className="btn" onClick={() => void load()}>刷新</button>
+        </div>
+        <div className="card-body" style={{ padding: 0 }}>
+          {ops.length === 0 ? (
+            <div className="empty">
+              <h3>还没有提交记录</h3>
+              <div className="tiny">lead 调用 repo.commit 后，这里会显示分支、commit 与目标分支。</div>
+            </div>
+          ) : (
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>类型</th>
+                  <th>Issue</th>
+                  <th>分支 → 目标</th>
+                  <th>commit</th>
+                  <th>结果</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ops.map((o) => (
+                  <tr key={o.id}>
+                    <td className="tiny" style={{ whiteSpace: "nowrap" }}>{when(o.created_at)}</td>
+                    <td><span className="chip">{o.kind}</span></td>
+                    <td className="mono tiny">{o.issue_ref || "—"}</td>
+                    <td className="mono tiny">{o.branch || "—"}{o.target_branch ? " → " + o.target_branch : ""}</td>
+                    <td className="mono tiny">{(o.commit || "").slice(0, 12) || "—"}</td>
+                    <td>
+                      {o.ok ? <span className="chip ok"><span className="dot" />成功</span> : <span className="chip bad"><span className="dot" />失败</span>}
+                      {o.error ? <div className="tiny">{o.error}</div> : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
       <div className={"modal-backdrop" + (detail ? " open" : "")}>
         <div className="modal" style={{ width: "min(860px, 100%)" }}>
           <div className="modal-head">
