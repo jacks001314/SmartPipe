@@ -3,11 +3,11 @@ package store
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
 	"smartpipe/backend/internal/secretbox"
+	"smartpipe/backend/internal/testdb"
 )
 
 // 集成测试需要真实 Postgres。设置 SMARTPIPE_TEST_DSN 后运行：
@@ -16,10 +16,7 @@ import (
 //	go test ./internal/store -count=1
 func testStore(t *testing.T) *Store {
 	t.Helper()
-	dsn := os.Getenv("SMARTPIPE_TEST_DSN")
-	if dsn == "" {
-		t.Skip("SMARTPIPE_TEST_DSN 未设置，跳过集成测试")
-	}
+	dsn := testdb.DSN(t)
 	key := make([]byte, secretbox.KeySize)
 	for i := range key {
 		key[i] = byte(i + 7)

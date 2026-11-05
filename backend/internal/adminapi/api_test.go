@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"smartpipe/backend/internal/conncheck"
 	"smartpipe/backend/internal/secretbox"
 	"smartpipe/backend/internal/store"
+	"smartpipe/backend/internal/testdb"
 )
 
 func newTestAPI(t *testing.T, token string) (*iris.Application, *store.Store) {
@@ -24,10 +24,7 @@ func newTestAPI(t *testing.T, token string) (*iris.Application, *store.Store) {
 
 func newTestAPIWith(t *testing.T, token string, mutate func(*Config)) (*iris.Application, *store.Store) {
 	t.Helper()
-	dsn := os.Getenv("SMARTPIPE_TEST_DSN")
-	if dsn == "" {
-		t.Skip("SMARTPIPE_TEST_DSN 未设置，跳过管理 API 集成测试")
-	}
+	dsn := testdb.DSN(t)
 	key := make([]byte, secretbox.KeySize)
 	for i := range key {
 		key[i] = byte(3*i + 1)

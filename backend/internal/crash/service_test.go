@@ -2,7 +2,6 @@ package crash
 
 import (
 	"context"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -11,6 +10,7 @@ import (
 	"smartpipe/backend/internal/github"
 	"smartpipe/backend/internal/secretbox"
 	"smartpipe/backend/internal/store"
+	"smartpipe/backend/internal/testdb"
 )
 
 type fakeForge struct {
@@ -32,10 +32,7 @@ func (f *fakeForge) Comment(ctx context.Context, repo string, number int, body s
 
 func testStore(t *testing.T) *store.Store {
 	t.Helper()
-	dsn := os.Getenv("SMARTPIPE_TEST_DSN")
-	if dsn == "" {
-		t.Skip("SMARTPIPE_TEST_DSN 未设置，跳过集成测试")
-	}
+	dsn := testdb.DSN(t)
 	key := make([]byte, secretbox.KeySize)
 	for i := range key {
 		key[i] = byte(i + 3)
