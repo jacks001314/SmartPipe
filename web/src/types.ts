@@ -263,3 +263,27 @@ export type ReleaseRun = {
   finished_at: string | null;
   duration_ms: number;
 };
+
+export type CrashReport = {
+  id: number;
+  project_id: string | null;
+  fingerprint: string;
+  app: string;
+  version: string;
+  os: string;
+  arch: string;
+  user_id: string;
+  device_id: string;
+  source: string;
+  repo: string;
+  issue_number: number;
+  issue_url: string;
+  status: string;
+  reject_reason: string;
+  occurrences: number;
+  size_bytes: number;
+  bundle: Record<string, unknown>;
+  occurred_at: string | null;
+  created_at: string;
+  updated_at: string;
+};

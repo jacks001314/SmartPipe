@@ -3,6 +3,7 @@ import type {
   AppServer,
   AuditEntry,
   BridgeLink,
+  CrashReport,
   Credential,
   Derivation,
   DispatchRecord,
@@ -137,6 +138,8 @@ export const api = {
   createRelease: (body: { project_id?: string; repo?: string; version: string; commit: string; artifact_globs?: string[]; notes?: string }) =>
     request<{ record: ReleaseRecord; report: Record<string, unknown> }>("/releases", { method: "POST", body }),
   listReleaseRuns: (limit = 50) => request<ReleaseRun[]>("/releases/runs?limit=" + limit),
+  listCrashes: (limit = 100) => request<CrashReport[]>("/crashes?limit=" + limit),
+  getCrash: (id: number) => request<CrashReport>("/crashes/" + id),
   listReleaseCandidates: (projectId: string, label?: string) =>
     request<{ repo: string; label: string; candidates: ReleaseCandidate[] }>(
       "/releases/candidates?project_id=" + encodeURIComponent(projectId) + (label ? "&label=" + encodeURIComponent(label) : "")),

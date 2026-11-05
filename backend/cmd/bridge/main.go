@@ -16,15 +16,18 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"smartpipe/backend/internal/bridge"
+	"smartpipe/backend/internal/crash"
 	"smartpipe/backend/internal/secretbox"
 	"smartpipe/backend/internal/store"
 	"smartpipe/backend/internal/syntropyclient"
@@ -58,9 +61,10 @@ func main() {
 		log.Println("警告: 未配置 webhook secret，/webhooks/github 将跳过签名校验（仅限本地开发）")
 	}
 
+	var lead *bridge.LeadDispatcher
 	svc := bridge.NewService(st, nil)
 	if addr := strings.TrimSpace(os.Getenv("SMARTPIPE_APPSERVER_ADDR")); addr != "" {
-		lead := bridge.NewLeadDispatcher(st)
+		lead = bridge.NewLeadDispatcher(st)
 		lead.Token = strings.TrimSpace(os.Getenv("SMARTPIPE_APPSERVER_TOKEN"))
 		svc.WithDispatcher(lead)
 		log.Printf("启用 lead 派单，默认 App Server %s", addr)
@@ -117,6 +121,87 @@ func main() {
 		}
 		writeJSON(w, status, map[string]any{"link": link, "created": created})
 	})
+	crashSvc := &crash.Service{
+		Store: st,
+		Forge: func(ctx context.Context, projectID *string) (crash.Forge, error) {
+			return bridge.ClientFromCredentials(ctx, st, projectID)
+		},
+		MaxBytes:     envInt("SMARTPIPE_CRASH_MAX_BYTES", 256*1024),
+		RateLimit:    envInt("SMARTPIPE_CRASH_RATE_LIMIT", 5),
+		RateWindow:   time.Hour,
+		DedupeWindow: 24 * time.Hour,
+	}
+	crashToken := strings.TrimSpace(os.Getenv("SMARTPIPE_CRASH_TOKEN"))
+	if crashToken == "" {
+		crashToken = bridgeToken
+	}
+	defaultCrashProject := strings.TrimSpace(os.Getenv("SMARTPIPE_CRASH_PROJECT"))
+	mux.HandleFunc("/ingest/crash", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if crashToken != "" && r.Header.Get("X-Ingest-Token") != crashToken {
+			http.Error(w, "invalid ingest token", http.StatusUnauthorized)
+			return
+		}
+		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+		if err != nil {
+			http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		var in struct {
+			ProjectID string       `json:"project_id"`
+			Source    string       `json:"source"`
+			Bundle    crash.Bundle `json:"bundle"`
+		}
+		if err := json.Unmarshal(raw, &in); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		projectID := strings.TrimSpace(in.ProjectID)
+		if projectID == "" {
+			projectID = defaultCrashProject
+		}
+		if projectID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "project_id is required"})
+			return
+		}
+		project, err := st.GetProject(r.Context(), projectID)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "project not found"})
+			return
+		}
+		repo := strings.TrimSpace(project.GitHubIssueRepo)
+		if repo == "" {
+			repo = strings.TrimSpace(project.GitHubRepoURL)
+		}
+		outcome, err := crashSvc.Ingest(r.Context(), crash.Ingest{Project: project, Repo: repo, Source: in.Source, Bundle: in.Bundle, RawSize: len(raw)})
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+			return
+		}
+		payload := map[string]any{"data": outcome}
+		if lead != nil && outcome.Status == "created" && outcome.Report != nil {
+			link := &store.BridgeLink{ProjectID: &project.ID, Repo: repo, IssueNumber: outcome.IssueNumber,
+				IssueURL: outcome.IssueURL, UserID: in.Bundle.UserID}
+			if agentID, derr := lead.Dispatch(r.Context(), link, project, crash.Title(in.Bundle)); derr != nil {
+				payload["dispatch_error"] = derr.Error()
+			} else {
+				payload["lead_agent_id"] = agentID
+			}
+		}
+		status := http.StatusCreated
+		switch outcome.Status {
+		case "deduped":
+			status = http.StatusOK
+		case "rate_limited":
+			status = http.StatusTooManyRequests
+		case "rejected":
+			status = http.StatusUnprocessableEntity
+		}
+		writeJSON(w, status, payload)
+	})
 	mux.HandleFunc("/bridge/links", func(w http.ResponseWriter, r *http.Request) {
 		items, err := st.ListBridgeLinks(r.Context(), 100)
 		if err != nil {
@@ -160,6 +245,15 @@ func lookupWebhookSecret(ctx context.Context, st *store.Store) string {
 		}
 	}
 	return ""
+}
+
+func envInt(key string, fallback int) int {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return fallback
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

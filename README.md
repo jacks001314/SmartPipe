@@ -39,6 +39,7 @@ M0–M4 已在本地环境跑通（Windows + 192.168.1.99 上的 Postgres，Linu
 | M2 | 无 Actions 的补丁门禁：干净副本 + `smartpipe.yaml`、失败回路、`/commit`、`/push` | `backend/cmd/patch-verifier` | [M2](docs/M2实施记录.md) |
 | M3 | 复杂 Issue 方案登记、`/approve vN` 权限与哈希校验、派生入口强制门禁 | `/admin/derivations` | [M3](docs/M3实施记录.md) |
 | M4 | 发版链路：候选 Issue → 构建 → tag/Release → 标签回写 → 蓝信通知 → 回滚 | `/admin/releases/runs` | [M4](docs/M4实施记录.md) |
+| 崩溃上报 | `crash_bundle` 脱敏、指纹去重、限流、自动建单与派单 | `POST /ingest/crash` | [崩溃上报](docs/崩溃上报实施记录.md) |
 
 重构方向：
 

@@ -129,6 +129,7 @@ func (a *API) Register(app *iris.Application) {
 	a.registerVerification(party)
 	a.registerDerivations(party)
 	a.registerReleases(party)
+	a.registerCrashes(party)
 }
 
 func (a *API) cors(ctx iris.Context) {

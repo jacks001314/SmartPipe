@@ -8,8 +8,9 @@ import { RuntimePage } from "./pages/RuntimePage";
 import { BridgePage } from "./pages/BridgePage";
 import { VerificationPage } from "./pages/VerificationPage";
 import { ReleasePage } from "./pages/ReleasePage";
+import { CrashPage } from "./pages/CrashPage";
 
-type PageKey = "projects" | "credentials" | "runtime" | "bridge" | "verify" | "release" | "audit";
+type PageKey = "projects" | "credentials" | "runtime" | "bridge" | "verify" | "release" | "crash" | "audit";
 
 const NAV: { key: PageKey; label: string; icon: string }[] = [
   { key: "projects", label: "项目", icon: "▤" },
@@ -18,6 +19,7 @@ const NAV: { key: PageKey; label: string; icon: string }[] = [
   { key: "bridge", label: "桥接与派单", icon: "⇄" },
   { key: "verify", label: "补丁验证", icon: "✓" },
   { key: "release", label: "发版", icon: "⬆" },
+  { key: "crash", label: "崩溃上报", icon: "⚠" },
   { key: "audit", label: "审计日志", icon: "☰" },
 ];
 
@@ -28,6 +30,7 @@ const META: Record<PageKey, { crumb: string; title: string; sub: string }> = {
   bridge: { crumb: "配置中心 / 桥接与派单", title: "桥接与派单", sub: "蓝信消息转 GitHub Issue，并把工单投递给项目的 pipeline-lead。" },
   verify: { crumb: "配置中心 / 补丁验证", title: "补丁验证", sub: "无 Actions 的合并门禁：干净副本应用补丁并执行 smartpipe.yaml。" },
   release: { crumb: "配置中心 / 发版", title: "发版", sub: "从干净提交构建制品，生成带校验和与签名的 manifest。" },
+  crash: { crumb: "配置中心 / 崩溃上报", title: "崩溃上报", sub: "客户端 crash_bundle 脱敏、指纹去重、限流与自动建单。" },
   audit: { crumb: "配置中心 / 审计日志", title: "审计日志", sub: "记录项目、凭据和运行时的管理操作，不保存明文秘密。" },
 };
 
@@ -134,6 +137,7 @@ export function App() {
           {page === "bridge" && <BridgePage notify={notify} />}
           {page === "verify" && <VerificationPage notify={notify} />}
           {page === "release" && <ReleasePage notify={notify} />}
+          {page === "crash" && <CrashPage notify={notify} />}
           {page === "audit" && <AuditPage notify={notify} />}
         </div>
       </main>

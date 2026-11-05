@@ -13,6 +13,38 @@ type migration struct {
 
 var migrations = []migration{
 	{
+		version: 12,
+		name:    "crash_reports",
+		sql: `
+CREATE TABLE IF NOT EXISTS crash_reports (
+    id            BIGSERIAL PRIMARY KEY,
+    project_id    TEXT,
+    fingerprint   TEXT NOT NULL DEFAULT '',
+    app           TEXT NOT NULL DEFAULT '',
+    version       TEXT NOT NULL DEFAULT '',
+    os            TEXT NOT NULL DEFAULT '',
+    arch          TEXT NOT NULL DEFAULT '',
+    user_id       TEXT NOT NULL DEFAULT '',
+    device_id     TEXT NOT NULL DEFAULT '',
+    source        TEXT NOT NULL DEFAULT '',
+    repo          TEXT NOT NULL DEFAULT '',
+    issue_number  INTEGER NOT NULL DEFAULT 0,
+    issue_url     TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT '',
+    reject_reason TEXT NOT NULL DEFAULT '',
+    occurrences   INTEGER NOT NULL DEFAULT 1,
+    size_bytes    INTEGER NOT NULL DEFAULT 0,
+    bundle        JSONB NOT NULL DEFAULT '{}'::jsonb,
+    occurred_at   TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS crash_reports_fp_idx ON crash_reports (project_id, fingerprint, created_at DESC);
+CREATE INDEX IF NOT EXISTS crash_reports_user_idx ON crash_reports (user_id, created_at DESC);
+`,
+	},
+	{
 		version: 11,
 		name:    "release_runs",
 		sql: `
