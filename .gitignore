@@ -6,3 +6,5 @@ web/dist/
 coverage.out
 # 本地真实凭证，勿提交
 deploy/bot.local.env
+.dev/
+backend/bin/

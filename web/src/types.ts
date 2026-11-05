@@ -1,0 +1,265 @@
+export type Project = {
+  id: string;
+  name: string;
+  description: string;
+  github_provider: string;
+  github_repo_url: string;
+  github_default_branch: string;
+  github_issue_repo: string;
+  labels_prefix: string;
+  codeowners_required: boolean;
+  approver_teams: string;
+  verify_profile_path: string;
+  release_profile: string;
+  bluex_group_ids: string;
+  lead_agent_template: string;
+  tool_profile: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Credential = {
+  id: string;
+  project_id: string | null;
+  kind: string;
+  name: string;
+  mask: string;
+  metadata: Record<string, unknown>;
+  enabled: boolean;
+  last_tested_at: string | null;
+  last_test_ok: boolean | null;
+  last_test_message: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AuditEntry = {
+  id: number;
+  at: string;
+  actor: string;
+  action: string;
+  target_type: string;
+  target_id: string;
+  project_id: string | null;
+  result: string;
+  detail: Record<string, unknown>;
+  trace_id: string;
+};
+
+export type Health = {
+  status: string;
+  database: boolean;
+  version: string;
+  auth: string;
+  checked_at: string;
+};
+
+export type TestResult = {
+  ok: boolean;
+  message: string;
+  latency_ms: number;
+  credential: Credential | null;
+};
+
+export const CREDENTIAL_KINDS: { value: string; label: string; hint: string }[] = [
+  { value: "github_app", label: "GitHub App 私钥", hint: "需同时填 app_id 与 installation_id" },
+  { value: "github_pat", label: "GitHub PAT", hint: "用于快速验证仓库读取权限" },
+  { value: "github_webhook_secret", label: "GitHub Webhook Secret", hint: "仅做长度校验，至少 16 位" },
+  { value: "lanxin", label: "蓝信 App Secret", hint: "需填 app_id 与 api_base" },
+  { value: "syntropy", label: "Syntropy 服务令牌", hint: "需填 base_url，默认 127.0.0.1:8765" },
+  { value: "git_ssh", label: "Git 只读凭据", hint: "需填 repo_url，用于 ls-remote 探测" },
+  { value: "signing_key", label: "发版签名密钥", hint: "仅登记，联网校验在 M4" },
+];
+
+export type AppServer = {
+  id: string;
+  name: string;
+  addr: string;
+  binary: string;
+  pid: number;
+  status: string;
+  health: string;
+  version: string;
+  started_at: string;
+  exit_code: number | null;
+  last_error: string;
+  log_path: string;
+  data_dir: string;
+};
+
+export type AgentItem = {
+  id: string;
+  name?: string;
+  displayName?: string;
+  projectId?: string;
+  phase?: string;
+  desiredState?: string;
+  templateName?: string;
+  nodeId?: string;
+  [key: string]: unknown;
+};
+
+export type BridgeLink = {
+  id: number;
+  source_message_id: string;
+  channel: string;
+  chat_id: string;
+  user_id: string;
+  project_id: string | null;
+  repo: string;
+  issue_number: number;
+  issue_url: string;
+  lead_agent_id: string;
+  dispatch_status: string;
+  dispatch_error: string;
+  dispatched_at: string | null;
+  receipt_status: string;
+  receipt_error: string;
+  created_at: string;
+};
+
+export type ProjectBinding = {
+  project_id: string;
+  app_server_id: string;
+  app_server_addr: string;
+  agent_project_id: string;
+  lead_agent_id: string;
+  lead_agent_name: string;
+  updated_at: string;
+};
+
+export type DispatchRecord = {
+  id: number;
+  link_id: number;
+  agent_id: string;
+  status: string;
+  message: string;
+  at: string;
+};
+
+export type WebhookDelivery = {
+  delivery_id: string;
+  event: string;
+  repo: string;
+  received_at: string;
+};
+
+export type IssuePlan = {
+  id: number;
+  repo: string;
+  issue_number: number;
+  version: number;
+  body: string;
+  content_hash: string;
+  author: string;
+  created_at: string;
+  approved: boolean;
+  approver: string;
+  approved_at: string | null;
+};
+
+export type VerifyCheck = {
+  name: string;
+  command: string;
+  ok: boolean;
+  exit_code: number;
+  duration_ms: number;
+  output: string;
+  timed_out: boolean;
+};
+
+export type VerificationRecord = {
+  id: number;
+  project_id: string | null;
+  issue_ref: string;
+  repo: string;
+  base_commit: string;
+  head_commit: string;
+  patch_hash: string;
+  ok: boolean;
+  files: string[];
+  changed_lines: number;
+  checks: VerifyCheck[];
+  error: string;
+  duration_ms: number;
+  report: Record<string, unknown>;
+  created_at: string;
+};
+
+export type IssueAttempt = {
+  issue_ref: string;
+  project_id: string | null;
+  attempts: number;
+  state: string;
+  last_verification_id: number | null;
+  updated_at: string;
+};
+
+export type Derivation = {
+  id: number;
+  project_id: string | null;
+  issue_ref: string;
+  agent_name: string;
+  agent_id: string;
+  operation_id: string;
+  approval_version: number;
+  approval_hash: string;
+  status: string;
+  created_at: string;
+};
+
+export type ReleaseArtifact = {
+  path: string;
+  size: number;
+  sha256: string;
+};
+
+export type ReleaseRecord = {
+  id: number;
+  project_id: string | null;
+  version: string;
+  commit_sha: string;
+  ok: boolean;
+  status: string;
+  manifest: Record<string, unknown>;
+  manifest_sha256: string;
+  signature: string;
+  artifacts: ReleaseArtifact[];
+  output_dir: string;
+  error: string;
+  duration_ms: number;
+  created_at: string;
+};
+
+export type ReleaseCandidate = {
+  number: number;
+  title: string;
+  url: string;
+  author: string;
+};
+
+export type ReleaseRun = {
+  id: number;
+  project_id: string | null;
+  version: string;
+  commit_sha: string;
+  branch: string;
+  status: string;
+  trigger: string;
+  candidates: ReleaseCandidate[];
+  notes: string;
+  release_url: string;
+  tag: string;
+  release_id: number;
+  manifest_sha256: string;
+  output_dir: string;
+  artifacts: ReleaseArtifact[];
+  build_output: string;
+  error: string;
+  notify_status: string;
+  notify_error: string;
+  started_at: string;
+  finished_at: string | null;
+  duration_ms: number;
+};
