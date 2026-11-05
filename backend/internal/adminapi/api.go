@@ -139,6 +139,7 @@ func (a *API) Register(app *iris.Application) {
 	a.registerCrashes(party)
 	a.registerAgentTokens(party)
 	a.registerIssues(party)
+	a.registerIdentities(party)
 	a.registerToolCalls(party)
 }
 

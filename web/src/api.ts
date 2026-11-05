@@ -20,6 +20,7 @@ import type {
   MCPConfig,
   TestResult,
   ToolCall,
+  UserIdentity,
   VerificationRecord,
   WebhookDelivery,
 } from "./types";
@@ -122,6 +123,12 @@ export const api = {
     request<Record<string, unknown>>("/runtime/app-servers/" + id + "/agents", { method: "POST", body }),
   agentOperation: (id: string, op: string) =>
     request<Record<string, unknown>>("/runtime/app-servers/" + id + "/agent-operations/" + op),
+
+  listIdentities: (platform = "", projectId = "") =>
+    request<UserIdentity[]>("/identities?platform=" + encodeURIComponent(platform) + (projectId ? "&project_id=" + encodeURIComponent(projectId) : "")),
+  upsertIdentity: (body: { platform?: string; platform_user_id: string; project_id?: string | null; github_login: string; display_name?: string; enabled?: boolean }) =>
+    request<UserIdentity>("/identities", { method: "POST", body }),
+  deleteIdentity: (id: number) => request<void>("/identities/" + id, { method: "DELETE" }),
 
   listBridgeLinks: (limit = 100) => request<BridgeLink[]>("/bridge/links?limit=" + limit),
   listWebhookDeliveries: (limit = 50) => request<WebhookDelivery[]>("/bridge/deliveries?limit=" + limit),

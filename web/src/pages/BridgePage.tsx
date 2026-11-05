@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api";
-import type { AgentItem, AppServer, BridgeLink, Derivation, DispatchRecord, IssuePlan, Project, ProjectBinding, WebhookDelivery } from "../types";
+import type { AgentItem, AppServer, BridgeLink, Derivation, DispatchRecord, IssuePlan, Project, ProjectBinding, UserIdentity, WebhookDelivery } from "../types";
 import type { Notify } from "../App";
 
 function when(value: string | null | undefined) {
@@ -39,10 +39,12 @@ export function BridgePage({ notify }: { notify: Notify }) {
   const [form, setForm] = useState({ project_id: "", app_server_id: "", lead_agent_id: "", lead_agent_name: "" });
   const [agents, setAgents] = useState<AgentItem[]>([]);
   const [agentError, setAgentError] = useState("");
+  const [identities, setIdentities] = useState<UserIdentity[]>([]);
+  const [identForm, setIdentForm] = useState({ platform_user_id: "", github_login: "", display_name: "", project_id: "" });
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [linkRes, bindRes, projRes, srvRes, delivRes, dispRes, planRes, derRes] = await Promise.allSettled([
+    const [linkRes, bindRes, projRes, srvRes, delivRes, dispRes, planRes, derRes, identRes] = await Promise.allSettled([
       api.listBridgeLinks(100),
       api.listBindings(),
       api.listProjects(),
@@ -51,6 +53,7 @@ export function BridgePage({ notify }: { notify: Notify }) {
       api.listDispatches(30),
       api.listPlans(30),
       api.listDerivations(30),
+      api.listIdentities(),
     ]);
     if (linkRes.status === "fulfilled") setLinks(linkRes.value);
     if (bindRes.status === "fulfilled") setBindings(bindRes.value);
@@ -60,6 +63,7 @@ export function BridgePage({ notify }: { notify: Notify }) {
     if (dispRes.status === "fulfilled") setDispatches(dispRes.value);
     if (planRes.status === "fulfilled") setPlans(planRes.value);
     if (derRes.status === "fulfilled") setDerivations(derRes.value);
+    if (identRes.status === "fulfilled") setIdentities(identRes.value);
     setError(linkRes.status === "rejected" ? (linkRes.reason instanceof ApiError ? linkRes.reason.message : "读取桥接数据失败") : "");
     setLoading(false);
   }, []);
@@ -367,6 +371,106 @@ export function BridgePage({ notify }: { notify: Notify }) {
                     <td className="tiny">{d.approval_version ? "v" + d.approval_version : "简单任务"}</td>
                     <td className="tiny mono">{d.operation_id || "—"}</td>
                     <td><span className={"chip " + (d.status === "submitted" ? "ok" : "warn")}><span className="dot" />{d.status}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <div className="card-title">蓝信用户 ↔ GitHub 身份映射</div>
+            <div className="card-sub">命中的上报人会在 Issue 正文里带 @GitHub 账号，方便追问与回执</div>
+          </div>
+          <button className="btn" onClick={() => void load()}>刷新</button>
+        </div>
+        <div className="card-body">
+          <div className="form-grid">
+            <div className="field">
+              <label>蓝信用户 ID</label>
+              <input value={identForm.platform_user_id} placeholder="如 u-10293" onChange={(e) => setIdentForm((p) => ({ ...p, platform_user_id: e.target.value }))} />
+            </div>
+            <div className="field">
+              <label>GitHub 账号</label>
+              <input value={identForm.github_login} placeholder="alice 或 @alice" onChange={(e) => setIdentForm((p) => ({ ...p, github_login: e.target.value }))} />
+            </div>
+            <div className="field">
+              <label>显示名（可选）</label>
+              <input value={identForm.display_name} placeholder="张三" onChange={(e) => setIdentForm((p) => ({ ...p, display_name: e.target.value }))} />
+            </div>
+            <div className="field">
+              <label>项目（可选）</label>
+              <select value={identForm.project_id} onChange={(e) => setIdentForm((p) => ({ ...p, project_id: e.target.value }))}>
+                <option value="">全局映射</option>
+                {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
+            <button
+              className="btn primary"
+              disabled={busy === "identity"}
+              onClick={async () => {
+                if (!identForm.platform_user_id.trim() || !identForm.github_login.trim()) {
+                  notify("蓝信用户 ID 与 GitHub 账号必填", "error");
+                  return;
+                }
+                setBusy("identity");
+                try {
+                  await api.upsertIdentity({
+                    platform: "lanxin",
+                    platform_user_id: identForm.platform_user_id.trim(),
+                    github_login: identForm.github_login.trim(),
+                    display_name: identForm.display_name.trim() || undefined,
+                    project_id: identForm.project_id || null,
+                  });
+                  notify("身份映射已保存");
+                  setIdentForm({ platform_user_id: "", github_login: "", display_name: "", project_id: "" });
+                  await load();
+                } catch (err) {
+                  notify(err instanceof ApiError ? err.message : "保存失败", "error");
+                } finally {
+                  setBusy("");
+                }
+              }}
+            >
+              保存映射
+            </button>
+          </div>
+        </div>
+        <div className="card-body" style={{ padding: 0 }}>
+          {identities.length === 0 ? (
+            <div className="empty" style={{ padding: "20px 16px" }}><div className="tiny">还没有映射；未命中时 Issue 正文不带 @账号</div></div>
+          ) : (
+            <table className="table">
+              <thead><tr><th>渠道用户</th><th>GitHub</th><th>显示名</th><th>作用域</th><th>状态</th><th></th></tr></thead>
+              <tbody>
+                {identities.map((it) => (
+                  <tr key={it.id}>
+                    <td className="mono tiny">{it.platform} · {it.platform_user_id}</td>
+                    <td className="mono tiny">@{it.github_login}</td>
+                    <td className="tiny">{it.display_name || "—"}</td>
+                    <td className="tiny">{it.project_id ? (projects.find((p) => p.id === it.project_id)?.name ?? it.project_id) : "全局"}</td>
+                    <td>{it.enabled ? <span className="chip ok"><span className="dot" />启用</span> : <span className="chip">停用</span>}</td>
+                    <td className="tiny" style={{ textAlign: "right" }}>
+                      <button
+                        className="btn small"
+                        onClick={async () => {
+                          try {
+                            await api.deleteIdentity(it.id);
+                            notify("已删除映射");
+                            await load();
+                          } catch (err) {
+                            notify(err instanceof ApiError ? err.message : "删除失败", "error");
+                          }
+                        }}
+                      >
+                        删除
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

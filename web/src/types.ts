@@ -331,3 +331,15 @@ export type RepoOp = {
   error: string;
   created_at: string;
 };
+
+export type UserIdentity = {
+  id: number;
+  platform: string;
+  platform_user_id: string;
+  project_id: string | null;
+  github_login: string;
+  display_name: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+};

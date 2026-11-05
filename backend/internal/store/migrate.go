@@ -13,6 +13,27 @@ type migration struct {
 
 var migrations = []migration{
 	{
+		version: 16,
+		name:    "user_identities",
+		sql: `
+CREATE TABLE IF NOT EXISTS user_identities (
+    id               BIGSERIAL PRIMARY KEY,
+    platform         TEXT NOT NULL,
+    platform_user_id TEXT NOT NULL,
+    project_id       TEXT NOT NULL DEFAULT '',
+    github_login     TEXT NOT NULL DEFAULT '',
+    display_name     TEXT NOT NULL DEFAULT '',
+    enabled          BOOLEAN NOT NULL DEFAULT true,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS user_identities_uniq
+    ON user_identities (platform, platform_user_id, project_id);
+CREATE INDEX IF NOT EXISTS user_identities_lookup_idx
+    ON user_identities (platform, platform_user_id);
+`,
+	}, {
 		version: 15,
 		name:    "repo_ops",
 		sql: `

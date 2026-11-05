@@ -90,7 +90,15 @@ func (s *Service) HandleMessage(ctx context.Context, msg Message) (*store.Bridge
 	if err != nil {
 		return nil, false, err
 	}
-	issue, err := client.CreateIssue(ctx, repo, msg.Title, msg.Body, labels)
+	body := msg.Body
+	if ident, ierr := s.store.FindUserIdentity(ctx, msg.Channel, msg.UserID, projectID); ierr == nil && ident != nil {
+		name := strings.TrimSpace(ident.DisplayName)
+		if name == "" {
+			name = ident.GitHubLogin
+		}
+		body = fmt.Sprintf("> 上报人：%s（%s %s，GitHub @%s）\n\n%s", name, msg.Channel, msg.UserID, ident.GitHubLogin, body)
+	}
+	issue, err := client.CreateIssue(ctx, repo, msg.Title, body, labels)
 	if err != nil {
 		return nil, false, err
 	}

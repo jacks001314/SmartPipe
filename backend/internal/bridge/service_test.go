@@ -24,6 +24,7 @@ type testEnv struct {
 	creates  int32
 	comments []string
 	labels   []string
+	bodies   []string
 }
 
 func newEnv(t *testing.T) *testEnv {
@@ -50,6 +51,7 @@ func newEnv(t *testing.T) *testEnv {
 	_, _ = st.DB().Exec("DELETE FROM bridge_links")
 	_, _ = st.DB().Exec("DELETE FROM project_bindings")
 	_, _ = st.DB().Exec("DELETE FROM webhook_deliveries")
+	_, _ = st.DB().Exec("DELETE FROM user_identities")
 	_, _ = st.DB().Exec("DELETE FROM credentials")
 	_, _ = st.DB().Exec("DELETE FROM projects")
 	t.Cleanup(func() {
@@ -59,6 +61,7 @@ func newEnv(t *testing.T) *testEnv {
 		_, _ = st.DB().Exec("DELETE FROM bridge_links")
 		_, _ = st.DB().Exec("DELETE FROM project_bindings")
 		_, _ = st.DB().Exec("DELETE FROM webhook_deliveries")
+		_, _ = st.DB().Exec("DELETE FROM user_identities")
 		_, _ = st.DB().Exec("DELETE FROM credentials")
 		_, _ = st.DB().Exec("DELETE FROM projects")
 		_ = st.Close()
@@ -90,6 +93,9 @@ func newEnv(t *testing.T) *testEnv {
 			atomic.AddInt32(&env.creates, 1)
 			var payload map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&payload)
+			if body, ok := payload["body"].(string); ok {
+				env.bodies = append(env.bodies, body)
+			}
 			w.WriteHeader(http.StatusCreated)
 			fmt.Fprintf(w, `{"number":101,"html_url":"https://github.com/example/core/issues/101","title":%q}`, payload["title"])
 			return
@@ -380,5 +386,44 @@ func TestBotNotifierHTTP(t *testing.T) {
 	}
 	if !strings.Contains(gotBody, "grp-1") || !strings.Contains(gotBody, "chatType") {
 		t.Fatalf("body = %s", gotBody)
+	}
+}
+
+func TestHandleMessageAddsReporterAttribution(t *testing.T) {
+	env := newEnv(t)
+	project := env.project(t, true)
+	if _, err := env.store.UpsertUserIdentity(context.Background(), store.UserIdentity{
+		Platform: "lanxin", PlatformUserID: "u-42", GitHubLogin: "@alice",
+		DisplayName: "爱丽丝", Enabled: true,
+	}); err != nil {
+		t.Fatalf("upsert identity: %v", err)
+	}
+	svc := NewService(env.store, nil)
+	msg := Message{MessageID: "msg-attr", ChatID: "grp-1", UserID: "u-42", Title: "登录崩溃", Body: "点登录就崩", ProjectID: project.ID}
+	if _, _, err := svc.HandleMessage(context.Background(), msg); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(env.bodies) != 1 {
+		t.Fatalf("issue bodies = %d", len(env.bodies))
+	}
+	body := env.bodies[0]
+	if !strings.Contains(body, "@alice") || !strings.Contains(body, "爱丽丝") || !strings.Contains(body, "u-42") {
+		t.Fatalf("attribution missing: %s", body)
+	}
+	if !strings.Contains(body, "点登录就崩") {
+		t.Fatalf("original body lost: %s", body)
+	}
+}
+
+func TestHandleMessageWithoutIdentityKeepsBody(t *testing.T) {
+	env := newEnv(t)
+	project := env.project(t, true)
+	svc := NewService(env.store, nil)
+	msg := Message{MessageID: "msg-plain", UserID: "u-unknown", Title: "崩溃", Body: "原始描述", ProjectID: project.ID}
+	if _, _, err := svc.HandleMessage(context.Background(), msg); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(env.bodies) != 1 || env.bodies[0] != "原始描述" {
+		t.Fatalf("body = %v", env.bodies)
 	}
 }
