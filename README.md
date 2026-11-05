@@ -70,6 +70,16 @@ sudo ./scripts/verify-deploy.sh --mode docker --install-dir /opt/smartpipe
 - 所有外部凭据由配置管理台托管，Agent 只拿到 `project_id`。
 - MCP 收敛为一个 smartpipe-mcp，内部按 GitHub/issue/patch/verify/release 分组。
 
+## Codex 自动开发执行器
+
+`backend/cmd/codex-runner` 在已检出的工作区里跑一轮 Codex 开发任务，产出 unified diff，并可立即交给补丁门禁在干净副本上验证。
+
+```bash
+codex-runner -work-dir <workspace> -prompt-file task.md -out issue.patch -verify-repo <repo> -base <commit>
+```
+
+`-prompt-file` 可用 `-prompt` 内联代替；`-verify-repo` 与 `-base` 配合时会应用补丁并执行 `smartpipe.yaml` 的必过命令。执行器不持有 Git 凭据，提交与推送仍走服务端门禁。
+
 ## 本地开发原型（早期）
 
 ```powershell
