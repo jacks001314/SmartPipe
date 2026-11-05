@@ -1,10 +1,11 @@
-﻿# 桥接冒烟：蓝信消息 -> GitHub Issue（可用本地假 GitHub），并验证去重
+# 桥接冒烟：蓝信消息 -> GitHub Issue（可用本地假 GitHub），并验证去重
 param(
     [string]$Base = "http://127.0.0.1:8092",
     [string]$BridgeBase = "http://127.0.0.1:8090",
     [string]$Token = "dev-admin-token",
     [string]$BridgeToken = "dev-bridge-token",
     [string]$FakeGitHub = "http://127.0.0.1:9099",
+    [string]$FakeBot = "http://127.0.0.1:9091",
     [string]$WebhookSecret = "local-webhook-secret-123",
     [string]$AppServerID = "",
     [string]$AppServerAddr = "http://127.0.0.1:8766",
@@ -44,6 +45,24 @@ if (-not $LeadAgentID -and $first.link.dispatch_status -ne "unbound") { throw ("
 $second = Invoke-RestMethod -Method Post -Uri "$BridgeBase/bridge/messages" -Headers (@{ "X-Bridge-Token" = $BridgeToken }) -ContentType "application/json" -Body $msg
 Write-Output ("second: created=" + $second.created + " issue=" + $second.link.issue_number)
 if ($second.created) { throw "duplicate message created a second issue" }
+
+# 2b. 建单回执必须回到原会话（假 bot 记录 /internal/reply）
+$receipt = $null
+for ($i = 0; $i -lt 30; $i++) {
+  $all = @((Invoke-RestMethod -Uri "$FakeBot/__replies").replies)
+  $hit = @($all | Where-Object { $_.payload.refMsgId -eq ("msg-" + $stamp) })
+  if ($hit.Count -ge 1) { $receipt = $hit[0]; break }
+  Start-Sleep -Milliseconds 200
+}
+if ($null -eq $receipt) { throw ("no lanxin receipt for msg-" + $stamp) }
+$allReceipts = @((Invoke-RestMethod -Uri "$FakeBot/__replies").replies)
+$mine = @($allReceipts | Where-Object { $_.payload.refMsgId -eq ("msg-" + $stamp) })
+if ($mine.Count -ne 1) { throw ("expected exactly 1 receipt, got " + $mine.Count) }
+$expectIssue = "Issue #" + $first.link.issue_number
+if ($receipt.payload.text -notmatch [regex]::Escape($expectIssue)) { throw ("receipt missing " + $expectIssue + ": " + $receipt.payload.text) }
+if ($receipt.payload.text -notmatch [regex]::Escape([string]$first.link.issue_url)) { throw ("receipt missing issue url: " + $receipt.payload.text) }
+if ($receipt.payload.targetId -ne "grp-bridge") { throw ("receipt went to wrong target: " + $receipt.payload.targetId) }
+Write-Output ("receipt: refMsgId=msg-" + $stamp + " issue=#" + $first.link.issue_number + " target=" + $receipt.payload.targetId)
 
 $issues = @((Invoke-RestMethod -Uri "$FakeGitHub/__state").issues)
 $delta = $issues.Count - $beforeCount
