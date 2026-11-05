@@ -93,6 +93,7 @@ try {
     "bot" = "./cmd/bot"
     "botdiag" = "./cmd/botdiag"
     "codex-runner" = "./cmd/codex-runner"
+    "codex-pipeline" = "./cmd/codex-pipeline"
   }
   $Ldflags = "-s -w -X main.version=$Version"
   $Go = (Get-Command go -ErrorAction Stop).Source

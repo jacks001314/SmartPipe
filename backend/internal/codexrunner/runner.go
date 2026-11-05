@@ -9,6 +9,7 @@ package codexrunner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	codex "github.com/pmenglund/codex-sdk-go"
+	"github.com/pmenglund/codex-sdk-go/protocol"
 )
 
 // 默认值：一次开发任务最多 30 分钟，effort 交给模型默认。
@@ -123,31 +125,107 @@ func Run(ctx context.Context, spec Spec) (*Result, error) {
 	if effort := strings.TrimSpace(spec.Effort); effort != "" {
 		turnOpts.Effort = codex.ReasoningEffort(effort)
 	}
-	turn, err := thread.Run(runCtx, spec.Prompt, turnOpts)
+
+	// 用流式接口而不是 thread.Run：Run 会把每条通知都攒进内存，命令输出一大
+	// （例如跑测试）就会把 SDK 的 64 条通知缓冲撑爆，报 notification overflow。
+	// 这里持续消费、只保留最终消息，既不掉队也不吃内存。
+	stream, err := thread.RunStreamed(runCtx, []codex.Input{codex.TextInput(spec.Prompt)}, turnOpts)
 	if err != nil {
-		out := &Result{Status: "error", DurationMS: time.Since(started).Milliseconds(), TimedOut: runCtx.Err() == context.DeadlineExceeded}
-		return out, fmt.Errorf("codexrunner: run turn: %w", err)
+		return &Result{Status: "error", DurationMS: time.Since(started).Milliseconds()}, fmt.Errorf("codexrunner: start turn: %w", err)
 	}
-	result := &Result{
-		Status:     turn.Status,
-		TurnID:     turn.TurnID,
-		ThreadID:   thread.ID(),
-		ItemCount:  len(turn.Items),
-		DurationMS: time.Since(started).Milliseconds(),
+	defer stream.Close()
+
+	result := &Result{ThreadID: thread.ID()}
+	var finalText string
+	var turnErrMsg string
+	done := false
+	for !done {
+		note, err := stream.Next(runCtx)
+		if err != nil {
+			result.Status = "error"
+			result.DurationMS = time.Since(started).Milliseconds()
+			result.TimedOut = runCtx.Err() == context.DeadlineExceeded
+			result.FinalResponse = finalText
+			result.ResponseBytes = len(finalText)
+			return result, fmt.Errorf("codexrunner: read turn events: %w", err)
+		}
+		switch value := note.Params.(type) {
+		case protocol.ItemCompletedNotification:
+			if raw := value.Item.RawJSON(); len(raw) > 0 {
+				var item struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				}
+				if json.Unmarshal(raw, &item) == nil && item.Type == "agentMessage" && strings.TrimSpace(item.Text) != "" {
+					finalText = item.Text
+					result.ItemCount++
+				}
+			}
+		case protocol.TurnNotification:
+			if value.Turn.ID != "" {
+				result.TurnID = value.Turn.ID
+			}
+			if value.Turn.Status != "" {
+				result.Status = string(value.Turn.Status)
+			}
+		}
+		switch note.Method {
+		case "turn/failed":
+			turnErrMsg = failureMessage(note.Raw)
+			done = true
+		case "turn/completed":
+			done = true
+		}
 	}
-	if turn.ErrorMessage != "" {
-		result.Status = "error"
-		result.FinalResponse = strings.TrimSpace(turn.ErrorMessage)
-		result.ResponseBytes = len(result.FinalResponse)
-		return result, fmt.Errorf("codexrunner: turn failed: %s", turn.ErrorMessage)
-	}
+
+	result.DurationMS = time.Since(started).Milliseconds()
+	result.TimedOut = runCtx.Err() == context.DeadlineExceeded
+	result.ResponseBytes = len(finalText)
 	if spec.KeepResponse {
-		result.FinalResponse = turn.FinalResponse
-	} else {
-		result.FinalResponse = ""
+		result.FinalResponse = finalText
 	}
-	result.ResponseBytes = len(turn.FinalResponse)
+	if turnErrMsg != "" {
+		result.Status = "error"
+		result.FinalResponse = strings.TrimSpace(turnErrMsg)
+		return result, fmt.Errorf("codexrunner: turn failed: %s", turnErrMsg)
+	}
+	if result.Status == "" {
+		result.Status = "completed"
+	}
 	return result, nil
+}
+
+// failureMessage 从 turn/failed 通知里取出可读错误。
+func failureMessage(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return "turn failed"
+	}
+	var payload struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+		Turn struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		} `json:"turn"`
+	}
+	if err := json.Unmarshal(raw, &payload); err == nil {
+		if msg := strings.TrimSpace(payload.Error.Message); msg != "" {
+			return msg
+		}
+		if msg := strings.TrimSpace(payload.Turn.Error.Message); msg != "" {
+			return msg
+		}
+	}
+	return truncate(string(raw), 600)
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 // Diff 把工作区当前改动整理成 unified diff：先 git add -A（按 .gitignore 过滤），

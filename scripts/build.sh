@@ -90,7 +90,8 @@ LDFLAGS="-s -w -X main.version=$VERSION"
     "mcp-gateway ./cmd/mcp-gateway" \
     "bot ./cmd/bot" \
     "botdiag ./cmd/botdiag" \
-    "codex-runner ./cmd/codex-runner"; do
+    "codex-runner ./cmd/codex-runner" \
+    "codex-pipeline ./cmd/codex-pipeline"; do
     set -- $pair
     go build -trimpath -ldflags "$LDFLAGS" -o "$OUT/bin/$1$EXT" "$2"
   done

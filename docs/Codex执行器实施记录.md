@@ -109,3 +109,36 @@ Docker 镜像目前没有内置 codex CLI；要用容器跑，需要自己装
    跑一轮 → 拿补丁 → 调 `verify.patch` → 提交/推送 → 回写 Issue 与蓝信。
 2. 在真实凭据下跑通一次完整链路，记录 Issue 编号、补丁哈希与验证报告。
 3. 观察稳定后再决定是否引入 Syntropy 的 Agent 团队替换或并行于这条执行路径。
+## 8. 完整链路实测（Issue #4）
+
+整条链路已经用真实 Issue 跑通：
+
+`gh issue create` 建 Issue #4（`docs: README 增加 codex-runner 用法说明`）→
+`codex-pipeline -issue 4 -project prj_a21c063d -apply`，结果：
+
+| 阶段 | 证据 |
+|---|---|
+| 读 Issue | #4，标题与正文取到 |
+| 工作区 | 克隆到临时目录，基线 `5d448a262acf` |
+| Codex | `deepseek-v4-flash`，`status=completed`，963 字节补丁，仅 `README.md` |
+| 门禁 | `build` 命令通过，`patch_hash=sha256:7ac559e5…` |
+| 提交 | `f3188c46f59427acae37685c3c554f3be41f2b2b`，分支 `agent/issue-4` |
+| 推送 | GitHub 上 `agent/issue-4` 指向该 commit |
+| 回写 | Issue #4 出现流水线评论（模型、分支、提交、改动文件、摘要） |
+
+模型实际改动：`README.md` +10 行，新增「Codex 自动开发执行器」小节，包含
+`codex-runner -work-dir ... -verify-repo ... -base ...` 命令示例与凭据边界说明。
+
+跑通过程中修掉三个真实问题：
+
+1. **通知缓冲溢出**：SDK 的 `thread.Run` 会把每条通知都留在内存，跑构建测试时
+   撑爆 64 条缓冲报 `notification overflow`。改成 `RunStreamed` + 持续消费，
+   只保留最终消息，`TestRunLiveCodex` 复跑通过。
+2. **提交端要本地副本**：`/admin/commits` 的 `repo` 必须是本地工作副本，传仓库
+   URL 会报 `not a git worktree`。新增 `-commit-repo`，默认用本次工作区。
+3. **提交端要求干净**：服务端自己打补丁，工作区带着 Codex 的改动会被
+   `worktree is dirty` 拒绝。提交前先 `git reset --hard <base>` 加 `git clean -fd`。
+
+已知限制：`codex-pipeline` 目前与服务端在同一台机器上运行（提交与推送需要共享
+本地工作副本）。若要多机部署，需要让 admin-api 侧持有一份对应的工作副本，
+或把 commit/push 改成“服务端自行 clone”的形态。
