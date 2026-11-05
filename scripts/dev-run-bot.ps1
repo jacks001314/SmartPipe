@@ -7,7 +7,7 @@ $env:BOT_HTTP_ADDR = ":8093"
 $env:INTERNAL_TOKEN = "dev-internal-token"
 $env:CRASH_INGEST_URL = "http://127.0.0.1:8090/ingest/crash"
 $env:CRASH_INGEST_TOKEN = "dev-crash-token"
-$env:CRASH_PROJECT_ID = "prj_5148b505"
+# 不写死项目：bridge 会按蓝信群（chat_id）反查配置台里的项目映射
 $exe = Join-Path $root "backend\bin\bot.exe"
 if (-not (Test-Path -LiteralPath $exe)) { throw "missing backend/bin/bot.exe" }
 $log = Join-Path $root ".dev\bot.log"

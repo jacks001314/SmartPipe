@@ -14,6 +14,17 @@ function Send-Event($payload) {
 function LastReply() { return (Invoke-RestMethod -Uri ($lanxin + "/__messages")).sent[-1] }
 function ReplyText($r) { return [string]$r.payload.msgData.formatText.text }
 
+# 自备项目：绑定 grp-release，让 bridge 按群反查到真实项目
+$api = "http://127.0.0.1:8092/admin"
+$gh = "http://127.0.0.1:9099"
+$adminHeaders = @{ Authorization = "Bearer dev-admin-token" }
+$stampG = [guid]::NewGuid().ToString("N").Substring(0, 6)
+$groupID = "grp-bot-" + $stampG
+$proj = (Invoke-RestMethod -Method Post -Uri ($api + "/projects") -Headers $adminHeaders -ContentType "application/json" -Body (@{
+  name = ("bot-crash-" + $stampG); github_repo_url = "https://github.com/example/release"; github_issue_repo = "example/release"
+  github_default_branch = "master"; labels_prefix = "smartpipe"; bluex_group_ids = $groupID; enabled = $true
+} | ConvertTo-Json)).data
+Invoke-RestMethod -Method Post -Uri ($api + "/credentials") -Headers $adminHeaders -ContentType "application/json" -Body (@{ project_id = $proj.id; kind = "github_pat"; name = "fake-gh"; value = "fake-token"; metadata = @{ api_base = $gh } } | ConvertTo-Json -Depth 4) | Out-Null
 $null = & curl.exe -s -X POST ($lanxin + "/__reset")
 $mediaDir = Join-Path $root ".dev\lanxin-media"
 New-Item -ItemType Directory -Force -Path $mediaDir | Out-Null
@@ -36,7 +47,7 @@ function Event($msgID, $mediaID) {
     type = "bot_group_message"
     data = @{
       msgType = "text"; chatType = "group"; from = "u-10293"; senderName = "smoke"; msgId = $msgID
-      groupId = "grp-release"
+      groupId = $groupID
       msgData = @{ text = @{ content = ""; mediaType = 3; mediaIds = @($mediaID) } }
       reminder = @{ isAtMe = $true }
     }

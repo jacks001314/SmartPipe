@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -202,5 +203,39 @@ func TestAuditAppendAndList(t *testing.T) {
 	}
 	if entries[0].TraceID == "" {
 		t.Log("trace id empty (allowed for manual append)")
+	}
+}
+
+// 蓝信群是入口，配置台里一个项目可以绑多个群；反查必须按逗号分词、忽略空白与大小写。
+func TestFindProjectByGroup(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	p, err := s.CreateProject(ctx, &Project{
+		Name:            "group-lookup",
+		GitHubRepoURL:   "https://github.com/example/group",
+		GitHubIssueRepo: "example/group",
+		BluexGroupIDs:   " grp-alpha , GRP-Beta ,,grp-gamma",
+		Enabled:         true,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	for _, group := range []string{"grp-alpha", "grp-beta", "grp-gamma", " GRP-ALPHA "} {
+		got, err := s.FindProjectByGroup(ctx, group)
+		if err != nil {
+			t.Fatalf("lookup %q: %v", group, err)
+		}
+		if got.ID != p.ID {
+			t.Fatalf("lookup %q = %s, want %s", group, got.ID, p.ID)
+		}
+	}
+
+	if _, err := s.FindProjectByGroup(ctx, "grp-missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing group should be ErrNotFound, got %v", err)
+	}
+	if _, err := s.FindProjectByGroup(ctx, ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("empty group should be ErrNotFound, got %v", err)
 	}
 }

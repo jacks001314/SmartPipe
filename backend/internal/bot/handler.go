@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"strings"
 	"context"
 	"log"
 	"sync"
@@ -94,7 +95,11 @@ func (h *Handler) handleMessage(ctx context.Context, m *lanxin.InboundMessage) e
 		if h.crash == nil {
 			return h.reply(ctx, m, "当前机器人未开启一键上报，请把问题描述发给 pipeline-lead。")
 		}
-		res, msg, err := h.crash.HandleAttachment(ctx, mediaType, ids[0])
+		chatID := m.GroupID
+		if strings.TrimSpace(chatID) == "" {
+			chatID = m.From
+		}
+		res, msg, err := h.crash.HandleAttachment(ctx, mediaType, ids[0], chatID)
 		if replyErr := h.reply(ctx, m, msg); replyErr != nil {
 			log.Printf("[bot] crash reply failed: %v", replyErr)
 		}

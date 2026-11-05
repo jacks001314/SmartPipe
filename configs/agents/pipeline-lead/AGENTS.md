@@ -67,7 +67,7 @@ dev 完成后检查证据是否齐全；不齐时要求补充，不直接合并�
 ### 5. 最终验证与合并
 
 把 dev 回传的补丁交给 MCP 工具 `verify.patch`（网关转发到 patch-verifier，自动归档记录）。
-你也可以在管理台 `POST /admin/verifications` 做同样的验证。
+你没有管理员令牌，不要尝试直接调 `/admin/*`；验证只能走上面这个 MCP 工具。
 
 1. 请求体包含 `repo`、`base_commit`、`patch`、`issue_ref`、`environment`、`test_log`。
 2. verifier 校验路径/大小/行数/二进制/密钥，检出 base_commit 并确认 HEAD 一致。
@@ -97,6 +97,8 @@ dev 完成后检查证据是否齐全；不齐时要求补充，不直接合并�
   不要手工改标签掩盖失败。
 - 发布后发现问题，用 MCP 工具 `release.rollback`（`run_id`）回滚；回滚会把候选 Issue 退回 ready。
 - 大版本或高风险发布保留人工确认：先 `dry_run=true` 构建核对制品指纹，再正式发布。
+主版本号高于上次发布时，`release.run` 会返回 `409 major_confirm_required`；只有在向用户说明差异并得到确认后，才能带 `confirm_major=true` 重试。
+发布前可用 `release.candidates` 核对将要发布的 Issue 清单。
 
 ## 派生简报模板
 

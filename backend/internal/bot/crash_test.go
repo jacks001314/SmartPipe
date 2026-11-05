@@ -42,7 +42,7 @@ func TestCrashIntakeRejectsOversizedAttachment(t *testing.T) {
 
 	media := &fakeMedia{data: []byte(strings.Repeat("x", 2048))}
 	ci := &CrashIntake{IngestURL: srv.URL, MaxBytes: 1024, Media: media}
-	res, msg, err := ci.HandleAttachment(context.Background(), lanxin.MediaFile, "m-1")
+	res, msg, err := ci.HandleAttachment(context.Background(), lanxin.MediaFile, "m-1", "grp-test")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -63,11 +63,11 @@ func TestCrashIntakeRejectsInvalidJSONAndMissingFields(t *testing.T) {
 	}))
 	defer srv.Close()
 	ci := &CrashIntake{IngestURL: srv.URL, Media: &fakeMedia{data: []byte("not-json")}}
-	if _, msg, _ := ci.HandleAttachment(context.Background(), lanxin.MediaFile, "m-1"); !strings.Contains(msg, "不是合法的 crash_bundle") {
+	if _, msg, _ := ci.HandleAttachment(context.Background(), lanxin.MediaFile, "m-1", "grp-test"); !strings.Contains(msg, "不是合法的 crash_bundle") {
 		t.Fatalf("message = %s", msg)
 	}
 	ci.Media = &fakeMedia{data: []byte(`{"app":"x"}`)}
-	if _, msg, _ := ci.HandleAttachment(context.Background(), lanxin.MediaFile, "m-1"); !strings.Contains(msg, "exception.type") {
+	if _, msg, _ := ci.HandleAttachment(context.Background(), lanxin.MediaFile, "m-1", "grp-test"); !strings.Contains(msg, "exception.type") {
 		t.Fatalf("message = %s", msg)
 	}
 }
@@ -86,7 +86,7 @@ func TestCrashIntakePostsBundleAndSummarises(t *testing.T) {
 
 	media := &fakeMedia{data: validBundle()}
 	ci := &CrashIntake{IngestURL: srv.URL, Token: "tok-ingest", ProjectID: "prj_1", Media: media}
-	res, msg, err := ci.HandleAttachment(context.Background(), lanxin.MediaFile, "m-9")
+	res, msg, err := ci.HandleAttachment(context.Background(), lanxin.MediaFile, "m-9", "grp-test")
 	if err != nil {
 		t.Fatalf("handle: %v", err)
 	}

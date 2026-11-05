@@ -41,6 +41,8 @@ type ApprovalOutcome struct {
 type ApprovalService struct {
 	Store     *store.Store
 	ClientFor func(ctx context.Context, projectID *string) (*github.Client, error)
+	// GroupNotify 把方案登记与批准两个里程碑同步到项目绑定的蓝信群；nil 表示不通知。
+	GroupNotify Notifier
 	// NotifyLead 在批准后通知 pipeline-lead；nil 表示只记录。
 	NotifyLead func(ctx context.Context, projectID, text string) error
 }
@@ -96,6 +98,7 @@ func (s *ApprovalService) HandleComment(ctx context.Context, ev CommentEvent) (A
 		msg := fmt.Sprintf("方案 v%d 已登记，内容指纹 `%s`。\n\n请维护者审阅后评论 `/approve v%d`；方案内容再修改会自动生成新版本，旧批准不生效。",
 			plan.Version, shortHash(hash), plan.Version)
 		s.reply(ctx, client, repo, ev.IssueNumber, msg)
+		s.notifyGroups(ctx, project, planRegisteredText(ev.IssueNumber, plan.Version, issueURL(ev, repo)))
 		_ = client.AddLabels(ctx, repo, ev.IssueNumber, []string{"needs-approval"})
 		_ = s.Store.AppendAudit(ctx, store.AuditEntry{
 			Actor: ev.User, Action: "issue.plan.create", TargetType: "issue",
@@ -143,6 +146,7 @@ func (s *ApprovalService) HandleComment(ctx context.Context, ev CommentEvent) (A
 			fmt.Sprintf("✅ 方案 v%d 已批准（审批人 @%s，指纹 `%s`）。lead 现在可以开始实现，并在完成后回到本 Issue 汇报。",
 				version, approval.Approver, shortHash(actual)))
 		_ = client.AddLabels(ctx, repo, ev.IssueNumber, []string{"approved"})
+		s.notifyGroups(ctx, project, planApprovedText(ev.IssueNumber, version, approval.Approver, issueURL(ev, repo)))
 		_ = s.Store.AppendAudit(ctx, store.AuditEntry{
 			Actor: ev.User, Action: "issue.plan.approve", TargetType: "issue",
 			TargetID: fmt.Sprintf("%s#%d", repo, ev.IssueNumber), ProjectID: projectIDPtr(project),
@@ -160,6 +164,29 @@ func (s *ApprovalService) HandleComment(ctx context.Context, ev CommentEvent) (A
 	return ApprovalOutcome{Action: "ignored"}, nil
 }
 
+
+// planRegisteredText 与 planApprovedText 是发给蓝信群的里程碑文本。
+func planRegisteredText(issue int, version int, url string) string {
+	return fmt.Sprintf("【SmartPipe】Issue #%d 已提出方案 v%d，等待维护者评论 /approve v%d。\n%s", issue, version, version, url)
+}
+
+func planApprovedText(issue int, version int, approver, url string) string {
+	return fmt.Sprintf("【SmartPipe】Issue #%d 方案 v%d 已获 @%s 批准，开始开发。\n%s", issue, version, approver, url)
+}
+
+// notifyGroups 按项目绑定的群发送里程碑消息；发送失败不影响主流程。
+func (s *ApprovalService) notifyGroups(ctx context.Context, project *store.Project, text string) {
+	if s.GroupNotify == nil || project == nil {
+		return
+	}
+	for _, gid := range strings.Split(project.BluexGroupIDs, ",") {
+		gid = strings.TrimSpace(gid)
+		if gid == "" {
+			continue
+		}
+		_ = s.GroupNotify.Reply(ctx, "group", gid, "", text)
+	}
+}
 func (s *ApprovalService) clientForRepo(ctx context.Context, repo string) (*github.Client, *store.Project, error) {
 	projects, err := s.Store.ListProjects(ctx)
 	if err != nil {

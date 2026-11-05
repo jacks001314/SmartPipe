@@ -163,3 +163,24 @@ func isUniqueViolation(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "duplicate key value") || strings.Contains(msg, "SQLSTATE 23505")
 }
+
+// FindProjectByGroup 按蓝信群/会话 ID 反查项目：bluex_group_ids 是逗号分隔的列表。
+// 只在配置里精确匹配；找不到时返回 ErrNotFound，调用方决定是否回落到默认项目。
+func (s *Store) FindProjectByGroup(ctx context.Context, groupID string) (*Project, error) {
+	target := strings.TrimSpace(groupID)
+	if target == "" {
+		return nil, ErrNotFound
+	}
+	projects, err := s.ListProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range projects {
+		for _, raw := range strings.Split(projects[i].BluexGroupIDs, ",") {
+			if strings.EqualFold(strings.TrimSpace(raw), target) {
+				return &projects[i], nil
+			}
+		}
+	}
+	return nil, ErrNotFound
+}

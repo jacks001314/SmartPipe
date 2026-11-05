@@ -5,7 +5,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $api = "http://127.0.0.1:8092/admin"
 $mcp = "http://127.0.0.1:8097/mcp"
 $gh = "http://127.0.0.1:9099"
-$project = "prj_5148b505"
+$projectName = "release-demo"
 $adminHeaders = @{ Authorization = "Bearer dev-admin-token" }
 
 function PostJson($url, $payload, $headers) {
@@ -30,6 +30,23 @@ function Tool($token, $name, $arguments) {
   if ($r.Status -ne 200) { throw ("tools/call HTTP " + $r.Status + ": " + $r.Text) }
   return $r.Body.result
 }
+
+# 0) 自备项目与假 GitHub 凭据：不依赖库里长期存在的固定 ID
+$projects = (Invoke-RestMethod -Uri ($api + "/projects") -Headers $adminHeaders).data
+$proj = $projects | Where-Object { $_.name -eq $projectName } | Select-Object -First 1
+if (-not $proj) {
+  $proj = (PostJson ($api + "/projects") @{
+    name = $projectName; github_repo_url = "https://github.com/example/release"; github_issue_repo = "example/release"
+    github_default_branch = "master"; labels_prefix = "smartpipe"; bluex_group_ids = "grp-release"; enabled = $true
+  } $adminHeaders).Body.data
+}
+$creds = (Invoke-RestMethod -Uri ($api + "/credentials") -Headers $adminHeaders).data
+$hasCred = @($creds | Where-Object { $_.project_id -eq $proj.id })
+if ($hasCred.Count -eq 0) {
+  $null = PostJson ($api + "/credentials") @{ project_id = $proj.id; kind = "github_pat"; name = "fake-gh"; value = "fake-token"; metadata = @{ api_base = $gh } } $adminHeaders
+}
+$project = $proj.id
+$baseCommit = (& git -C (Join-Path $root ".dev\sandbox-repo") rev-parse HEAD).Trim()
 
 # 1) 管理员签发 lead 令牌
 $created = PostJson ($api + "/agent-tokens") @{ project_id = $project; role = "lead"; name = "smoke-lead" } $adminHeaders
@@ -71,7 +88,7 @@ Write-Output 'STEP 6 verify.patch'
 $patch = [string][IO.File]::ReadAllText((Join-Path $root ".dev\patch-multiply.diff"), [Text.UTF8Encoding]::new($false))
 $verify = Tool $leadToken "verify.patch" @{
   issue_ref = "example/release#101"; repo = (Join-Path $root ".dev\sandbox-repo")
-  base_commit = "ddac226063b9631e05dc752dc319e73a5f1683c5"; patch = $patch; author = "mcp-smoke"
+  base_commit = $baseCommit; patch = $patch; author = "mcp-smoke"
 }
 $verifyText = $verify.content[0].text
 try { $verifyBody = $verifyText | ConvertFrom-Json } catch { throw ("verify.patch 返回非 JSON: " + $verifyText.Substring(0, [Math]::Min(400, $verifyText.Length))) }

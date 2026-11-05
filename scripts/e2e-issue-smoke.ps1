@@ -8,6 +8,7 @@ param(
   [string]$BridgeBase = "http://127.0.0.1:8090",
   [string]$Mcp = "http://127.0.0.1:8097/mcp",
   [string]$FakeGitHub = "http://127.0.0.1:9099",
+  [string]$FakeBot = "http://127.0.0.1:9091",
   [string]$AdminToken = "dev-admin-token",
   [string]$BridgeToken = "dev-bridge-token",
   [string]$WebhookSecret = "local-webhook-secret-123"
@@ -96,6 +97,11 @@ function Send-Webhook([string]$event, [string]$delivery, $payload) {
   return @{ Status = [int]$code; Text = $resp }
 }
 
+function Get-LanxinReplies($base) {
+  $resp = Invoke-WebRequest -Uri ($base + "/__replies") -UseBasicParsing -TimeoutSec 30
+  $txt = Read-Utf8 $resp.RawContentStream
+  return @(($txt | ConvertFrom-Json).replies)
+}
 function Wait-For([scriptblock]$probe, [int]$tries, [int]$sleepMs) {
   for ($i = 0; $i -lt $tries; $i++) {
     $v = & $probe
@@ -190,6 +196,15 @@ $plan = Wait-For {
 } 50 300
 if (-not $plan) { throw "plan not recorded" }
 Write-Output ("[5] plan v" + $plan.version + " hash=" + $plan.content_hash)
+# 5b. 方案登记要同步到项目绑定的蓝信群
+$planNotice = Wait-For {
+  $all = Get-LanxinReplies $FakeBot
+  $hit = @($all | Where-Object { $_.payload.targetId -eq "grp-release" -and $_.payload.text -match "方案 v1" })
+  if ($hit.Count -gt 0) { return $true }
+  return $false
+} 50 300
+if (-not $planNotice) { throw "no lanxin group notice for plan v1" }
+Write-Output "[5b] lanxin group notified: plan v1"
 
 # 6) 有方案但没有批准：验证必须被门禁拦住
 $before = McpRaw $leadToken "verify.patch" @{ issue_ref = $issueRef; repo = $work; base_commit = $baseCommit; patch = $patch }
@@ -217,6 +232,14 @@ $approved = Wait-For {
 } 50 300
 if (-not $approved) { throw "issue not labelled approved after /approve" }
 Write-Output "[7] approved label present"
+$okNotice = Wait-For {
+  $all = Get-LanxinReplies $FakeBot
+  $hit = @($all | Where-Object { $_.payload.targetId -eq "grp-release" -and $_.payload.text -match "已获 .* 批准" })
+  if ($hit.Count -gt 0) { return $true }
+  return $false
+} 50 300
+if (-not $okNotice) { throw "no lanxin group notice for approval" }
+Write-Output "[7b] lanxin group notified: approved"
 
 # 8) 批准后同一个补丁验证通过
 $ver = McpTool $leadToken "verify.patch" @{ issue_ref = $issueRef; repo = $work; base_commit = $baseCommit; patch = $patch }

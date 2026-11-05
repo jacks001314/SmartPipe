@@ -6,7 +6,8 @@ $bridge = "http://127.0.0.1:8090"
 $api = "http://127.0.0.1:8092/admin"
 $gh = "http://127.0.0.1:9099"
 $token = "dev-crash-token"
-$project = "prj_5148b505"
+$projectName = "crash-smoke"
+$groupID = "grp-crash-" + [guid]::NewGuid().ToString("N").Substring(0, 6)
 $user = "smoke-user-" + [guid]::NewGuid().ToString("N").Substring(0, 8)
 
 function PostJson($url, $payload, $headers) {
@@ -35,6 +36,16 @@ function Bundle($stack) {
     metadata = @{ module = "login" }
   }
 }
+
+# 自备项目：绑定 grp-release，同时供 bot-crash 按群反查使用
+$adminHeaders = @{ Authorization = "Bearer dev-admin-token" }
+$proj = (PostJson ($api + "/projects") @{
+  name = ("crash-smoke-" + [guid]::NewGuid().ToString("N").Substring(0, 6))
+  github_repo_url = "https://github.com/example/release"; github_issue_repo = "example/release"
+  github_default_branch = "master"; labels_prefix = "smartpipe"; bluex_group_ids = $groupID; enabled = $true
+} $adminHeaders).Body.data
+$null = PostJson ($api + "/credentials") @{ project_id = $proj.id; kind = "github_pat"; name = "fake-gh"; value = "fake-token"; metadata = @{ api_base = $gh } } $adminHeaders
+$project = $proj.id
 
 $h = @{ "X-Ingest-Token" = $token }
 $tag = [guid]::NewGuid().ToString("N").Substring(0, 6)
@@ -75,6 +86,14 @@ $found = $list.data | Where-Object { $_.id -eq $r1.Body.data.report.id }
 if (-not $found) { throw "admin list missing crash report" }
 $detail = Invoke-RestMethod -Uri ($api + "/crashes/" + $found.id) -Headers $adminHeaders
 if (($detail.data.bundle | ConvertTo-Json -Depth 8) -match "ghp_") { throw "stored bundle still has a token" }
+
+# 只给 chat_id、不给 project_id：按群反查项目（蓝信入口基础能力）
+$bundleG = Bundle "at Group.Lookup_$tag() in C:\work\Group.cs:line 9"
+$bundleG.user_id = $user + "-g"
+$r6 = PostJson ($bridge + "/ingest/crash") @{ chat_id = $groupID; bundle = $bundleG } $h
+if ($r6.Status -ne 201 -or $r6.Body.data.status -ne "created") { throw ("group lookup ingest failed: " + $r6.Status + " " + ($r6.Body | ConvertTo-Json -Depth 6)) }
+if ($r6.Body.data.report.project_id -ne $project) { throw ("group lookup resolved to " + $r6.Body.data.report.project_id) }
+Write-Output ("  group_lookup=201 project=" + $project)
 
 Write-Output ("CRASH SMOKE OK user=" + $user + " issue=#" + $issue1 + " report=" + $found.id)
 Write-Output ("  created=" + $r1.Status + " deduped=" + $r2.Status + " second=" + $r3.Status + " rate=" + $r4.Status + " oversize=" + $r5.Status)

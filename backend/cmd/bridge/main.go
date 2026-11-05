@@ -33,6 +33,20 @@ import (
 	"smartpipe/backend/internal/syntropyclient"
 )
 
+
+// resolveProjectByChat 返回可用的项目 ID：优先用调用方给的 project_id，
+// 找不到时按蓝信群/会话反查（管理员在配置台维护的 bluex_group_ids）。
+func resolveProjectByChat(ctx context.Context, st *store.Store, projectID, chatID string) string {
+	if id := strings.TrimSpace(projectID); id != "" {
+		if _, err := st.GetProject(ctx, id); err == nil {
+			return id
+		}
+	}
+	if p, err := st.FindProjectByGroup(ctx, chatID); err == nil {
+		return p.ID
+	}
+	return strings.TrimSpace(projectID)
+}
 func main() {
 	dsn := strings.TrimSpace(os.Getenv("SMARTPIPE_DSN"))
 	if dsn == "" {
@@ -69,12 +83,14 @@ func main() {
 		svc.WithDispatcher(lead)
 		log.Printf("启用 lead 派单，默认 App Server %s", addr)
 	}
+	var botNotifier bridge.Notifier
 	if addr := strings.TrimSpace(os.Getenv("SMARTPIPE_BOT_ADDR")); addr != "" {
-		svc.WithNotifier(bridge.NewBotNotifier(addr, strings.TrimSpace(os.Getenv("SMARTPIPE_BOT_INTERNAL_TOKEN"))))
+		botNotifier = bridge.NewBotNotifier(addr, strings.TrimSpace(os.Getenv("SMARTPIPE_BOT_INTERNAL_TOKEN")))
+		svc.WithNotifier(botNotifier)
 		log.Printf("启用蓝信回执，bot %s", addr)
 	}
 
-	approvals := &bridge.ApprovalService{Store: st}
+	approvals := &bridge.ApprovalService{Store: st, GroupNotify: botNotifier}
 	appToken := strings.TrimSpace(os.Getenv("SMARTPIPE_APPSERVER_TOKEN"))
 	approvals.NotifyLead = func(ctx context.Context, projectID, text string) error {
 		b, err := st.GetBinding(ctx, projectID)
@@ -110,6 +126,10 @@ func main() {
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
+		if p := resolveProjectByChat(r.Context(), st, msg.ProjectID, msg.ChatID); p != "" {
+			msg.ProjectID = p
+		}
+
 		link, created, err := svc.HandleMessage(r.Context(), msg)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
@@ -152,6 +172,7 @@ func main() {
 		}
 		var in struct {
 			ProjectID string       `json:"project_id"`
+			ChatID    string       `json:"chat_id"`
 			Source    string       `json:"source"`
 			Bundle    crash.Bundle `json:"bundle"`
 		}
@@ -162,6 +183,10 @@ func main() {
 		projectID := strings.TrimSpace(in.ProjectID)
 		if projectID == "" {
 			projectID = defaultCrashProject
+		}
+		// 配置漂移或机器人未配项目时，按蓝信群反查项目，避免整条上报链路 404。
+		if p := resolveProjectByChat(r.Context(), st, projectID, in.ChatID); p != "" {
+			projectID = p
 		}
 		if projectID == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "project_id is required"})

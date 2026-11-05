@@ -49,7 +49,7 @@ func (c *CrashIntake) maxBytes() int {
 }
 
 // HandleAttachment 处理一条带附件的消息：预检失败只回执，不调用上报接口。
-func (c *CrashIntake) HandleAttachment(ctx context.Context, mediaType lanxin.MediaType, mediaID string) (*CrashResult, string, error) {
+func (c *CrashIntake) HandleAttachment(ctx context.Context, mediaType lanxin.MediaType, mediaID, chatID string) (*CrashResult, string, error) {
 	if mediaType != lanxin.MediaFile && mediaType != lanxin.MediaImage {
 		return nil, fmt.Sprintf("只支持文件或图片形式的 crash_bundle（当前类型 %d）", mediaType), nil
 	}
@@ -74,16 +74,17 @@ func (c *CrashIntake) HandleAttachment(ctx context.Context, mediaType lanxin.Med
 	if strings.TrimSpace(bundle.App) == "" || strings.TrimSpace(bundle.Exception.Type) == "" {
 		return nil, "crash_bundle 缺少 app 或 exception.type 字段", nil
 	}
-	res, err := c.ingest(ctx, raw)
+	res, err := c.ingest(ctx, raw, chatID)
 	if err != nil {
 		return nil, "上报失败：" + err.Error(), err
 	}
 	return res, summarize(res), nil
 }
 
-func (c *CrashIntake) ingest(ctx context.Context, raw []byte) (*CrashResult, error) {
+func (c *CrashIntake) ingest(ctx context.Context, raw []byte, chatID string) (*CrashResult, error) {
 	payload, err := json.Marshal(map[string]any{
 		"project_id": c.ProjectID,
+		"chat_id":    chatID,
 		"source":     "lanxin",
 		"bundle":     json.RawMessage(raw),
 	})
