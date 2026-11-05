@@ -10,14 +10,16 @@ import { VerificationPage } from "./pages/VerificationPage";
 import { ReleasePage } from "./pages/ReleasePage";
 import { CrashPage } from "./pages/CrashPage";
 import { TokenPage } from "./pages/TokenPage";
+import { ToolCallsPage } from "./pages/ToolCallsPage";
 
-type PageKey = "projects" | "credentials" | "runtime" | "tokens" | "bridge" | "verify" | "release" | "crash" | "audit";
+type PageKey = "projects" | "credentials" | "runtime" | "tokens" | "toolcalls" | "bridge" | "verify" | "release" | "crash" | "audit";
 
 const NAV: { key: PageKey; label: string; icon: string }[] = [
   { key: "projects", label: "项目", icon: "▤" },
   { key: "credentials", label: "凭据与连接", icon: "⚿" },
   { key: "runtime", label: "Syntropy 运行时", icon: "◫" },
   { key: "tokens", label: "Agent 令牌", icon: "⌘" },
+  { key: "toolcalls", label: "工具调用", icon: "⌁" },
   { key: "bridge", label: "桥接与派单", icon: "⇄" },
   { key: "verify", label: "补丁验证", icon: "✓" },
   { key: "release", label: "发版", icon: "⬆" },
@@ -30,6 +32,7 @@ const META: Record<PageKey, { crumb: string; title: string; sub: string }> = {
   credentials: { crumb: "配置中心 / 凭据与连接", title: "凭据与连接", sub: "凭据密文存储，界面只显示掩码；连接测试由服务端发起。" },
   runtime: { crumb: "配置中心 / Syntropy 运行时", title: "Syntropy 运行时", sub: "App Server 进程、Master/Worker 节点和 pipeline-lead 实例。" },
   tokens: { crumb: "配置中心 / Agent 令牌", title: "Agent 令牌", sub: "按项目与角色签发 MCP 令牌；明文只显示一次，随时可撤销。" },
+  toolcalls: { crumb: "配置中心 / 工具调用", title: "工具调用", sub: "MCP 网关的调用审计与接入地址配置。" },
   bridge: { crumb: "配置中心 / 桥接与派单", title: "桥接与派单", sub: "蓝信消息转 GitHub Issue，并把工单投递给项目的 pipeline-lead。" },
   verify: { crumb: "配置中心 / 补丁验证", title: "补丁验证", sub: "无 Actions 的合并门禁：干净副本应用补丁并执行 smartpipe.yaml。" },
   release: { crumb: "配置中心 / 发版", title: "发版", sub: "从干净提交构建制品，生成带校验和与签名的 manifest。" },
@@ -138,6 +141,7 @@ export function App() {
           {page === "credentials" && <CredentialsPage notify={notify} />}
           {page === "runtime" && <RuntimePage notify={notify} />}
           {page === "tokens" && <TokenPage notify={notify} />}
+          {page === "toolcalls" && <ToolCallsPage notify={notify} />}
           {page === "bridge" && <BridgePage notify={notify} />}
           {page === "verify" && <VerificationPage notify={notify} />}
           {page === "release" && <ReleasePage notify={notify} />}

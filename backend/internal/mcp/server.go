@@ -30,6 +30,24 @@ type Executor interface {
 	Call(ctx context.Context, p *Principal, tool string, args map[string]any) (any, error)
 }
 
+// CallRecord 是一次工具调用的审计记录。
+type CallRecord struct {
+	ProjectID   *string        `json:"project_id"`
+	TokenID     string         `json:"token_id"`
+	AgentName   string         `json:"agent_name"`
+	Role        string         `json:"role"`
+	Tool        string         `json:"tool"`
+	Status      string         `json:"status"`
+	DurationMS  int            `json:"duration_ms"`
+	ArgsSummary map[string]any `json:"args_summary"`
+	Error       string         `json:"error"`
+}
+
+// Recorder 持久化工具调用记录。
+type Recorder interface {
+	Record(ctx context.Context, rec CallRecord)
+}
+
 // ErrUnauthorized 表示令牌无效。
 var ErrUnauthorized = errors.New("mcp: unauthorized")
 
@@ -66,6 +84,7 @@ type Server struct {
 	// RateLimit 为每个令牌每分钟允许的调用数，默认 120。
 	RateLimit int
 	Logger    *log.Logger
+	Recorder  Recorder
 
 	mu      sync.Mutex
 	buckets map[string]*bucket
@@ -150,20 +169,28 @@ func (s *Server) dispatch(ctx context.Context, p *Principal, req rpcRequest) (an
 		if err := json.Unmarshal(req.Params, &params); err != nil {
 			return nil, &rpcError{Code: -32602, Message: "invalid params: " + err.Error()}
 		}
-		if !ToolAllowed(p.Role, params.Name) {
-			return toolResult("工具 "+params.Name+" 不在角色 "+p.Role+" 的权限范围内", true), nil
-		}
-		if !s.allow(p.TokenID) {
-			return nil, &rpcError{Code: -32000, Message: "rate limit exceeded"}
-		}
 		args, err := Arguments(params.Arguments)
 		if err != nil {
+			s.record(ctx, p, params.Name, "invalid_args", 0, nil, err.Error())
 			return toolResult("参数不是合法 JSON 对象: "+err.Error(), true), nil
 		}
+		if !ToolAllowed(p.Role, params.Name) {
+			msg := "工具 " + params.Name + " 不在角色 " + p.Role + " 的权限范围内"
+			s.record(ctx, p, params.Name, "denied", 0, args, msg)
+			return toolResult(msg, true), nil
+		}
+		if !s.allow(p.TokenID) {
+			s.record(ctx, p, params.Name, "rate_limited", 0, args, "rate limit exceeded")
+			return nil, &rpcError{Code: -32000, Message: "rate limit exceeded"}
+		}
+		started := time.Now()
 		out, callErr := s.Exec.Call(ctx, p, params.Name, args)
+		elapsed := int(time.Since(started).Milliseconds())
 		if callErr != nil {
+			s.record(ctx, p, params.Name, "error", elapsed, args, callErr.Error())
 			return toolResult(callErr.Error(), true), nil
 		}
+		s.record(ctx, p, params.Name, "ok", elapsed, args, "")
 		text, _ := json.MarshalIndent(out, "", "  ")
 		return map[string]any{"content": []map[string]any{{"type": "text", "text": string(text)}}}, nil
 	default:
@@ -249,4 +276,42 @@ func writeRPCError(w http.ResponseWriter, status int, id json.RawMessage, code i
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(rpcResponse{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: code, Message: msg, Data: data}})
+}
+
+func (s *Server) record(ctx context.Context, p *Principal, tool, status string, elapsed int, args map[string]any, errMsg string) {
+	if s.Recorder == nil || p == nil {
+		return
+	}
+	s.Recorder.Record(ctx, CallRecord{
+		ProjectID: p.ProjectID, TokenID: p.TokenID, AgentName: p.Name, Role: p.Role,
+		Tool: tool, Status: status, DurationMS: elapsed, ArgsSummary: SummarizeArgs(args), Error: errMsg,
+	})
+}
+
+// SummarizeArgs 只保留可审计的标量字段，避免把补丁全文或评论正文写进记录。
+func SummarizeArgs(args map[string]any) map[string]any {
+	if len(args) == 0 {
+		return map[string]any{}
+	}
+	out := map[string]any{}
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	out["keys"] = keys
+	for _, key := range []string{"issue_ref", "number", "version", "run_id", "dry_run", "agent_name", "template_name", "author"} {
+		if v, ok := args[key]; ok {
+			out[key] = v
+		}
+	}
+	if v, ok := args["labels"].([]any); ok {
+		out["labels_count"] = len(v)
+	}
+	if v, ok := args["patch"].(string); ok {
+		out["patch_bytes"] = len(v)
+	}
+	if v, ok := args["body"].(string); ok {
+		out["body_bytes"] = len(v)
+	}
+	return out
 }

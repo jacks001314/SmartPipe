@@ -298,3 +298,22 @@ export type AgentToken = {
   last_used_at: string | null;
   created_at: string;
 };
+
+export type ToolCall = {
+  id: number;
+  project_id: string | null;
+  token_id: string;
+  agent_name: string;
+  role: string;
+  tool: string;
+  status: string;
+  duration_ms: number;
+  args_summary: Record<string, unknown>;
+  error: string;
+  created_at: string;
+};
+
+export type MCPConfig = {
+  url: string;
+  pool_name: string;
+};

@@ -101,6 +101,8 @@ func main() {
 		MCPPoolName:    envOr("SMARTPIPE_MCP_POOL_NAME", "smartpipe"),
 	})
 
+	api.ApplyRuntimeSettings(context.Background())
+
 	app := iris.New()
 	app.Use(iris.Compression)
 	app.Get("/healthz", func(c iris.Context) {

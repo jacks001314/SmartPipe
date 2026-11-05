@@ -16,7 +16,9 @@ import type {
   ReleaseCandidate,
   ReleaseRecord,
   ReleaseRun,
+  MCPConfig,
   TestResult,
+  ToolCall,
   VerificationRecord,
   WebhookDelivery,
 } from "./types";
@@ -144,6 +146,12 @@ export const api = {
   createAgentToken: (body: { project_id?: string; role: string; name: string }) =>
     request<{ token: string; record: AgentToken }>("/agent-tokens", { method: "POST", body }),
   revokeAgentToken: (id: string) => request<{ id: string; enabled: boolean }>("/agent-tokens/" + id + "/revoke", { method: "POST" }),
+  listToolCalls: (tool = "", limit = 100) =>
+    request<ToolCall[]>("/tool-calls?limit=" + limit + (tool ? "&tool=" + encodeURIComponent(tool) : "")),
+  getMCPConfig: () => request<MCPConfig>("/runtime/mcp-config"),
+  updateMCPConfig: (body: { url: string; pool_name: string }) =>
+    request<MCPConfig>("/runtime/mcp-config", { method: "PUT", body }),
+
   listCrashes: (limit = 100) => request<CrashReport[]>("/crashes?limit=" + limit),
   getCrash: (id: number) => request<CrashReport>("/crashes/" + id),
   listReleaseCandidates: (projectId: string, label?: string) =>
@@ -162,3 +170,5 @@ export const api = {
     author?: string;
   }) => request<{ record: VerificationRecord; report: Record<string, unknown> }>("/verifications", { method: "POST", body }),
 };
+
+export type ToolCallApi = typeof api;

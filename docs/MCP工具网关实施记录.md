@@ -1,4 +1,4 @@
-﻿# MCP 工具网关实施记录
+# MCP 工具网关实施记录
 
 更新时间：2026-11-05
 
@@ -152,11 +152,70 @@ MCP AGENT SMOKE OK app_server=appsrv-86s6w agent=mcp-lead-6d1a7c tools=9
 `agent is killed`、`toolCount=0`；因此这里用「注入给 Agent 的同一个令牌」直接调用网关，验证了 9 个工具可见。
 真实环境里 Agent 建立会话后，`/mcp/statuses` 应能看到 `serverName=smartpipe` 与工具数量。
 
-## 9. 仍待完成
+## 9. 工具调用审计与配置可编辑
 
-1. **接入 Syntropy Agent**：把 MCP 地址与令牌注入 pipeline-lead 模板的运行环境（App Server 侧工具配置），当前为手工在模板里约定。
-2. **OAuth / 动态令牌**：目前是静态令牌 + 撤销；多租户场景需要短期令牌与刷新。
-3. **更细的权限**：按标签/Issue 限制工具范围（例如 release 令牌只能操作指定项目版本）。
-4. **Streamable HTTP（SSE）**：当前实现单请求 JSON 响应，未实现服务端推送。
-5. **调用审计视图**：网关调用日志目前只在进程日志里，可在管理台增加「工具调用」列表。
-6. **会话级验证**：沙箱缺少模型凭据，无法驱动真实 Codex 会话加载 MCP；需要在有模型的环境里再跑一次 `/mcp/statuses` 断言。
+网关过去只把调用写在进程日志里，排查「哪个 Agent 调了什么」要去翻日志。这一节把调用记录落到数据库，并在管理台加了「工具调用」页。
+
+### 9.1 记录链路
+
+```
+Agent --(spt_ 令牌)--> mcp-gateway --(异步 POST /admin/tool-calls)--> admin-api --> PostgreSQL tool_calls
+```
+
+- `mcp.Server` 增加 `Recorder` 接口，`tools/call` 的 `ok / denied / invalid_args / rate_limited / error` 五个分支都会回调，带上令牌、Agent、角色、工具名、耗时和错误。
+- 网关侧 `mcpRecorder` 用 256 容量的有界队列异步回写，队列满时丢弃并打日志；管理接口失败不影响工具执行结果。
+- 参数只保留可审计字段：`issue_ref / number / version / run_id / dry_run / agent_name / template_name / author`，附加 `keys`、`labels_count`、`patch_bytes`、`body_bytes`。**补丁全文与评论正文不落库**，只记字节数。
+
+迁移 `v14 tool_calls_settings`：
+
+```sql
+CREATE TABLE tool_calls (
+  id BIGSERIAL PRIMARY KEY, project_id TEXT, token_id TEXT NOT NULL,
+  agent_name TEXT, role TEXT, tool TEXT NOT NULL, status TEXT NOT NULL,
+  duration_ms INT, args_summary JSONB, error TEXT, created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE TABLE runtime_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ);
+```
+
+### 9.2 MCP 地址可在界面改
+
+`GET|PUT /admin/runtime/mcp-config` 读写 `runtime_settings` 的 `mcp_url` / `mcp_pool_name`；
+admin-api 启动时 `ApplyRuntimeSettings` 用库里的值覆盖环境变量，因此改了地址重启 admin-api 即生效，
+Agent 下次部署会拿到新的 Pool 地址。界面改动会写审计 `runtime.mcp.config`。
+
+### 9.3 新增接口
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/admin/tool-calls?tool=&limit=` | 最近调用，按工具过滤 |
+| POST | `/admin/tool-calls` | 网关回写入口（管理员令牌） |
+| GET | `/admin/runtime/mcp-config` | 读取 MCP 地址与 Pool 名 |
+| PUT | `/admin/runtime/mcp-config` | 保存（校验 http(s)） |
+
+### 9.4 实测
+
+`scripts/mcp-smoke.ps1` 跑完后查询接口（真实输出）：
+
+```
+[{"id":5,"agent_name":"smoke-dev","role":"dev","tool":"derivation.create","status":"denied",
+  "error":"工具 derivation.create 不在角色 dev 的权限范围内"},
+ {"id":4,"agent_name":"smoke-lead","role":"lead","tool":"verify.patch","status":"ok","duration_ms":3349,
+  "args_summary":{"issue_ref":"example/release#101","patch_bytes":546,...}},
+ {"id":3,"tool":"issue.comment","status":"ok","args_summary":{"number":101,"body_bytes":24}}]
+```
+
+可以看到 `verify.patch` 只留下 `patch_bytes=546`、`issue.comment` 只留下 `body_bytes=24`，正文没有入库。
+
+界面截图：
+
+![工具调用审计](images/console-toolcalls.png)
+
+单元测试 `internal/mcp/recorder_test.go` 覆盖：denied/ok/error 都会记录、principal 信息透传、
+`SummarizeArgs` 丢弃 `patch`/`body` 并保留字节数。
+
+## 10. 仍待完成
+
+1. **OAuth / 动态令牌**：目前是静态令牌 + 撤销；多租户场景需要短期令牌与刷新。
+2. **更细的权限**：按标签/Issue 限制工具范围（例如 release 令牌只能操作指定项目版本）。
+3. **Streamable HTTP（SSE）**：当前实现单请求 JSON 响应，未实现服务端推送。
+4. **会话级验证**：沙箱缺少模型凭据，无法驱动真实 Codex 会话加载 MCP；需要在有模型的环境里再跑一次 `/mcp/statuses` 断言。

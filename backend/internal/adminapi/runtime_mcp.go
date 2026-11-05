@@ -16,6 +16,8 @@ func (a *API) registerRuntimeMCP(p iris.Party) {
 	p.Post("/app-servers/{id}/mcp/servers", a.upsertMCPServer)
 	p.Delete("/app-servers/{id}/mcp/servers/{name}", a.deleteMCPServer)
 	p.Get("/app-servers/{id}/mcp/statuses", a.mcpStatuses)
+	p.Get("/mcp-config", a.mcpConfig)
+	p.Put("/mcp-config", a.updateMCPConfig)
 }
 
 // poolFrom 从 /api/settings 响应中取出 mcpPool.servers。

@@ -13,6 +13,34 @@ type migration struct {
 
 var migrations = []migration{
 	{
+		version: 14,
+		name:    "tool_calls_settings",
+		sql: `
+CREATE TABLE IF NOT EXISTS tool_calls (
+    id           BIGSERIAL PRIMARY KEY,
+    project_id   TEXT,
+    token_id     TEXT NOT NULL DEFAULT '',
+    agent_name   TEXT NOT NULL DEFAULT '',
+    role         TEXT NOT NULL DEFAULT '',
+    tool         TEXT NOT NULL DEFAULT '',
+    status       TEXT NOT NULL DEFAULT '',
+    duration_ms  INTEGER NOT NULL DEFAULT 0,
+    args_summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+    error        TEXT NOT NULL DEFAULT '',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS tool_calls_at_idx ON tool_calls (created_at DESC);
+CREATE INDEX IF NOT EXISTS tool_calls_tool_idx ON tool_calls (tool, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS runtime_settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+`,
+	},
+	{
 		version: 13,
 		name:    "agent_tokens",
 		sql: `

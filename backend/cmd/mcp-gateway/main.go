@@ -40,10 +40,11 @@ func main() {
 		return verifyToken(ctx, adminURL, adminToken, token)
 	}
 	server := &mcp.Server{
-		Auth:    auth,
-		Exec:    mcp.NewAdminBackend(adminURL, adminToken),
-		Version: version,
-		Logger:  log.Default(),
+		Auth:     auth,
+		Exec:     mcp.NewAdminBackend(adminURL, adminToken),
+		Version:  version,
+		Logger:   log.Default(),
+		Recorder: newMCPRecorder(adminURL, adminToken, 256),
 	}
 
 	if *stdio {
