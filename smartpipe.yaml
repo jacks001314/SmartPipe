@@ -1,0 +1,12 @@
+version: 1
+toolchain:
+  go: "1.25"
+  node: "24"
+commands:
+  build: "cd backend && go build ./... && cd ../web && npm run build"
+  unit: "cd backend && go test ./internal/... -count=1"
+required_for_merge:
+  - build
+timeouts:
+  build: 10m
+  unit: 15m
