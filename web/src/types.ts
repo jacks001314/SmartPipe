@@ -283,6 +283,7 @@ export type CrashReport = {
   occurrences: number;
   size_bytes: number;
   bundle: Record<string, unknown>;
+  similar?: CrashSimilar[];
   occurred_at: string | null;
   created_at: string;
   updated_at: string;
@@ -342,6 +343,15 @@ export type UserIdentity = {
   enabled: boolean;
   created_at: string;
   updated_at: string;
+};
+
+export type CrashSimilar = {
+  report_id: number;
+  issue_number: number;
+  issue_url: string;
+  fingerprint: string;
+  version: string;
+  score: number;
 };
 
 export type CrashRetention = {

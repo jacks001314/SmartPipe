@@ -166,6 +166,32 @@ export function CrashPage({ notify }: { notify: Notify }) {
               指纹 {detail?.fingerprint} · 用户 {detail?.user_id || "—"} · 设备 {detail?.device_id || "—"} ·
               出现 {detail?.occurrences} 次 · 大小 {detail?.size_bytes} B
             </div>
+            {detail?.similar && detail.similar.length > 0 ? (
+              <div style={{ marginBottom: 12 }}>
+                <div className="strong" style={{ marginBottom: 6 }}>可能相关的问题（按调用栈相似度检索）</div>
+                <table className="table">
+                  <thead>
+                    <tr><th>Issue</th><th>相似度</th><th>版本</th><th>指纹</th></tr>
+                  </thead>
+                  <tbody>
+                    {detail.similar.map((it) => (
+                      <tr key={it.report_id}>
+                        <td>
+                          {it.issue_url ? (
+                            <a href={it.issue_url} target="_blank" rel="noreferrer">#{it.issue_number}</a>
+                          ) : (
+                            <span className="tiny">#{it.issue_number || "—"}</span>
+                          )}
+                        </td>
+                        <td className="tiny">{Math.round(it.score * 100)}%</td>
+                        <td className="tiny">{it.version || "—"}</td>
+                        <td className="mono tiny">{(it.fingerprint || "").replace("sha256:", "").slice(0, 12)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
             <pre className="mono" style={{ maxHeight: 420, overflow: "auto", background: "#0f172a", color: "#cbd5e1", padding: 10, borderRadius: 8, fontSize: 11, whiteSpace: "pre-wrap" }}>
               {JSON.stringify(detail?.bundle ?? {}, null, 2)}
             </pre>

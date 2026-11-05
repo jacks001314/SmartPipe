@@ -172,6 +172,10 @@ func (s *Service) Ingest(ctx context.Context, in Ingest) (*Outcome, error) {
 		return nil, err
 	}
 	similar := s.findSimilar(ctx, projectID, b, normalized.Fingerprint)
+	if rawSimilar, merr := json.Marshal(similar); merr == nil {
+		_ = s.Store.SetCrashSimilar(ctx, report.ID, rawSimilar)
+		report.Similar = rawSimilar
+	}
 	body := Body(*normalized, in.Source, report.ID, 1, now) + SimilarSection(similar)
 	issue, err := client.CreateIssue(ctx, in.Repo, Title(b), body, labels)
 	if err != nil {

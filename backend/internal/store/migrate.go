@@ -13,6 +13,13 @@ type migration struct {
 
 var migrations = []migration{
 	{
+		version: 17,
+		name:    "crash_similar",
+		sql: `
+ALTER TABLE crash_reports ADD COLUMN IF NOT EXISTS similar_issues JSONB NOT NULL DEFAULT '[]'::jsonb;
+`,
+	},
+	{
 		version: 16,
 		name:    "user_identities",
 		sql: `
@@ -437,7 +444,22 @@ CREATE INDEX IF NOT EXISTS bridge_dispatches_link_idx ON bridge_dispatches (link
 }
 
 // Migrate 幂等地应用所有迁移。
+// migrateLockKey 是迁移用的 advisory lock，避免多个进程/测试包同时迁移互相踩。
+const migrateLockKey int64 = 0x53504d50 // "SPMP"
+
 func (s *Store) Migrate(ctx context.Context) error {
+	// 同一事务连接上取锁，整个迁移期间串行；进程退出或 ctx 取消时自动释放。
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("store: acquire migrate conn: %w", err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, migrateLockKey); err != nil {
+		return fmt.Errorf("store: migrate lock: %w", err)
+	}
+	defer func() {
+		_, _ = conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock($1)`, migrateLockKey)
+	}()
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
         version    INT PRIMARY KEY,
         name       TEXT NOT NULL,

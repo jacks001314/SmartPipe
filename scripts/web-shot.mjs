@@ -5,7 +5,7 @@ import { writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const [url, out, token = ""] = process.argv.slice(2);
+const [url, out, token = "", action = ""] = process.argv.slice(2);
 if (!url || !out) {
   console.error("usage: node scripts/web-shot.mjs <url> <out.png> [token]");
   process.exit(2);
@@ -81,6 +81,11 @@ if (token) {
   await send("Page.reload", { ignoreCache: false });
 }
 await sleep(4500);
+if (action) {
+  const res = await send("Runtime.evaluate", { expression: action, returnByValue: true, awaitPromise: true });
+  console.log("action: " + JSON.stringify(res.result?.result?.value ?? res.result?.exceptionDetails?.text ?? "ok"));
+  await sleep(1500);
+}
 
 const shot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
 if (!shot.result?.data) {

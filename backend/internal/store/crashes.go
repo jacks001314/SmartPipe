@@ -30,13 +30,14 @@ type CrashReport struct {
 	Occurrences  int             `json:"occurrences"`
 	SizeBytes    int             `json:"size_bytes"`
 	Bundle       json.RawMessage `json:"bundle"`
+	Similar      json.RawMessage `json:"similar"`
 	OccurredAt   *time.Time      `json:"occurred_at"`
 	CreatedAt    time.Time       `json:"created_at"`
 	UpdatedAt    time.Time       `json:"updated_at"`
 }
 
 const crashColumns = `id, project_id, fingerprint, app, version, os, arch, user_id, device_id,
-source, repo, issue_number, issue_url, status, reject_reason, occurrences, size_bytes, bundle,
+source, repo, issue_number, issue_url, status, reject_reason, occurrences, size_bytes, bundle, similar_issues,
 occurred_at, created_at, updated_at`
 
 func scanCrash(row interface{ Scan(...any) error }) (*CrashReport, error) {
@@ -47,7 +48,7 @@ func scanCrash(row interface{ Scan(...any) error }) (*CrashReport, error) {
 	)
 	err := row.Scan(&r.ID, &project, &r.Fingerprint, &r.App, &r.Version, &r.OS, &r.Arch, &r.UserID,
 		&r.DeviceID, &r.Source, &r.Repo, &r.IssueNumber, &r.IssueURL, &r.Status, &r.RejectReason,
-		&r.Occurrences, &r.SizeBytes, &r.Bundle, &occurred, &r.CreatedAt, &r.UpdatedAt)
+		&r.Occurrences, &r.SizeBytes, &r.Bundle, &r.Similar, &occurred, &r.CreatedAt, &r.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -70,17 +71,20 @@ func (s *Store) CreateCrashReport(ctx context.Context, r CrashReport) (*CrashRep
 	if len(r.Bundle) == 0 {
 		r.Bundle = json.RawMessage("{}")
 	}
+	if len(r.Similar) == 0 {
+		r.Similar = json.RawMessage("[]")
+	}
 	if r.Occurrences <= 0 {
 		r.Occurrences = 1
 	}
 	row := s.db.QueryRowContext(ctx, `
 INSERT INTO crash_reports (project_id, fingerprint, app, version, os, arch, user_id, device_id,
-    source, repo, issue_number, issue_url, status, reject_reason, occurrences, size_bytes, bundle, occurred_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+    source, repo, issue_number, issue_url, status, reject_reason, occurrences, size_bytes, bundle, similar_issues, occurred_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
 RETURNING id, created_at, updated_at`,
 		r.ProjectID, r.Fingerprint, r.App, r.Version, r.OS, r.Arch, r.UserID, r.DeviceID,
 		r.Source, r.Repo, r.IssueNumber, r.IssueURL, r.Status, r.RejectReason, r.Occurrences,
-		r.SizeBytes, r.Bundle, r.OccurredAt)
+		r.SizeBytes, r.Bundle, r.Similar, r.OccurredAt)
 	if err := row.Scan(&r.ID, &r.CreatedAt, &r.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("store: create crash report: %w", err)
 	}
@@ -222,4 +226,16 @@ ORDER BY id DESC LIMIT $4`, strings.TrimSpace(app), since, project, limit)
 		out = append(out, *r)
 	}
 	return out, rows.Err()
+}
+
+// SetCrashSimilar 回填相似问题清单（JSON 数组）。
+func (s *Store) SetCrashSimilar(ctx context.Context, id int64, similar json.RawMessage) error {
+	if len(similar) == 0 {
+		similar = json.RawMessage("[]")
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE crash_reports SET similar_issues = $2, updated_at = now() WHERE id = $1`, id, similar)
+	if err != nil {
+		return fmt.Errorf("store: set crash similar: %w", err)
+	}
+	return nil
 }
