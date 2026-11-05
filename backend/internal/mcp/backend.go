@@ -158,7 +158,7 @@ func (b *AdminBackend) Call(ctx context.Context, p *Principal, tool string, args
 		payload := map[string]any{
 			"project_id": projectID, "version": strArg(args, "version"), "commit": strArg(args, "commit"),
 			"branch": strArg(args, "branch"), "notes": strArg(args, "notes"),
-			"dry_run": args["dry_run"] == true,
+			"dry_run": args["dry_run"] == true, "confirm_major": args["confirm_major"] == true,
 		}
 		if globs := strList(args, "artifact_globs"); len(globs) > 0 {
 			payload["artifact_globs"] = globs

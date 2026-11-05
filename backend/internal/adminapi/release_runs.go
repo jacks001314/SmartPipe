@@ -3,6 +3,7 @@ package adminapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -141,6 +142,7 @@ type releaseRunRequest struct {
 	ReadyLabel    string   `json:"ready_label"`
 	ArtifactGlobs []string `json:"artifact_globs"`
 	Trigger       string   `json:"trigger"`
+	ConfirmMajor  bool     `json:"confirm_major"`
 }
 
 func (a *API) createReleaseRun(c iris.Context) {
@@ -166,6 +168,15 @@ func (a *API) createReleaseRun(c iris.Context) {
 	}
 	record, run, err := a.executeReleaseRun(ctx, project, in)
 	if err != nil {
+		var majorErr *majorConfirmError
+		if errors.As(err, &majorErr) {
+			pid := project.ID
+			a.audit(ctx, c, "release.run", "release_run", in.Version, &pid, "blocked",
+				map[string]any{"reason": majorErr.Error(), "last": majorErr.Last})
+			c.StatusCode(http.StatusConflict)
+			_ = c.JSON(envelope{Err: &apiError{Code: "major_confirm_required", Message: majorErr.Error()}})
+			return
+		}
 		c.StatusCode(http.StatusBadGateway)
 		_ = c.JSON(envelope{Err: &apiError{Code: "release_failed", Message: err.Error()}})
 		return

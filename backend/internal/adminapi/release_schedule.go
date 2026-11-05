@@ -107,6 +107,14 @@ func (a *API) executeReleaseRun(ctx context.Context, project *store.Project, in 
 	if repo == "" {
 		return nil, nil, fmt.Errorf("adminapi: project %s has no GitHub repository", project.ID)
 	}
+	// 大版本人工确认：非 dry-run 且主版本号高于上次发布时，必须显式确认。
+	if !in.DryRun {
+		if last, lerr := a.store.LatestReleasedVersion(ctx, project.ID); lerr == nil && last != "" {
+			if needsMajorConfirm(last, in.Version) && !in.ConfirmMajor {
+				return nil, nil, &majorConfirmError{Last: last, Next: in.Version}
+			}
+		}
+	}
 	client, err := bridge.ClientFromCredentials(ctx, a.store, &project.ID)
 	if err != nil {
 		return nil, nil, err

@@ -39,7 +39,7 @@ export function ReleasePage({ notify }: { notify: Notify }) {
   const [candidateError, setCandidateError] = useState("");
   const [candidateLabel, setCandidateLabel] = useState("");
   const [form, setForm] = useState({ project_id: "", repo: "", version: "", commit: "", globs: "dist/**", notes: "" });
-  const [runForm, setRunForm] = useState({ project_id: "", version: todayVersion(), commit: "", branch: "", notes: "", globs: "dist/**" });
+  const [runForm, setRunForm] = useState({ project_id: "", version: todayVersion(), commit: "", branch: "", notes: "", globs: "dist/**", confirm_major: false });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -134,6 +134,7 @@ export function ReleasePage({ notify }: { notify: Notify }) {
         branch: runForm.branch.trim() || undefined,
         notes: runForm.notes,
         dry_run: dryRun,
+        confirm_major: runForm.confirm_major,
         artifact_globs: runForm.globs.split(",").map((x) => x.trim()).filter(Boolean),
       });
       const run = res.run;
@@ -222,6 +223,17 @@ export function ReleasePage({ notify }: { notify: Notify }) {
             <div className="field">
               <label>目标分支（可留空）</label>
               <input value={runForm.branch} onChange={(e) => setRunForm((p) => ({ ...p, branch: e.target.value }))} placeholder="项目默认分支" />
+            </div>
+            <div className="field">
+              <label>大版本确认</label>
+              <label className="tiny" style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={runForm.confirm_major}
+                  onChange={(e) => setRunForm((p) => ({ ...p, confirm_major: e.target.checked }))}
+                />
+                允许跨主版本发布（如 v1.x → v2.0.0）
+              </label>
             </div>
             <div className="field">
               <label>制品 glob</label>
@@ -326,6 +338,17 @@ export function ReleasePage({ notify }: { notify: Notify }) {
             <div className="field">
               <label>commit</label>
               <input value={form.commit} onChange={(e) => setForm((p) => ({ ...p, commit: e.target.value }))} placeholder="完整 sha" />
+            </div>
+            <div className="field">
+              <label>大版本确认</label>
+              <label className="tiny" style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={runForm.confirm_major}
+                  onChange={(e) => setRunForm((p) => ({ ...p, confirm_major: e.target.checked }))}
+                />
+                允许跨主版本发布（如 v1.x → v2.0.0）
+              </label>
             </div>
             <div className="field">
               <label>制品 glob</label>

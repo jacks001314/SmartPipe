@@ -169,7 +169,7 @@ export const api = {
   listReleaseCandidates: (projectId: string, label?: string) =>
     request<{ repo: string; label: string; candidates: ReleaseCandidate[] }>(
       "/releases/candidates?project_id=" + encodeURIComponent(projectId) + (label ? "&label=" + encodeURIComponent(label) : "")),
-  createReleaseRun: (body: { project_id: string; version: string; commit?: string; branch?: string; notes?: string; dry_run?: boolean; artifact_globs?: string[] }) =>
+  createReleaseRun: (body: { project_id: string; version: string; commit?: string; branch?: string; notes?: string; dry_run?: boolean; artifact_globs?: string[]; confirm_major?: boolean }) =>
     request<{ run: ReleaseRun; record: ReleaseRun }>("/releases/runs", { method: "POST", body }),
   rollbackReleaseRun: (id: number) => request<ReleaseRun>("/releases/runs/" + id + "/rollback", { method: "POST" }),
   createVerification: (body: {

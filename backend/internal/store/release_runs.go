@@ -153,3 +153,19 @@ func (s *Store) HasReleaseRun(ctx context.Context, projectID, version string) (b
 	}
 	return exists, nil
 }
+
+// LatestReleasedVersion 返回项目最近一次成功发布的版本号（没有则空串）。
+func (s *Store) LatestReleasedVersion(ctx context.Context, projectID string) (string, error) {
+	var version string
+	err := s.db.QueryRowContext(ctx, `
+SELECT version FROM release_runs
+WHERE project_id = $1 AND status IN ('released','released_with_warnings')
+ORDER BY id DESC LIMIT 1`, projectID).Scan(&version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("store: latest released version: %w", err)
+	}
+	return version, nil
+}

@@ -121,6 +121,7 @@ var Tools = []Tool{
 			"branch":         str("目标分支（可选）"),
 			"notes":          str("发布说明（可选）"),
 			"dry_run":        map[string]any{"type": "boolean", "description": "只构建，不发布"},
+			"confirm_major":  map[string]any{"type": "boolean", "description": "大版本升级需显式确认为 true"},
 			"artifact_globs": strs("制品 glob（可选）"),
 			"project_id":     str("项目 ID（可选）"),
 		}, "version"),
