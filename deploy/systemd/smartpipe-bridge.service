@@ -1,0 +1,27 @@
+[Unit]
+Description=SmartPipe Lanxin and GitHub webhook bridge
+After=network-online.target smartpipe-admin-api.service
+Wants=network-online.target
+Requires=smartpipe-admin-api.service
+
+[Service]
+Type=simple
+User=smartpipe
+Group=smartpipe
+WorkingDirectory=@INSTALL_DIR@
+EnvironmentFile=/etc/smartpipe/smartpipe.env
+Environment=SMARTPIPE_BRIDGE_ADDR=:8090
+Environment=SMARTPIPE_ADMIN_URL=http://127.0.0.1:8092
+Environment=SMARTPIPE_BOT_ADDR=http://127.0.0.1:8093
+ExecStart=@INSTALL_DIR@/bin/bridge
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

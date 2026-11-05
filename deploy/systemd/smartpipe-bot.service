@@ -1,0 +1,26 @@
+[Unit]
+Description=SmartPipe Lanxin bot
+After=network-online.target smartpipe-bridge.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=smartpipe
+Group=smartpipe
+WorkingDirectory=@INSTALL_DIR@
+EnvironmentFile=/etc/smartpipe/smartpipe.env
+Environment=BOT_HTTP_ADDR=:8093
+Environment=BRIDGE_URL=http://127.0.0.1:8090
+Environment=CRASH_INGEST_URL=http://127.0.0.1:8090/ingest/crash
+ExecStart=@INSTALL_DIR@/bin/bot
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

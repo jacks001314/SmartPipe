@@ -1,33 +1,46 @@
 #!/usr/bin/env python3
-"""把本地 tar 包传到 Linux 主机、解包并执行命令（开发/联调辅助）。
+"""Upload a tar.gz to a Linux host, extract it, and run a command.
 
-用法示例：
-  python scripts/remote-run.py --host 192.168.1.99 --user jacks \
-      --pass-file /path/pass.txt --local .dev/sit-linux.tar.gz \
-      --dir /tmp/sit --cmd "bash scripts/sit-linux.sh --skip-test"
+This helper is used by deployment and Linux SIT scripts. The optional --sudo
+flag forwards the same SSH password to sudo -S without printing it.
 """
 import argparse
 import os
+import shlex
 import sys
 
 import paramiko
 
 
 def main() -> int:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(errors="replace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", required=True)
     ap.add_argument("--user", required=True)
     ap.add_argument("--port", type=int, default=22)
     ap.add_argument("--pass-file", default="")
-    ap.add_argument("--local", required=True, help="本地 tar.gz")
-    ap.add_argument("--dir", default="/tmp/smartpipe-sit", help="远端解包目录")
-    ap.add_argument("--cmd", required=True, help="解包后执行的命令")
+    ap.add_argument("--local", required=True, help="local tar.gz")
+    ap.add_argument("--dir", default="/tmp/smartpipe-sit", help="remote extract directory below /tmp")
+    ap.add_argument("--cmd", required=True, help="command run after extraction")
+    ap.add_argument("--sudo", action="store_true", help="run --cmd through sudo")
+    ap.add_argument("--cleanup", action="store_true", help="remove the uploaded archive and extract directory")
     args = ap.parse_args()
 
     password = os.environ.get("SMARTPIPE_SSH_PASSWORD", "")
     if args.pass_file:
         with open(args.pass_file, encoding="utf-8") as fh:
             password = fh.read().strip()
+    if args.sudo and not password:
+        print("[sudo] --sudo requires --pass-file or SMARTPIPE_SSH_PASSWORD", file=sys.stderr)
+        return 2
+
+    remote_dir = args.dir.rstrip("/")
+    if not remote_dir.startswith("/tmp/") or ".." in remote_dir.split("/"):
+        print("[extract] --dir must be below /tmp", file=sys.stderr)
+        return 2
 
     remote_tar = "/tmp/" + os.path.basename(args.local)
     client = paramiko.SSHClient()
@@ -48,15 +61,24 @@ def main() -> int:
             e = err.read().decode("utf-8", "replace")
             if e.strip():
                 sys.stderr.write(e)
-            rc = out.channel.recv_exit_status()
-            return rc
+            return out.channel.recv_exit_status()
 
-        rc = run(f"rm -rf {args.dir} && mkdir -p {args.dir} && tar -xzf {remote_tar} -C {args.dir}")
+        extract = (
+            f"rm -rf -- {shlex.quote(remote_dir)} && "
+            f"mkdir -p {shlex.quote(remote_dir)} && "
+            f"tar -xzf {shlex.quote(remote_tar)} -C {shlex.quote(remote_dir)}"
+        )
+        rc = run(extract)
         if rc != 0:
             print(f"[extract] failed rc={rc}")
             return rc
-        rc = run(f"cd {args.dir} && {args.cmd}")
+        command = f"cd {shlex.quote(remote_dir)} && {args.cmd}"
+        if args.sudo:
+            command = f"printf '%s\\n' {shlex.quote(password)} | sudo -S -p '' bash -lc {shlex.quote(command)}"
+        rc = run(command)
         print(f"[remote] exit={rc}")
+        if args.cleanup:
+            run(f"rm -rf -- {shlex.quote(remote_dir)} {shlex.quote(remote_tar)}")
         return rc
     finally:
         client.close()

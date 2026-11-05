@@ -42,6 +42,26 @@ M0–M4 已在本地环境跑通（Windows + 192.168.1.99 上的 Postgres，Linu
 | 崩溃上报 | `crash_bundle` 脱敏、指纹去重、限流、自动建单与派单 | `POST /ingest/crash` | [崩溃上报](docs/崩溃上报实施记录.md) |
 | MCP 网关 | Agent 令牌（角色/项目绑定）、工具裁剪、Issue/验证/提交/推送/派生/发版工具；已接入 Syntropy MCP Pool 与 Agent 环境注入；调用审计落库，MCP 地址/池名可在「工具调用」页维护 | `backend/cmd/mcp-gateway`（:8097/mcp） | [MCP 网关](docs/MCP工具网关实施记录.md) |
 
+## 构建与部署
+
+```powershell
+# Windows：前端 + 5 个服务二进制 + 清单与 SHA-256
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build.ps1 -Version 0.1.0
+```
+
+```bash
+# Linux：Docker 一键安装（也可加 --install-docker）
+sudo ./scripts/install.sh --mode docker --env-file deploy/.env
+
+# 原地升级并等待所有健康检查
+sudo ./scripts/deploy.sh
+
+# 部署验收
+sudo ./scripts/verify-deploy.sh --mode docker --install-dir /opt/smartpipe
+```
+
+支持 Docker Compose 与二进制 + systemd 两种部署方式；环境变量、远程 Windows 部署和排障说明见 [部署文档](deploy/README.md)。
+
 重构方向：
 
 - 保留 `backend/cmd/bot` 作为蓝信入口；`bridge` 只做消息 ↔ Issue 的薄桥接与派单。
@@ -50,7 +70,7 @@ M0–M4 已在本地环境跑通（Windows + 192.168.1.99 上的 Postgres，Linu
 - 所有外部凭据由配置管理台托管，Agent 只拿到 `project_id`。
 - MCP 收敛为一个 smartpipe-mcp，内部按 GitHub/issue/patch/verify/release 分组。
 
-## 本地原型
+## 本地开发原型（早期）
 
 ```powershell
 # 1) Issue 原型服务（内存存储）

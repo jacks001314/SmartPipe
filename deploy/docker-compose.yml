@@ -1,19 +1,134 @@
-# SmartPipe 部署骨架（占位，随 M1 落地补全）
+# SmartPipe 容器部署：五个服务共用 Dockerfile 产出的同一个镜像。
+#
+# 首次部署：
+#   cp deploy/.env.example deploy/.env   # 填写数据库、蓝信和随机令牌
+#   chmod 600 deploy/.env
+#   sudo ./scripts/install.sh --mode docker
+#
+# 日常更新：
+#   sudo ./scripts/deploy.sh
+name: smartpipe
+
+x-service: &service
+  build:
+    context: ..
+    dockerfile: Dockerfile
+    args:
+      VERSION: ${SMARTPIPE_VERSION:-dev}
+      COMMIT: ${SMARTPIPE_COMMIT:-unknown}
+      BUILD_TIME: unknown
+  image: smartpipe:local
+  restart: unless-stopped
+  env_file:
+    - .env
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "3"
+
 services:
-  postgres:
-    image: postgres:16
+  admin-api:
+    <<: *service
+    command: ["admin-api"]
     environment:
-      POSTGRES_DB: smartpipe
-      POSTGRES_USER: smartpipe
-      POSTGRES_PASSWORD: changeme
+      SMARTPIPE_ADMIN_ADDR: ":8092"
+      SMARTPIPE_WEB_DIST: /app/web
+      SMARTPIPE_RUNTIME_DATA: /data/runtime
+      SMARTPIPE_VERIFY_URL: http://patch-verifier:8095
+      SMARTPIPE_RELEASE_URL: http://patch-verifier:8095
+      SMARTPIPE_BOT_ADDR: http://bot:8093
+      SMARTPIPE_MCP_URL: http://mcp-gateway:8097/mcp
+    ports:
+      - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_ADMIN_PORT:-8092}:8092"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - ./data/runtime:/data/runtime
+    depends_on:
+      patch-verifier:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8092/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
 
-  redis:
-    image: redis:7
+  bridge:
+    <<: *service
+    command: ["bridge"]
+    environment:
+      SMARTPIPE_BRIDGE_ADDR: ":8090"
+      SMARTPIPE_ADMIN_URL: http://admin-api:8092
+      SMARTPIPE_BOT_ADDR: http://bot:8093
+    ports:
+      - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_BRIDGE_PORT:-8090}:8090"
+    depends_on:
+      admin-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
-  # backend 各服务镜像从 backend/cmd/* 构建：
-  # bot / orchestrator / issue-service / patch-verifier / ci-adapter / release-service / mcp-gateway
+  patch-verifier:
+    <<: *service
+    command: ["patch-verifier"]
+    environment:
+      SMARTPIPE_VERIFY_ADDR: ":8095"
+      SMARTPIPE_VERIFY_WORK_ROOT: /data/verify/work
+      SMARTPIPE_WORKSPACE_ROOT: /data/verify/workspaces
+      SMARTPIPE_RELEASE_WORK_ROOT: /data/verify/releases
+      SMARTPIPE_RELEASE_OUTPUT_ROOT: /data/releases
+    ports:
+      - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_VERIFY_PORT:-8095}:8095"
+    volumes:
+      - ./data/verify:/data/verify
+      - ./data/releases:/data/releases
+      - ./data/go:/data/go
+      - ./data/go-cache:/data/go-cache
+      - ./data/npm:/data/npm
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8095/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
-volumes:
-  pgdata:
+  mcp-gateway:
+    <<: *service
+    command: ["mcp-gateway"]
+    environment:
+      SMARTPIPE_MCP_ADDR: ":8097"
+      SMARTPIPE_ADMIN_URL: http://admin-api:8092
+    ports:
+      - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_MCP_PORT:-8097}:8097"
+    depends_on:
+      admin-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8097/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  bot:
+    <<: *service
+    command: ["bot"]
+    environment:
+      BOT_HTTP_ADDR: ":8093"
+      BRIDGE_URL: http://bridge:8090
+      CRASH_INGEST_URL: http://bridge:8090/ingest/crash
+    ports:
+      - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_BOT_PORT:-8093}:8093"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8093/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 10s

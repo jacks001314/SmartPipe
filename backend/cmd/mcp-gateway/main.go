@@ -27,7 +27,7 @@ import (
 	"smartpipe/backend/internal/mcp"
 )
 
-const version = "0.1.0"
+var version = "0.1.0"
 
 func main() {
 	stdio := flag.Bool("stdio", false, "以 stdio 方式运行（本地 MCP 客户端）")

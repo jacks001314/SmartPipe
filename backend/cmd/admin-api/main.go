@@ -32,7 +32,7 @@ import (
 	"smartpipe/backend/internal/store"
 )
 
-const version = "0.1.0-m0"
+var version = "0.1.0-m0"
 
 func main() {
 	dsn := strings.TrimSpace(os.Getenv("SMARTPIPE_DSN"))

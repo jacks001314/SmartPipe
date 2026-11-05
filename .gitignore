@@ -1,13 +1,24 @@
 .syntropy/
 node_modules/
 web/dist/
+dist/
+dist-archive/
 *.exe
 *.test
 coverage.out
-# 本地真实凭证，勿提交
+# 本地真实凭证与部署数据，勿提交
+deploy/.env
 deploy/bot.local.env
+deploy/data/
 .dev/
 backend/bin/
+
+# 构建/部署临时文件
+*.tar.gz
+*.zip
+.deploy.env
+__pycache__/
+*.pyc
 
 # 附件是只读输入，不进仓库
 attachments/
