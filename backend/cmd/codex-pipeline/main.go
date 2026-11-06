@@ -169,28 +169,12 @@ func run(ctx context.Context, opts options) *summary {
 	}
 	out.Repo = prj.Repo
 	// 模型以配置台为准：项目绑定 > 全局默认 > 执行器默认模型。
-	if strings.TrimSpace(opts.model) == "" {
-		opts.model = strings.TrimSpace(prj.CodexModel)
+	var def *modelDefault
+	if strings.TrimSpace(opts.model) == "" && strings.TrimSpace(prj.CodexModel) == "" {
+		def, _ = fetchModelDefault(ctx, opts)
 	}
-	if strings.TrimSpace(opts.effort) == "" {
-		opts.effort = strings.TrimSpace(prj.CodexReasoningEffort)
-	}
-	if strings.TrimSpace(opts.model) == "" {
-		if def, err := fetchModelDefault(ctx, opts); err == nil {
-			if strings.TrimSpace(def.Model) != "" {
-				opts.model = def.Model
-				if opts.effort == "" {
-					opts.effort = strings.TrimSpace(def.ReasoningEffort)
-				}
-				if strings.TrimSpace(prj.CodexModelProvider) == "" {
-					prj.CodexModelProvider = strings.TrimSpace(def.ProviderID)
-				}
-			}
-		}
-	}
-	if strings.TrimSpace(opts.model) == "" {
-		opts.model = "deepseek-v4-flash"
-	}
+	opts.model, opts.effort, prj.CodexModelProvider = resolveModelSelection(
+		opts.model, opts.effort, prj, def)
 	out.Model = opts.model
 	var modelEnv []string
 	if providerID := strings.TrimSpace(prj.CodexModelProvider); providerID != "" {
@@ -397,6 +381,30 @@ func fetchProject(ctx context.Context, o options) (*project, error) {
 		out.Data.Default = "main"
 	}
 	return &out.Data, nil
+}
+
+// resolveModelSelection 决定本次执行使用的模型、推理强度与供应商。
+func resolveModelSelection(model, effort string, prj *project, def *modelDefault) (string, string, string) {
+	providerID := strings.TrimSpace(prj.CodexModelProvider)
+	if strings.TrimSpace(model) == "" {
+		model = strings.TrimSpace(prj.CodexModel)
+	}
+	if strings.TrimSpace(model) == "" && def != nil && strings.TrimSpace(def.Model) != "" {
+		model = strings.TrimSpace(def.Model)
+		if strings.TrimSpace(effort) == "" {
+			effort = strings.TrimSpace(def.ReasoningEffort)
+		}
+		if providerID == "" {
+			providerID = strings.TrimSpace(def.ProviderID)
+		}
+	}
+	if strings.TrimSpace(effort) == "" {
+		effort = strings.TrimSpace(prj.CodexReasoningEffort)
+	}
+	if strings.TrimSpace(model) == "" {
+		model = "deepseek-v4-flash"
+	}
+	return strings.TrimSpace(model), strings.TrimSpace(effort), providerID
 }
 
 func fetchModelDefault(ctx context.Context, o options) (*modelDefault, error) {
