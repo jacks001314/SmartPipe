@@ -140,7 +140,6 @@ SMARTPIPE_ADMIN_PORT=8092
 SMARTPIPE_BRIDGE_PORT=8090
 SMARTPIPE_BOT_PORT=8093
 SMARTPIPE_VERIFY_PORT=8095
-SMARTPIPE_MCP_PORT=8097
 SMARTPIPE_ADMIN_ADDR=:8092
 SMARTPIPE_BRIDGE_ADDR=:8090
 SMARTPIPE_VERIFY_ADDR=:8095
@@ -220,7 +219,7 @@ wait_compose_healthy() {
   local dir="$1" i service cid state ok
   for i in $(seq 1 60); do
     ok=1
-    for service in admin-api bridge patch-verifier mcp-gateway bot; do
+    for service in admin-api bridge patch-verifier bot; do
       cid="$(cd "$dir" && docker compose ps -q "$service" 2>/dev/null || true)"
       if [[ -z "$cid" ]]; then ok=0; break; fi
       state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" 2>/dev/null || echo unknown)"
@@ -306,7 +305,7 @@ install_binary_mode() {
   fi
 
   local unit source
-  for unit in smartpipe-patch-verifier smartpipe-admin-api smartpipe-mcp-gateway smartpipe-bridge smartpipe-bot; do
+  for unit in smartpipe-patch-verifier smartpipe-admin-api smartpipe-bridge smartpipe-bot; do
     source="$INSTALL_DIR/deploy/systemd/$unit.service"
     if [[ ! -f "$source" ]]; then
       echo "systemd unit missing: $source" >&2
@@ -318,11 +317,11 @@ install_binary_mode() {
   systemctl daemon-reload
   if [[ "$START_SERVICES" -eq 1 ]]; then
     systemctl enable --now smartpipe-patch-verifier.service smartpipe-admin-api.service \
-      smartpipe-mcp-gateway.service smartpipe-bridge.service smartpipe-bot.service
+      smartpipe-bridge.service smartpipe-bot.service
     local i port ok
     for i in $(seq 1 60); do
       ok=1
-      for port in 8092 8090 8095 8097 8093; do
+      for port in 8092 8090 8095 8093; do
         if ! curl -fsS --max-time 3 "http://127.0.0.1:$port/healthz" >/dev/null 2>&1; then ok=0; fi
       done
       if [[ "$ok" -eq 1 ]]; then
@@ -334,11 +333,9 @@ install_binary_mode() {
     if [[ "$ok" -ne 1 ]]; then
       echo "services did not become healthy within 120 seconds" >&2
       systemctl --no-pager --full status smartpipe-patch-verifier.service \
-        smartpipe-admin-api.service smartpipe-mcp-gateway.service \
-        smartpipe-bridge.service smartpipe-bot.service >&2 || true
+        smartpipe-admin-api.service smartpipe-bridge.service smartpipe-bot.service >&2 || true
       journalctl --no-pager -n 120 -u smartpipe-patch-verifier.service \
-        -u smartpipe-admin-api.service -u smartpipe-mcp-gateway.service \
-        -u smartpipe-bridge.service -u smartpipe-bot.service >&2 || true
+        -u smartpipe-admin-api.service -u smartpipe-bridge.service -u smartpipe-bot.service >&2 || true
       exit 1
     fi
   fi

@@ -7,7 +7,6 @@ SmartPipe 有五个常驻服务：
 | `admin-api` | 8092 | 管理接口、Web 控制台、数据库迁移 |
 | `bridge` | 8090 | 蓝信消息与 GitHub Webhook 入口 |
 | `patch-verifier` | 8095 | 干净副本补丁验证、制品构建 |
-| `mcp-gateway` | 8097 | Agent 的 MCP 工具入口 |
 | `bot` | 8093 | 蓝信 WebSocket、群回复、崩溃上报 |
 
 所有服务共用 `Dockerfile` 产出的同一个镜像。镜像内带 Git、Go 和 Node，`patch-verifier` 可以在隔离容器中执行仓库 `smartpipe.yaml` 声明的构建命令。
@@ -24,7 +23,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build.ps1 `
 
 输出位于 `dist/`：
 
-- `bin/admin-api.exe`、`bridge.exe`、`patch-verifier.exe`、`mcp-gateway.exe`、`bot.exe`、`botdiag.exe`
+- `bin/admin-api.exe`、`bridge.exe`、`patch-verifier.exe`、`bot.exe`、`botdiag.exe`
 - `web/`：已构建的 React 静态站点
 - `manifest.json`：版本、Git commit、构建时间和每个二进制的 SHA-256
 - `SHA256SUMS`
@@ -208,8 +207,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\sit-all.ps1
 项目名；在已有实例的机器上再装一套，必须同时满足三点，否则会把旧实例的容器重建：
 
 1. 环境文件里加 `COMPOSE_PROJECT_NAME=smartpipe-test2`（compose 优先读这个变量）；
-2. 换一组端口：`SMARTPIPE_ADMIN_PORT` / `BRIDGE_PORT` / `BOT_PORT` / `VERIFY_PORT`
-   / `MCP_PORT` 全部改掉；
+2. 换一组端口：`SMARTPIPE_ADMIN_PORT` / `BRIDGE_PORT` / `BOT_PORT` / `VERIFY_PORT` 全部改掉；
 3. 换一个数据库：不要和旧实例共用同一个 database，否则迁移与数据互相干扰。
 
 示例（192.168.0.5 上的第二套，端口 19090–19097）：
@@ -226,7 +224,6 @@ SMARTPIPE_ADMIN_PORT=19092
 SMARTPIPE_BRIDGE_PORT=19090
 SMARTPIPE_BOT_PORT=19093
 SMARTPIPE_VERIFY_PORT=19095
-SMARTPIPE_MCP_PORT=19097
 ```
 
 容器里的服务走 `172.17.0.1`（docker0 网关）访问宿主机上已经发布到 `0.0.0.0:5432`

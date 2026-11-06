@@ -41,7 +41,6 @@ services:
       SMARTPIPE_VERIFY_URL: http://patch-verifier:8095
       SMARTPIPE_RELEASE_URL: http://patch-verifier:8095
       SMARTPIPE_BOT_ADDR: http://bot:8093
-      SMARTPIPE_MCP_URL: http://mcp-gateway:8097/mcp
     ports:
       - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_ADMIN_PORT:-8092}:8092"
     volumes:
@@ -94,24 +93,6 @@ services:
       - ./data/npm:/data/npm
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8095/healthz"]
-      interval: 15s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-
-  mcp-gateway:
-    <<: *service
-    command: ["mcp-gateway"]
-    environment:
-      SMARTPIPE_MCP_ADDR: ":8097"
-      SMARTPIPE_ADMIN_URL: http://admin-api:8092
-    ports:
-      - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_MCP_PORT:-8097}:8097"
-    depends_on:
-      admin-api:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8097/healthz"]
       interval: 15s
       timeout: 5s
       retries: 12

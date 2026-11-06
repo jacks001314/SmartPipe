@@ -109,7 +109,7 @@ if [[ "$MODE" == "docker" ]]; then
     exit 1
   fi
   (cd "$compose_dir" && docker compose config -q)
-  for service in admin-api bridge patch-verifier mcp-gateway bot; do
+  for service in admin-api bridge patch-verifier bot; do
     cid="$(cd "$compose_dir" && docker compose ps -q "$service")"
     if [[ -z "$cid" ]]; then
       echo "FAIL missing container: $service" >&2
@@ -124,7 +124,7 @@ if [[ "$MODE" == "docker" ]]; then
       echo "CONTAINER $service=$state"
     fi
   done
-  for pair in "admin-api:8092" "bridge:8090" "patch-verifier:8095" "mcp-gateway:8097" "bot:8093"; do
+  for pair in "admin-api:8092" "bridge:8090" "patch-verifier:8095" "bot:8093"; do
     service="${pair%%:*}"
     port="${pair##*:}"
     if ! (cd "$compose_dir" && docker compose exec -T "$service" wget -qO- "http://127.0.0.1:$port/healthz"); then
@@ -135,7 +135,7 @@ if [[ "$MODE" == "docker" ]]; then
   done
   (cd "$compose_dir" && docker compose ps)
 else
-  for unit in smartpipe-patch-verifier smartpipe-admin-api smartpipe-mcp-gateway smartpipe-bridge smartpipe-bot; do
+  for unit in smartpipe-patch-verifier smartpipe-admin-api smartpipe-bridge smartpipe-bot; do
     if systemctl is-active --quiet "$unit.service"; then
       echo "SERVICE $unit=active"
     else
