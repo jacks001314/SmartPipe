@@ -166,7 +166,14 @@ copy_tree() {
   fi
   mkdir -p "$INSTALL_DIR"
   local item
-  for item in Dockerfile .dockerignore smartpipe.yaml README.md backend sdks web configs scripts docs; do
+  for item in backend sdks web configs scripts docs; do
+    if [[ -e "$SOURCE_DIR/$item" ]]; then
+      # 先删后拷，避免上一次部署留下的源文件（例如已删除的页面）参与构建。
+      rm -rf "$INSTALL_DIR/$item"
+      cp -a "$SOURCE_DIR/$item" "$INSTALL_DIR/"
+    fi
+  done
+  for item in Dockerfile .dockerignore smartpipe.yaml README.md; do
     if [[ -e "$SOURCE_DIR/$item" ]]; then
       cp -a "$SOURCE_DIR/$item" "$INSTALL_DIR/"
     fi
