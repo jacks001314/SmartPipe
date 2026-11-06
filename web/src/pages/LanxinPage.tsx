@@ -86,6 +86,10 @@ export function LanxinPage({ notify }: { notify: Notify }) {
   };
 
   const test = async () => {
+    if (dirty) {
+      notify("当前有未保存的修改，请先点「保存」再测试连接", "error");
+      return;
+    }
     setTesting(true);
     try {
       const res = await api.testLanxin();
@@ -144,6 +148,10 @@ export function LanxinPage({ notify }: { notify: Notify }) {
   };
 
   const configured = !!config?.has_secret;
+  const dirty =
+    form.app_id.trim() !== (config?.app_id ?? "") ||
+    form.api_base.trim() !== (config?.api_base ?? "") ||
+    form.app_secret !== "";
   const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? id;
 
   if (loading) {
@@ -185,17 +193,38 @@ export function LanxinPage({ notify }: { notify: Notify }) {
             </button>
             {configured && <button className="btn danger" onClick={() => void removeConfig()}>清除配置</button>}
             <button className="btn primary" disabled={saving} onClick={() => void save()}>
-              {saving ? "保存中…" : "保存"}
+              {saving ? "保存中…" : dirty ? "保存修改" : "保存"}
             </button>
           </div>
         </div>
         <div className="card-body">
           {config?.last_tested_at && (
-            <div className="tiny" style={{ marginBottom: 10 }}>
-              <span className={"chip " + (config.last_test_ok ? "ok" : "bad")} style={{ marginRight: 6 }}>
-                <span className="dot" />{config.last_test_ok ? "最近测试通过" : "最近测试失败"}
-              </span>
-              {config.last_test_message}
+            <div
+              style={{
+                marginBottom: 14,
+                padding: "10px 12px",
+                borderRadius: 10,
+                border: "1px solid " + (config.last_test_ok ? "#bfe6d0" : "#f6c7c7"),
+                background: config.last_test_ok ? "var(--ok-soft)" : "var(--danger-soft)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <span className={"chip " + (config.last_test_ok ? "ok" : "bad")}>
+                  <span className="dot" />{config.last_test_ok ? "最近测试通过" : "最近测试失败"}
+                </span>
+                <span className="tiny">{new Date(config.last_tested_at).toLocaleString()}</span>
+                <button className="btn small" style={{ marginLeft: "auto" }} disabled={testing || !configured} onClick={() => void test()}>
+                  {testing ? "测试中…" : "重新测试"}
+                </button>
+              </div>
+              <div style={{ color: config.last_test_ok ? "var(--ok)" : "var(--danger)", wordBreak: "break-word" }}>
+                {config.last_test_message}
+              </div>
+              {!config.last_test_ok && (
+                <div className="tiny" style={{ marginTop: 4 }}>
+                  可按提示核对 App ID、App Secret 与 API Base；保存修改后再测试。
+                </div>
+              )}
             </div>
           )}
           <div className="form-grid">
@@ -213,8 +242,11 @@ export function LanxinPage({ notify }: { notify: Notify }) {
               />
             </div>
             <div className="field full">
-              <label>API Base</label>
+              <label>API Base（网关地址，填到 /open/apigw 为止）</label>
               <input value={form.api_base} onChange={(e) => setForm((p) => ({ ...p, api_base: e.target.value }))} placeholder="https://open.e.lanxin.cn/open/apigw" />
+              <div className="tiny" style={{ marginTop: 4 }}>
+                公有云填 https://open.e.lanxin.cn/open/apigw；企业私有部署填管理员提供的网关地址（如 https://apigw.lx.qianxin.com）。无需填写 /v1 版本路径。
+              </div>
             </div>
             <div className="field full">
               <label>群聊响应规则</label>

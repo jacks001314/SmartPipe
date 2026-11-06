@@ -10,6 +10,7 @@ import (
 	"github.com/kataras/iris/v12"
 
 	"smartpipe/backend/internal/store"
+	lanxinsdk "smartpipe/sdks/lanxin"
 )
 
 // registerLanxin 挂载蓝信机器人配置：应用连接、群绑定和最近消息。
@@ -101,9 +102,9 @@ func (a *API) putLanxinConfig(c iris.Context) {
 		return
 	}
 	in.AppID = strings.TrimSpace(in.AppID)
-	in.APIBase = strings.TrimSpace(in.APIBase)
+	in.APIBase = lanxinsdk.NormalizeAPIBase(in.APIBase)
 	if in.APIBase == "" {
-		in.APIBase = "https://open.e.lanxin.cn/open/apigw"
+		in.APIBase = lanxinsdk.DefaultAPIBase
 	}
 	if in.AppID == "" {
 		a.badRequest(c, "App ID 不能为空")

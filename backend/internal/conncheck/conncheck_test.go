@@ -69,14 +69,89 @@ func TestSyntropyHealth(t *testing.T) {
 	}
 }
 
-func TestLanxinToken(t *testing.T) {
+func TestLanxinTokenUsesGetWithQuery(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotQuery = map[string]string{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		for _, k := range []string{"grant_type", "appid", "secret"} {
+			gotQuery[k] = r.URL.Query().Get(k)
 		}
 		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errCode":0,"errMsg":"","data":{"appToken":"x","expiresIn":7200}}`))
+	}))
+	defer srv.Close()
+
+	res := newChecker().Dispatch(context.Background(), "lanxin", "s3cret", map[string]any{
+		"app_id":   "org-app",
+		"api_base": srv.URL + "/",
+	})
+	if !res.OK {
+		t.Fatalf("expected ok, got %+v", res)
+	}
+	if gotMethod != http.MethodGet {
+		t.Fatalf("expected GET, got %s", gotMethod)
+	}
+	if gotPath != "/v1/apptoken/create" {
+		t.Fatalf("unexpected path %q", gotPath)
+	}
+	if gotQuery["grant_type"] != "client_credential" || gotQuery["appid"] != "org-app" || gotQuery["secret"] != "s3cret" {
+		t.Fatalf("unexpected query %+v", gotQuery)
+	}
+}
+
+// 用户误把 /v1 填进 API Base 时，不应拼成 /v1/v1。
+func TestLanxinBaseStripsVersionSuffix(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
 		_, _ = w.Write([]byte(`{"errCode":0,"data":{"appToken":"x"}}`))
+	}))
+	defer srv.Close()
+
+	res := newChecker().Dispatch(context.Background(), "lanxin", "s3cret", map[string]any{
+		"app_id":   "org-app",
+		"api_base": srv.URL + "/v1/",
+	})
+	if !res.OK {
+		t.Fatalf("expected ok, got %+v", res)
+	}
+	if gotPath != "/v1/apptoken/create" {
+		t.Fatalf("unexpected path %q", gotPath)
+	}
+}
+
+// errCode 非 0 时必须带回上游 errMsg 与可操作建议，并且不泄露 secret。
+func TestLanxinReportsUpstreamErrMsg(t *testing.T) {
+	secret := "super-secret-app-key"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"errCode":-5,"errMsg":"appid or secret invalid","data":null}`))
+	}))
+	defer srv.Close()
+
+	res := newChecker().Dispatch(context.Background(), "lanxin", secret, map[string]any{
+		"app_id":   "org-app",
+		"api_base": srv.URL,
+	})
+	if res.OK {
+		t.Fatal("expected failure")
+	}
+	for _, want := range []string{"errCode=-5", "appid or secret invalid", "API Base"} {
+		if !strings.Contains(res.Message, want) {
+			t.Fatalf("message missing %q: %q", want, res.Message)
+		}
+	}
+	if strings.Contains(res.Message, secret) {
+		t.Fatal("message leaked the app secret")
+	}
+}
+
+// 网关返回非 JSON（例如 HTML 错误页）时要说明原因，而不是只报状态码。
+func TestLanxinNonJSONResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("<html>404 Not Found</html>"))
 	}))
 	defer srv.Close()
 
@@ -84,8 +159,11 @@ func TestLanxinToken(t *testing.T) {
 		"app_id":   "org-app",
 		"api_base": srv.URL,
 	})
-	if !res.OK {
-		t.Fatalf("expected ok, got %+v", res)
+	if res.OK {
+		t.Fatal("expected failure")
+	}
+	if !strings.Contains(res.Message, "404") || !strings.Contains(res.Message, "不是 JSON") {
+		t.Fatalf("unexpected message %q", res.Message)
 	}
 }
 

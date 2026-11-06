@@ -19,9 +19,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
+
+	lanxinsdk "smartpipe/sdks/lanxin"
 )
 
 // Result 是一次连接测试的结论。
@@ -184,36 +188,82 @@ func signAppJWT(appID, privateKeyPEM string, now time.Time) (string, error) {
 	return signingInput + "." + enc.EncodeToString(sig), nil
 }
 
+// lanxinErrHint 把蓝信返回的业务错误码翻译成可操作的排查建议。
+func lanxinErrHint(code int) string {
+	switch code {
+	case -5:
+		return "网关认为请求方法或路径不对；请确认 API Base 是该环境的网关根地址（不要带 /v1）"
+	case 40013:
+		return "网关没有收到 appid 参数；请确认 App ID 已保存，且 API Base 指向蓝信网关根地址"
+	case 40018:
+		return "App Secret 错误；请到蓝信管理后台重新复制应用密钥，填到 App Secret 后保存"
+	case 10005:
+		return "应用缺少该接口权限，请联系蓝信管理员开通"
+	}
+	return "请核对 App ID、App Secret 与 API Base"
+}
+
+// lanxin 用 GET + query 调 /v1/apptoken/create（官方协议），
+// 失败时把上游 errMsg 与排查建议一起返回给管理界面。
 func (c *Checker) lanxin(ctx context.Context, appSecret string, meta map[string]any) Result {
 	appID := metaString(meta, "app_id", "")
-	base := metaString(meta, "api_base", "https://open.e.lanxin.cn/open/apigw")
+	base := lanxinsdk.NormalizeAPIBase(metaString(meta, "api_base", lanxinsdk.DefaultAPIBase))
 	if appID == "" {
-		return Result{Message: "缺少 app_id"}
+		return Result{Message: "缺少 App ID：请填写并保存应用配置"}
 	}
-	payload := map[string]string{"appId": appID, "appSecret": appSecret}
-	raw, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(base, "/")+"/v1/apptoken/create", bytes.NewReader(raw))
+	if strings.TrimSpace(appSecret) == "" {
+		return Result{Message: "缺少 App Secret：请重新填写并保存"}
+	}
+	q := url.Values{}
+	q.Set("grant_type", "client_credential")
+	q.Set("appid", appID)
+	q.Set("secret", appSecret)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1/apptoken/create?"+q.Encode(), nil)
 	if err != nil {
-		return Result{Message: "构造请求失败"}
+		return Result{Message: "构造请求失败：请检查 API Base 是否为合法 URL"}
 	}
-	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.client().Do(req)
 	if err != nil {
-		return Result{Message: "网络不可达: " + scrub(err.Error(), appSecret)}
+		return Result{Message: "无法连接蓝信网关 " + base + "：" + scrub(err.Error(), appSecret) + "；请检查网关地址、网络与代理"}
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if resp.StatusCode == http.StatusOK {
-		var out struct {
-			ErrCode int `json:"errCode"`
-		}
-		_ = json.Unmarshal(body, &out)
-		if out.ErrCode == 0 {
-			return Result{OK: true, Message: "蓝信 app token 获取成功"}
-		}
-		return Result{Message: fmt.Sprintf("蓝信返回 errCode=%d", out.ErrCode)}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	var out struct {
+		ErrCode int    `json:"errCode"`
+		ErrMsg  string `json:"errMsg"`
+		Data    struct {
+			AppToken  string `json:"appToken"`
+			ExpiresIn int    `json:"expiresIn"`
+		} `json:"data"`
 	}
-	return Result{Message: fmt.Sprintf("蓝信网关返回 %d", resp.StatusCode)}
+	if err := json.Unmarshal(body, &out); err != nil {
+		snippet := strings.TrimSpace(scrub(string(body), appSecret))
+		if snippet == "" {
+			return Result{Message: fmt.Sprintf("蓝信网关返回 HTTP %d 且响应为空；请确认 API Base 指向蓝信 API 网关", resp.StatusCode)}
+		}
+		return Result{Message: fmt.Sprintf("蓝信网关返回 HTTP %d，响应不是 JSON：%s", resp.StatusCode, truncate(snippet, 160))}
+	}
+	if out.ErrCode != 0 {
+		detail := "蓝信返回 errCode=" + strconv.Itoa(out.ErrCode)
+		if msg := strings.TrimSpace(out.ErrMsg); msg != "" {
+			detail += "（" + msg + "）"
+		}
+		if hint := lanxinErrHint(out.ErrCode); hint != "" {
+			detail += "。" + hint
+		}
+		return Result{Message: scrub(detail, appSecret)}
+	}
+	if resp.StatusCode != http.StatusOK {
+		return Result{Message: fmt.Sprintf("蓝信网关返回 HTTP %d；请确认 API Base 与网络可达", resp.StatusCode)}
+	}
+	if out.Data.AppToken == "" {
+		return Result{Message: "蓝信返回成功但缺少 appToken；请确认 API Base 与 App ID 属于同一蓝信环境"}
+	}
+	ttl := out.Data.ExpiresIn
+	if ttl <= 0 {
+		ttl = 7200
+	}
+	return Result{OK: true, Message: fmt.Sprintf("蓝信 app token 获取成功（有效期 %d 秒）", ttl)}
 }
 
 func (c *Checker) syntropy(ctx context.Context, token string, meta map[string]any) Result {
