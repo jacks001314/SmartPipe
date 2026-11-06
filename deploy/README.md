@@ -199,6 +199,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\sit-all.ps1
 - 主密钥必须备份；丢失后，配置台中保存的第三方凭据无法解密。
 - `SMARTPIPE_BIND_ADDR=0.0.0.0` 会监听所有网卡，建议用防火墙限制 8090/8092/8095/8097/8093。
 - GitHub Webhook 暴露到公网时，使用反向代理或临时隧道，并保持 `GITHUB_WEBHOOK_SECRET` 已配置。
+- 控制台登录：设置 `SMARTPIPE_ADMIN_USER` / `SMARTPIPE_ADMIN_PASSWORD` 后启用用户名密码登录，
+  会话保存在 HttpOnly Cookie（`SMARTPIPE_SESSION_TTL`，默认 12h）；密码留空时只接受
+  `Authorization: Bearer $SMARTPIPE_ADMIN_TOKEN`。修改密码后可用
+  `SMARTPIPE_ADMIN_PASSWORD_RESET=true` 重启一次强制同步环境变量里的新密码。
 - 数据库迁移由 `admin-api` 和 `bridge` 启动时幂等执行；多个实例同时启动由 PostgreSQL advisory lock 串行化。
 - 升级前建议先备份数据库；`deploy/data/` 保存运行时实例、验证工作区和发版制品。
 ## 10. 同一台机器跑第二套实例

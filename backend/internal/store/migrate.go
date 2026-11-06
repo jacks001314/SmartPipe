@@ -18,24 +18,26 @@ var migrations = []migration{
 		name:    "admin_users",
 		sql: `
 CREATE TABLE IF NOT EXISTS admin_users (
-    id            TEXT PRIMARY KEY,
-    username      TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
+    id            BIGSERIAL PRIMARY KEY,
+    username      TEXT NOT NULL,
     display_name  TEXT NOT NULL DEFAULT '',
+    password_hash TEXT NOT NULL,
+    role          TEXT NOT NULL DEFAULT 'admin',
     enabled       BOOLEAN NOT NULL DEFAULT true,
     last_login_at TIMESTAMPTZ,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS admin_users_username_uniq ON admin_users (lower(username));
+
 CREATE TABLE IF NOT EXISTS admin_sessions (
-    id           TEXT PRIMARY KEY,
-    user_id      TEXT NOT NULL,
-    expires_at   TIMESTAMPTZ NOT NULL,
-    user_agent   TEXT NOT NULL DEFAULT '',
-    ip           TEXT NOT NULL DEFAULT '',
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    token_hash TEXT PRIMARY KEY,
+    user_id    BIGINT NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+    user_agent TEXT NOT NULL DEFAULT '',
+    ip         TEXT NOT NULL DEFAULT '',
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS admin_sessions_expires_idx ON admin_sessions (expires_at);

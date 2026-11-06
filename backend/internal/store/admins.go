@@ -11,7 +11,7 @@ import (
 
 // AdminUser 是配置台的登录账号。PasswordHash 永不出现在 JSON 里。
 type AdminUser struct {
-	ID           string     `json:"id"`
+	ID           int64      `json:"id"`
 	Username     string     `json:"username"`
 	PasswordHash string     `json:"-"`
 	DisplayName  string     `json:"display_name"`
@@ -24,7 +24,7 @@ type AdminUser struct {
 // AdminSession 是一次登录会话；ID 存的是 Cookie 令牌的 SHA-256。
 type AdminSession struct {
 	ID          string    `json:"-"`
-	UserID      string    `json:"user_id"`
+	UserID      int64     `json:"user_id"`
 	Username    string    `json:"username"`
 	DisplayName string    `json:"display_name"`
 	ExpiresAt   time.Time `json:"expires_at"`
@@ -74,10 +74,10 @@ func (s *Store) CreateAdminUser(ctx context.Context, username, passwordHash, dis
 		displayName = username
 	}
 	row := s.db.QueryRowContext(ctx, `
-INSERT INTO admin_users (id, username, password_hash, display_name)
-VALUES ($1,$2,$3,$4)
+INSERT INTO admin_users (username, password_hash, display_name)
+VALUES ($1,$2,$3)
 RETURNING `+adminUserColumns,
-		newID("usr"), username, passwordHash, displayName)
+		username, passwordHash, displayName)
 	u, err := scanAdminUser(row)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -91,12 +91,12 @@ RETURNING `+adminUserColumns,
 // GetAdminUserByUsername 按用户名读取账号（含密码哈希，仅供登录校验）。
 func (s *Store) GetAdminUserByUsername(ctx context.Context, username string) (*AdminUser, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT `+adminUserColumns+` FROM admin_users WHERE username = $1`, strings.TrimSpace(username))
+		`SELECT `+adminUserColumns+` FROM admin_users WHERE lower(username) = lower($1)`, strings.TrimSpace(username))
 	return scanAdminUser(row)
 }
 
 // UpdateAdminPassword 更新密码哈希。
-func (s *Store) UpdateAdminPassword(ctx context.Context, id, passwordHash string) error {
+func (s *Store) UpdateAdminPassword(ctx context.Context, id int64, passwordHash string) error {
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE admin_users SET password_hash = $2, updated_at = now() WHERE id = $1`, id, passwordHash)
 	if err != nil {
@@ -110,17 +110,17 @@ func (s *Store) UpdateAdminPassword(ctx context.Context, id, passwordHash string
 }
 
 // TouchAdminLogin 记录最近登录时间。
-func (s *Store) TouchAdminLogin(ctx context.Context, id string) error {
+func (s *Store) TouchAdminLogin(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE admin_users SET last_login_at = now(), updated_at = now() WHERE id = $1`, id)
 	return err
 }
 
-// CreateAdminSession 保存会话（id 为令牌哈希）。
-func (s *Store) CreateAdminSession(ctx context.Context, id, userID string, expiresAt time.Time, userAgent, ip string) error {
+// CreateAdminSession 保存会话（第一个参数为令牌哈希）。
+func (s *Store) CreateAdminSession(ctx context.Context, tokenHash string, userID int64, expiresAt time.Time, userAgent, ip string) error {
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO admin_sessions (id, user_id, expires_at, user_agent, ip)
-VALUES ($1,$2,$3,$4,$5)`, id, userID, expiresAt, userAgent, ip)
+INSERT INTO admin_sessions (token_hash, user_id, expires_at, user_agent, ip)
+VALUES ($1,$2,$3,$4,$5)`, tokenHash, userID, expiresAt, userAgent, ip)
 	if err != nil {
 		return fmt.Errorf("store: create admin session: %w", err)
 	}
@@ -128,37 +128,36 @@ VALUES ($1,$2,$3,$4,$5)`, id, userID, expiresAt, userAgent, ip)
 }
 
 // GetAdminSession 读取有效会话；过期或账号停用返回 ErrNotFound。
-func (s *Store) GetAdminSession(ctx context.Context, id string) (*AdminSession, error) {
+func (s *Store) GetAdminSession(ctx context.Context, tokenHash string) (*AdminSession, error) {
 	var sess AdminSession
 	err := s.db.QueryRowContext(ctx, `
-SELECT s.id, s.user_id, u.username, u.display_name, s.expires_at, s.created_at, s.last_seen_at
+SELECT s.token_hash, s.user_id, u.username, u.display_name, s.expires_at, s.created_at
   FROM admin_sessions s
   JOIN admin_users u ON u.id = s.user_id
- WHERE s.id = $1 AND s.expires_at > now() AND u.enabled`, id).
+ WHERE s.token_hash = $1 AND s.expires_at > now() AND u.enabled`, tokenHash).
 		Scan(&sess.ID, &sess.UserID, &sess.Username, &sess.DisplayName,
-			&sess.ExpiresAt, &sess.CreatedAt, &sess.LastSeenAt)
+			&sess.ExpiresAt, &sess.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: get admin session: %w", err)
 	}
+	sess.LastSeenAt = sess.CreatedAt
 	return &sess, nil
 }
 
-// TouchAdminSession 刷新最近活跃时间。
-func (s *Store) TouchAdminSession(ctx context.Context, id string) {
-	_, _ = s.db.ExecContext(ctx, `UPDATE admin_sessions SET last_seen_at = now() WHERE id = $1`, id)
-}
+// TouchAdminSession 保留接口；现有表结构不记录最近活跃时间。
+func (s *Store) TouchAdminSession(ctx context.Context, id string) {}
 
 // DeleteAdminSession 退出登录。
-func (s *Store) DeleteAdminSession(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM admin_sessions WHERE id = $1`, id)
+func (s *Store) DeleteAdminSession(ctx context.Context, tokenHash string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM admin_sessions WHERE token_hash = $1`, tokenHash)
 	return err
 }
 
 // DeleteUserSessions 在改密码后让其他会话失效。
-func (s *Store) DeleteUserSessions(ctx context.Context, userID string) error {
+func (s *Store) DeleteUserSessions(ctx context.Context, userID int64) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM admin_sessions WHERE user_id = $1`, userID)
 	return err
 }

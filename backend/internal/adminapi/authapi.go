@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -120,7 +121,7 @@ func (a *API) login(c iris.Context) {
 		Expires:  expires,
 		MaxAge:   int(ttl.Seconds()),
 	})
-	a.audit(ctx, c, "auth.login", "admin_user", user.ID, nil, "ok", map[string]any{"username": user.Username})
+	a.audit(ctx, c, "auth.login", "admin_user", strconv.FormatInt(user.ID, 10), nil, "ok", map[string]any{"username": user.Username})
 	_ = c.JSON(envelope{Data: iris.Map{
 		"username":     user.Username,
 		"display_name": user.DisplayName,
