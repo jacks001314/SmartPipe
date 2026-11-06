@@ -132,6 +132,17 @@ export function LanxinPage({ notify }: { notify: Notify }) {
     }
   };
 
+  const removeConfig = async () => {
+    if (!window.confirm("清除已保存的蓝信应用配置？bot 会回落到环境变量。")) return;
+    try {
+      await api.deleteLanxinConfig();
+      notify("蓝信应用配置已清除");
+      await load();
+    } catch (err) {
+      notify(err instanceof ApiError ? err.message : "清除失败", "error");
+    }
+  };
+
   const configured = !!config?.has_secret;
   const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? id;
 
@@ -172,6 +183,7 @@ export function LanxinPage({ notify }: { notify: Notify }) {
             <button className="btn" disabled={testing || !configured} onClick={() => void test()}>
               {testing ? "测试中…" : "测试连接"}
             </button>
+            {configured && <button className="btn danger" onClick={() => void removeConfig()}>清除配置</button>}
             <button className="btn primary" disabled={saving} onClick={() => void save()}>
               {saving ? "保存中…" : "保存"}
             </button>

@@ -17,6 +17,7 @@ func (a *API) registerLanxin(party iris.Party) {
 	party.Get("/lanxin/config", a.getLanxinConfig)
 	party.Put("/lanxin/config", a.putLanxinConfig)
 	party.Post("/lanxin/test", a.testLanxinConfig)
+	party.Delete("/lanxin/config", a.deleteLanxinConfig)
 	party.Get("/lanxin/groups", a.listLanxinGroups)
 	party.Post("/lanxin/groups/bind", a.bindLanxinGroup)
 	party.Delete("/lanxin/groups/{group}", a.unbindLanxinGroup)
@@ -156,6 +157,22 @@ func (a *API) putLanxinConfig(c iris.Context) {
 	a.audit(ctx, c, "lanxin.config.update", "credential", cred.ID, nil, "ok",
 		map[string]any{"app_id": in.AppID, "secret_rotated": strings.TrimSpace(in.AppSecret) != ""})
 	_ = c.JSON(envelope{Data: view})
+}
+
+func (a *API) deleteLanxinConfig(c iris.Context) {
+	ctx := c.Request().Context()
+	cred, err := a.findLanxinCredential(ctx)
+	if err != nil {
+		a.badRequest(c, "还没有保存蓝信应用配置")
+		return
+	}
+	if err := a.store.DeleteCredential(ctx, cred.ID); err != nil {
+		a.fail(c, err)
+		return
+	}
+	_ = a.store.SetSetting(ctx, "lanxin_require_at_me", "true")
+	a.audit(ctx, c, "lanxin.config.delete", "credential", cred.ID, nil, "ok", nil)
+	c.StatusCode(http.StatusNoContent)
 }
 
 func (a *API) testLanxinConfig(c iris.Context) {

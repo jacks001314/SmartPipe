@@ -134,6 +134,7 @@ export const api = {
   saveLanxinConfig: (body: { app_id: string; app_secret?: string; api_base?: string; require_at_me?: boolean }) =>
     request<LanxinConfig>("/lanxin/config", { method: "PUT", body }),
   testLanxin: () => request<LanxinTestResult>("/lanxin/test", { method: "POST" }),
+  deleteLanxinConfig: () => request<void>("/lanxin/config", { method: "DELETE" }),
   listLanxinGroups: () => request<LanxinGroup[]>("/lanxin/groups"),
   bindLanxinGroup: (groupId: string, projectId: string) =>
     request<{ group_id: string; project_id: string }>("/lanxin/groups/bind", { method: "POST", body: { group_id: groupId, project_id: projectId } }),
