@@ -202,3 +202,36 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\sit-all.ps1
 - GitHub Webhook 暴露到公网时，使用反向代理或临时隧道，并保持 `GITHUB_WEBHOOK_SECRET` 已配置。
 - 数据库迁移由 `admin-api` 和 `bridge` 启动时幂等执行；多个实例同时启动由 PostgreSQL advisory lock 串行化。
 - 升级前建议先备份数据库；`deploy/data/` 保存运行时实例、验证工作区和发版制品。
+## 10. 同一台机器跑第二套实例
+
+`deploy/docker-compose.yml` 里写了 `name: smartpipe`，默认会占用同一个 compose
+项目名；在已有实例的机器上再装一套，必须同时满足三点，否则会把旧实例的容器重建：
+
+1. 环境文件里加 `COMPOSE_PROJECT_NAME=smartpipe-test2`（compose 优先读这个变量）；
+2. 换一组端口：`SMARTPIPE_ADMIN_PORT` / `BRIDGE_PORT` / `BOT_PORT` / `VERIFY_PORT`
+   / `MCP_PORT` 全部改掉；
+3. 换一个数据库：不要和旧实例共用同一个 database，否则迁移与数据互相干扰。
+
+示例（192.168.0.5 上的第二套，端口 19090–19097）：
+
+```bash
+# 数据库：用已有 Postgres 容器建独立库与角色
+docker exec smartpipe-postgres psql -U smartpipe -d postgres -c "CREATE ROLE smartpipe_v05 LOGIN PASSWORD '...'"
+docker exec smartpipe-postgres psql -U smartpipe -d postgres -c "CREATE DATABASE smartpipe_v05 OWNER smartpipe_v05"
+
+# 环境文件追加
+COMPOSE_PROJECT_NAME=smartpipe-v05
+SMARTPIPE_DSN=postgres://smartpipe_v05:...@172.17.0.1:5432/smartpipe_v05?sslmode=disable
+SMARTPIPE_ADMIN_PORT=19092
+SMARTPIPE_BRIDGE_PORT=19090
+SMARTPIPE_BOT_PORT=19093
+SMARTPIPE_VERIFY_PORT=19095
+SMARTPIPE_MCP_PORT=19097
+```
+
+容器里的服务走 `172.17.0.1`（docker0 网关）访问宿主机上已经发布到 `0.0.0.0:5432`
+的 Postgres。
+
+另外，全新数据库必须依赖 `store.Migrate` 按版本升序执行迁移；旧代码按声明顺序
+（18 → 1）执行，空库会在 `agent_tokens` 上失败，admin-api 反复重启。该问题已修复，
+排障时先看 `docker logs <project>-admin-api-1` 里有没有 `apply migration 18`。
