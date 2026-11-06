@@ -124,6 +124,7 @@ services:
       BOT_HTTP_ADDR: ":8093"
       BRIDGE_URL: http://bridge:8090
       CRASH_INGEST_URL: http://bridge:8090/ingest/crash
+      SMARTPIPE_ADMIN_URL: http://admin-api:8092
     ports:
       - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_BOT_PORT:-8093}:8093"
     healthcheck:

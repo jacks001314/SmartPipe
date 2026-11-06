@@ -99,6 +99,33 @@ export type ModelProvider = {
   updated_at: string;
 };
 
+export type LanxinConfig = {
+  credential_id: string;
+  app_id: string;
+  api_base: string;
+  secret_mask: string;
+  has_secret: boolean;
+  require_at_me: boolean;
+  last_tested_at: string | null;
+  last_test_ok: boolean | null;
+  last_test_message: string;
+  updated_at: string | null;
+};
+
+export type LanxinGroup = {
+  group_id: string;
+  project_id: string;
+  project_name: string;
+  enabled: boolean;
+};
+
+export type LanxinTestResult = {
+  ok: boolean;
+  message: string;
+  latency_ms: number;
+  config: LanxinConfig;
+};
+
 export type ModelDefault = {
   provider_id: string;
   model: string;

@@ -150,6 +150,8 @@ func (a *API) Register(app *iris.Application) {
 	a.registerIdentities(party)
 	a.registerToolCalls(party)
 	a.registerModels(party)
+	a.registerLanxin(party)
+	a.registerLanxinInternal(app)
 }
 
 func (a *API) cors(ctx iris.Context) {

@@ -7,6 +7,9 @@ import type {
   CrashReport,
   CrashRetention,
   Credential,
+  LanxinConfig,
+  LanxinGroup,
+  LanxinTestResult,
   ModelDefault,
   ModelProvider,
   ProviderModel,
@@ -127,6 +130,15 @@ export const api = {
     request<{ provider: ModelProvider; count: number }>("/model-providers/" + id + "/models/refresh", { method: "POST" }),
   getModelDefault: () => request<ModelDefault>("/model-default"),
   putModelDefault: (body: ModelDefault) => request<ModelDefault>("/model-default", { method: "PUT", body }),
+  getLanxinConfig: () => request<LanxinConfig>("/lanxin/config"),
+  saveLanxinConfig: (body: { app_id: string; app_secret?: string; api_base?: string; require_at_me?: boolean }) =>
+    request<LanxinConfig>("/lanxin/config", { method: "PUT", body }),
+  testLanxin: () => request<LanxinTestResult>("/lanxin/test", { method: "POST" }),
+  listLanxinGroups: () => request<LanxinGroup[]>("/lanxin/groups"),
+  bindLanxinGroup: (groupId: string, projectId: string) =>
+    request<{ group_id: string; project_id: string }>("/lanxin/groups/bind", { method: "POST", body: { group_id: groupId, project_id: projectId } }),
+  unbindLanxinGroup: (groupId: string) => request<void>("/lanxin/groups/" + encodeURIComponent(groupId), { method: "DELETE" }),
+  listLanxinMessages: (limit = 30) => request<BridgeLink[]>("/lanxin/messages?limit=" + limit),
   listAudit: (limit = 100, action = "") =>
     request<AuditEntry[]>("/audit?limit=" + limit + (action ? "&action=" + encodeURIComponent(action) : "")),
 

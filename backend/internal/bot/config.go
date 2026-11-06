@@ -30,6 +30,9 @@ type Config struct {
 	// RequireAtMe 群聊是否仅在 @机器人 时响应（默认 true）。
 	RequireAtMe bool
 
+	// AdminURL 非空时，启动与运行期会从配置台读取蓝信应用配置。
+	AdminURL string
+
 	// InternalToken 内网接口共享令牌（bot 与 orchestrator 一致；为空则不校验）。
 	InternalToken string
 
@@ -58,11 +61,17 @@ func LoadFromEnv() (Config, error) {
 		CrashToken:      os.Getenv("CRASH_INGEST_TOKEN"),
 		CrashProject:    os.Getenv("CRASH_PROJECT_ID"),
 		CrashMaxBytes:   atoiOr(os.Getenv("CRASH_MAX_BYTES"), 256*1024),
-	}
-	if cfg.AppID == "" || cfg.AppSecret == "" {
-		return cfg, fmt.Errorf("bot: LANXIN_APP_ID / LANXIN_APP_SECRET 必填（蓝信桌面端获取）")
+		AdminURL:        strings.TrimRight(os.Getenv("SMARTPIPE_ADMIN_URL"), "/"),
 	}
 	return cfg, nil
+}
+
+// Validate 在远程配置合并后检查必填项。
+func (c Config) Validate() error {
+	if c.AppID == "" || c.AppSecret == "" {
+		return fmt.Errorf("bot: 蓝信 App ID / Secret 未配置（配置台「蓝信配置」或 LANXIN_APP_ID/LANXIN_APP_SECRET）")
+	}
+	return nil
 }
 
 func atoiOr(raw string, def int) int {

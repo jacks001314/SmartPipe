@@ -172,6 +172,27 @@ func (s *Store) GetSecret(ctx context.Context, id string) (kind string, plaintex
 	return kind, plaintext, metadata, nil
 }
 
+// UpdateCredentialMetadata 更新凭据的公开元数据（如 app_id、api_base）。
+func (s *Store) UpdateCredentialMetadata(ctx context.Context, id string, metadata map[string]any) error {
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	rawMeta, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("store: encode metadata: %w", err)
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE credentials SET metadata = $2::jsonb, updated_at = now() WHERE id = $1`, id, string(rawMeta))
+	if err != nil {
+		return fmt.Errorf("store: update credential metadata: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // RotateCredential 用新值替换凭据，旧值立即失效。
 func (s *Store) RotateCredential(ctx context.Context, id, plaintext string) (*Credential, error) {
 	if plaintext == "" {
