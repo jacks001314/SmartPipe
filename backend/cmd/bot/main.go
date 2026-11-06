@@ -45,6 +45,12 @@ func startWS(parent context.Context, cfg bot.Config) *wsRunner {
 	return &wsRunner{cancel: cancel, done: done, handler: handler}
 }
 
+// sameLanxin 比较两次运行配置里影响蓝信连接的字段。
+func sameLanxin(a, b bot.Config) bool {
+	return a.AppID == b.AppID && a.AppSecret == b.AppSecret &&
+		a.APIBase == b.APIBase && a.RequireAtMe == b.RequireAtMe
+}
+
 func main() {
 	cfg, err := bot.LoadFromEnv()
 	if err != nil {
@@ -73,26 +79,38 @@ func main() {
 		go func() {
 			ticker := time.NewTicker(30 * time.Second)
 			defer ticker.Stop()
+			running := cfg
+			var lastErr string
 			for {
 				select {
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
 					rc, err := bot.FetchRemoteConfig(ctx, cfg.AdminURL, cfg.InternalToken)
-					if err != nil || rc == nil {
+					if err != nil {
+						// 只在错误发生变化时打日志，避免每 30 秒刷屏。
+						if err.Error() != lastErr {
+							lastErr = err.Error()
+							log.Printf("[bot] 轮询配置台失败: %v", err)
+						}
 						continue
 					}
+					if rc == nil {
+						continue
+					}
+					lastErr = ""
 					target := envCfg
 					if rc.AppID != "" {
 						target = envCfg.WithRemote(rc)
 					}
-					if target.SameLanxin(rc) {
+					if sameLanxin(running, target) {
 						continue
 					}
-					log.Printf("[bot] 检测到蓝信配置变更，重连 websocket")
+					log.Printf("[bot] 检测到蓝信配置变更（app_id=%s, api_base=%s），重连 websocket", target.AppID, target.APIBase)
 					runner.cancel()
 					<-runner.done
 					cfg = target
+					running = target
 					runner = startWS(ctx, cfg)
 				}
 			}
