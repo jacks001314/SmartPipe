@@ -11,11 +11,9 @@ type FormState = {
   github_issue_repo: string;
   bluex_group_ids: string;
   verify_profile_path: string;
-  lead_agent_template: string;
   codex_model_provider: string;
   codex_model: string;
   codex_reasoning_effort: string;
-  tool_profile: string;
   codeowners_required: boolean;
 };
 
@@ -27,11 +25,9 @@ const EMPTY: FormState = {
   github_issue_repo: "",
   bluex_group_ids: "",
   verify_profile_path: "smartpipe.yaml",
-  lead_agent_template: "pipeline-lead-v3",
   codex_model_provider: "",
   codex_model: "",
   codex_reasoning_effort: "",
-  tool_profile: "lead",
   codeowners_required: false,
 };
 
@@ -80,11 +76,9 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
       github_issue_repo: p.github_issue_repo,
       bluex_group_ids: p.bluex_group_ids,
       verify_profile_path: p.verify_profile_path,
-      lead_agent_template: p.lead_agent_template,
       codex_model_provider: p.codex_model_provider,
       codex_model: p.codex_model,
       codex_reasoning_effort: p.codex_reasoning_effort,
-      tool_profile: p.tool_profile,
       codeowners_required: p.codeowners_required,
     });
     setOpen(true);
@@ -146,7 +140,7 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
         <span>i</span>
         <div>
           <strong>项目是配置的最小作用域。</strong>
-          Agent 只接收 <span className="mono">project_id</span>，由服务端解析仓库地址、审批人和凭据；停用项目后新消息会被拒绝。
+          仓库地址、审批人、蓝信群和 Codex 模型都由项目解析；停用项目后新消息会被拒绝。
         </div>
       </div>
 
@@ -167,9 +161,9 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
           <div className="stat-foot">需在凭据页配置访问方式</div>
         </div>
         <div className="stat">
-          <div className="stat-label">默认模板</div>
-          <div className="stat-value" style={{ fontSize: 15 }}>{items[0]?.lead_agent_template ?? "pipeline-lead-v3"}</div>
-          <div className="stat-foot">每个 Issue 一条 lead</div>
+          <div className="stat-label">已绑定 Codex 模型</div>
+          <div className="stat-value">{items.filter((p) => p.codex_model_provider).length}</div>
+          <div className="stat-foot">未绑定的项目使用默认模型</div>
         </div>
       </div>
 
@@ -324,10 +318,6 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
                   <option value="xhigh">xhigh</option>
                 </select>
               </div>
-              <div className="field">
-                <label>Lead 模板</label>
-                <input value={form.lead_agent_template} onChange={(e) => set("lead_agent_template", e.target.value)} />
-              </div>
               <div className="field full">
                 <label>描述</label>
                 <input value={form.description} onChange={(e) => set("description", e.target.value)} placeholder="可选" />
@@ -340,13 +330,6 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
                 >
                   <option value="no">维护者批准即可</option>
                   <option value="yes">必须满足 CODEOWNERS</option>
-                </select>
-              </div>
-              <div className="field">
-                <label>工具权限集</label>
-                <select value={form.tool_profile} onChange={(e) => set("tool_profile", e.target.value)}>
-                  <option value="lead">lead（可对外通信）</option>
-                  <option value="lead-readonly">lead（只读仓库）</option>
                 </select>
               </div>
             </div>

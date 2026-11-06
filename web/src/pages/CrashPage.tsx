@@ -64,7 +64,7 @@ export function CrashPage({ notify }: { notify: Notify }) {
         <div>
           <strong>崩溃入口：</strong><span className="mono">POST /ingest/crash</span>（bridge，<span className="mono">X-Ingest-Token</span>）。
           服务端校验大小、脱敏凭据/邮箱/用户目录、按指纹 24h 去重、按用户每小时限流，然后建
-          <span className="mono">crash_report</span> Issue 并派给 pipeline-lead。
+          <span className="mono">crash_report</span> Issue。
         </div>
       </div>
 

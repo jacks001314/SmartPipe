@@ -88,9 +88,9 @@ export function VerificationPage({ notify }: { notify: Notify }) {
       <div className="notice">
         <span>i</span>
         <div>
-          <strong>没有 GitHub Actions 时的合并门禁：</strong>dev 回传 <span className="mono">base_commit + unified diff</span>，
+          <strong>没有 GitHub Actions 时的合并门禁：</strong>执行器回传 <span className="mono">base_commit + unified diff</span>，
           verifier 克隆干净副本、校验路径/大小/密钥、<span className="mono">git apply</span> 后执行仓库
-          <span className="mono"> smartpipe.yaml </span>声明的命令。只有全部通过才允许 lead 合并。
+          <span className="mono"> smartpipe.yaml </span>声明的命令。只有全部通过才允许提交。
         </div>
       </div>
 
@@ -228,7 +228,7 @@ export function VerificationPage({ notify }: { notify: Notify }) {
         <div className="card-head">
           <div>
             <div className="card-title">提交与合并</div>
-            <div className="card-sub">lead 通过 repo.commit / repo.push 落地；远端地址与 Git 凭据由服务端注入</div>
+            <div className="card-sub">通过 repo.commit / repo.push 落地；远端地址与 Git 凭据由服务端注入</div>
           </div>
           <button className="btn" onClick={() => void load()}>刷新</button>
         </div>
@@ -236,7 +236,7 @@ export function VerificationPage({ notify }: { notify: Notify }) {
           {ops.length === 0 ? (
             <div className="empty">
               <h3>还没有提交记录</h3>
-              <div className="tiny">lead 调用 repo.commit 后，这里会显示分支、commit 与目标分支。</div>
+              <div className="tiny">提交后这里会显示分支、commit 与目标分支。</div>
             </div>
           ) : (
             <table className="table">

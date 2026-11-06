@@ -24,7 +24,7 @@ const NAV: { key: PageKey; label: string; icon: string }[] = [
 ];
 
 const META: Record<PageKey, { crumb: string; title: string; sub: string }> = {
-  projects: { crumb: "配置中心 / 项目", title: "项目", sub: "管理项目、GitHub 仓库和蓝信群绑定。Agent 只使用 project_id，不接触凭据。" },
+  projects: { crumb: "配置中心 / 项目", title: "项目", sub: "管理项目、GitHub 仓库、蓝信群和 Codex 模型绑定。" },
   credentials: { crumb: "配置中心 / 凭据与连接", title: "凭据与连接", sub: "凭据密文存储，界面只显示掩码；连接测试由服务端发起。" },
   models: { crumb: "配置中心 / 模型与推理", title: "模型与推理", sub: "Codex 流水线的模型供应商、模型名与推理强度；项目绑定后自动生效。" },
   lanxin: { crumb: "配置中心 / 蓝信配置", title: "蓝信配置", sub: "机器人应用连接、群到项目绑定与最近消息；保存后自动重连。" },
@@ -163,7 +163,7 @@ export function App() {
             </div>
           </div>
           <div className="modal-foot">
-            <div className="tiny">令牌不会写入日志，也不会随请求转发给 Agent。</div>
+            <div className="tiny">令牌只保存在本机浏览器，不会写入日志。</div>
             <div>
               <button className="btn" onClick={() => setTokenOpen(false)}>取消</button>{" "}
               <button
