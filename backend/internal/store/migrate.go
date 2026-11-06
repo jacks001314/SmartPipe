@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"sort"
 )
 
 type migration struct {
@@ -476,7 +477,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return fmt.Errorf("store: create schema_migrations: %w", err)
 	}
 
-	for _, m := range migrations {
+	for _, m := range orderedMigrations() {
 		var exists bool
 		if err := s.db.QueryRowContext(ctx,
 			`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`, m.version).Scan(&exists); err != nil {
@@ -504,4 +505,13 @@ func (s *Store) Migrate(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// orderedMigrations 按版本升序返回迁移，保证全新数据库也能从空库一路建到最新。
+// migrations 表按“新增在前”书写便于阅读，执行顺序不能依赖声明顺序。
+func orderedMigrations() []migration {
+	ordered := make([]migration, len(migrations))
+	copy(ordered, migrations)
+	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].version < ordered[j].version })
+	return ordered
 }
