@@ -54,10 +54,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	envCfg := cfg
 	if cfg.AdminURL != "" {
 		if rc, err := bot.FetchRemoteConfig(ctx, cfg.AdminURL, cfg.InternalToken); err != nil {
 			log.Printf("[bot] 读取配置台失败，使用环境变量: %v", err)
-		} else if rc != nil {
+		} else if rc != nil && rc.AppID != "" {
 			cfg = cfg.WithRemote(rc)
 			log.Printf("[bot] 已从配置台加载蓝信应用配置 (app_id=%s)", cfg.AppID)
 		}
@@ -78,13 +79,20 @@ func main() {
 					return
 				case <-ticker.C:
 					rc, err := bot.FetchRemoteConfig(ctx, cfg.AdminURL, cfg.InternalToken)
-					if err != nil || rc == nil || cfg.SameLanxin(rc) {
+					if err != nil || rc == nil {
+						continue
+					}
+					target := envCfg
+					if rc.AppID != "" {
+						target = envCfg.WithRemote(rc)
+					}
+					if target.SameLanxin(rc) {
 						continue
 					}
 					log.Printf("[bot] 检测到蓝信配置变更，重连 websocket")
 					runner.cancel()
 					<-runner.done
-					cfg = cfg.WithRemote(rc)
+					cfg = target
 					runner = startWS(ctx, cfg)
 				}
 			}

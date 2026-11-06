@@ -347,7 +347,10 @@ func (a *API) internalLanxinConfig(c iris.Context) {
 	ctx := c.Request().Context()
 	cred, err := a.findLanxinCredential(ctx)
 	if err != nil {
-		c.StatusCode(http.StatusNotFound)
+		// 未配置时返回空值，bot 据此回落到环境变量。
+		_ = c.JSON(envelope{Data: iris.Map{
+			"app_id": "", "app_secret": "", "api_base": "", "require_at_me": true,
+		}})
 		return
 	}
 	_, secret, meta, err := a.store.GetSecret(ctx, cred.ID)
