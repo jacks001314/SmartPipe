@@ -70,7 +70,6 @@ export const CREDENTIAL_KINDS: { value: string; label: string; hint: string }[] 
   { value: "github_pat", label: "GitHub PAT", hint: "用于快速验证仓库读取权限" },
   { value: "github_webhook_secret", label: "GitHub Webhook Secret", hint: "仅做长度校验，至少 16 位" },
   { value: "lanxin", label: "蓝信 App Secret", hint: "需填 app_id 与 api_base" },
-  { value: "syntropy", label: "Syntropy 服务令牌", hint: "需填 base_url，默认 127.0.0.1:8765" },
   { value: "git_ssh", label: "Git 只读凭据", hint: "需填 repo_url，用于 ls-remote 探测" },
   { value: "signing_key", label: "发版签名密钥", hint: "仅登记，联网校验在 M4" },
   { value: "model_provider", label: "模型 API Key", hint: "需填 API Base（通常到 /v1 结尾），供模型档案引用" },

@@ -8,7 +8,6 @@ const KIND_LABEL: Record<string, string> = {
   github_pat: "GitHub PAT",
   github_webhook_secret: "Webhook Secret",
   lanxin: "蓝信 Secret",
-  syntropy: "Syntropy Token",
   git_ssh: "Git 只读",
   signing_key: "签名密钥",
 };
@@ -190,7 +189,7 @@ export function CredentialsPage({ notify }: { notify: Notify }) {
           ) : items.length === 0 ? (
             <div className="empty">
               <h3>还没有凭据</h3>
-              <div className="tiny">先登记 GitHub App、蓝信 Secret 和 Syntropy 令牌，连接测试通过后再接入项目。</div>
+              <div className="tiny">先登记 GitHub App、蓝信 Secret 等凭据，连接测试通过后再接入项目。</div>
               <button className="btn primary" style={{ marginTop: 14 }} onClick={() => setOpen(true)}>＋ 新增凭据</button>
             </div>
           ) : (
@@ -316,12 +315,6 @@ export function CredentialsPage({ notify }: { notify: Notify }) {
                 <div className="field full">
                   <label>API Base（GitHub Enterprise 才需要改）</label>
                   <input value={form.api_base} onChange={(e) => setForm((p) => ({ ...p, api_base: e.target.value }))} placeholder="https://api.github.com" />
-                </div>
-              )}
-              {form.kind === "syntropy" && (
-                <div className="field full">
-                  <label>App Server 地址</label>
-                  <input value={form.base_url} onChange={(e) => setForm((p) => ({ ...p, base_url: e.target.value }))} />
                 </div>
               )}
               {form.kind === "git_ssh" && (
