@@ -14,6 +14,35 @@ type migration struct {
 
 var migrations = []migration{
 	{
+		version: 20,
+		name:    "admin_users",
+		sql: `
+CREATE TABLE IF NOT EXISTS admin_users (
+    id            TEXT PRIMARY KEY,
+    username      TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    display_name  TEXT NOT NULL DEFAULT '',
+    enabled       BOOLEAN NOT NULL DEFAULT true,
+    last_login_at TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS admin_sessions (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL,
+    expires_at   TIMESTAMPTZ NOT NULL,
+    user_agent   TEXT NOT NULL DEFAULT '',
+    ip           TEXT NOT NULL DEFAULT '',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS admin_sessions_expires_idx ON admin_sessions (expires_at);
+CREATE INDEX IF NOT EXISTS admin_sessions_user_idx ON admin_sessions (user_id);
+`,
+	},
+	{
 		version: 19,
 		name:    "model_providers",
 		sql: `

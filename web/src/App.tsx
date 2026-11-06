@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError, getToken, setToken } from "./api";
-import type { Health } from "./types";
+import { api, ApiError, getToken, setToken, setUnauthorizedHandler } from "./api";
+import type { AuthSession, Health } from "./types";
+import { LoginPage } from "./pages/LoginPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { CredentialsPage } from "./pages/CredentialsPage";
 import { ModelsPage } from "./pages/ModelsPage";
@@ -46,10 +47,53 @@ export function App() {
   const [toast, setToast] = useState<{ message: string; kind: "ok" | "error" } | null>(null);
   const [tokenOpen, setTokenOpen] = useState(false);
   const [tokenDraft, setTokenDraft] = useState(getToken());
+  const [auth, setAuth] = useState<"checking" | "login" | "ready" | "token">("checking");
+  const [user, setUser] = useState<AuthSession | null>(null);
 
   const notify = useCallback<Notify>((message, kind = "ok") => {
     setToast({ message, kind });
     window.setTimeout(() => setToast(null), 3200);
+  }, []);
+
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      setUser(null);
+      setAuth((prev) => (prev === "ready" ? "login" : prev));
+    });
+    void (async () => {
+      try {
+        const cfg = await api.authConfig();
+        if (cfg.dev_open) {
+          setAuth("ready");
+          return;
+        }
+        if (!cfg.login_enabled) {
+          setAuth("token");
+          setTokenOpen(true);
+          return;
+        }
+        try {
+          const session = await api.session();
+          setUser(session);
+          setAuth("ready");
+        } catch {
+          setAuth("login");
+        }
+      } catch {
+        setAuth("login");
+      }
+    })();
+    return () => setUnauthorizedHandler(null);
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await api.logout();
+    } catch {
+      // 会话已失效时直接回到登录页。
+    }
+    setUser(null);
+    setAuth("login");
   }, []);
 
   const refreshHealth = useCallback(async () => {
@@ -74,6 +118,22 @@ export function App() {
   }, [page]);
 
   const meta = META[page];
+
+  if (auth === "checking") {
+    return <div className="login-shell"><div className="login-checking">正在检查登录状态…</div></div>;
+  }
+  if (auth === "login") {
+    return (
+      <LoginPage
+        onSuccess={(session) => {
+          setToken("");
+          setUser(session);
+          setAuth("ready");
+          void refreshHealth();
+        }}
+      />
+    );
+  }
 
   return (
     <div className="shell">
@@ -108,9 +168,18 @@ export function App() {
             <div><b>数据库</b> {health?.database ? "已连接" : "未连接"}</div>
             <div><b>鉴权</b> {health ? (health.auth === "dev-open" ? "dev-open" : "令牌") : "-"}</div>
           </div>
-          <button className="nav-item" onClick={() => { setTokenDraft(getToken()); setTokenOpen(true); }}>
-            <span className="nav-icon">⚙</span>管理员令牌
-          </button>
+          {user ? (
+            <>
+              <div className="tiny" style={{ padding: "0 8px 4px" }}>{user.display_name || user.username}</div>
+              <button className="nav-item" onClick={() => void logout()}>
+                <span className="nav-icon">⏻</span>退出登录
+              </button>
+            </>
+          ) : (
+            <button className="nav-item" onClick={() => { setTokenDraft(getToken()); setTokenOpen(true); }}>
+              <span className="nav-icon">⚙</span>管理员令牌
+            </button>
+          )}
         </div>
       </aside>
 

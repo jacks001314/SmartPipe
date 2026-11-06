@@ -3,6 +3,8 @@ import type {
   AgentToken,
   AppServer,
   AuditEntry,
+  AuthConfig,
+  AuthSession,
   BridgeLink,
   CrashReport,
   CrashRetention,
@@ -34,6 +36,12 @@ import type {
 } from "./types";
 
 const TOKEN_KEY = "smartpipe.adminToken";
+
+let unauthorizedHandler: (() => void) | null = null;
+
+export function setUnauthorizedHandler(fn: (() => void) | null) {
+  unauthorizedHandler = fn;
+}
 
 export function getToken(): string {
   return window.localStorage.getItem(TOKEN_KEY) ?? "";
@@ -71,6 +79,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   const res = await fetch("/admin" + path, {
     method: options.method ?? "GET",
     headers,
+    credentials: "same-origin",
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
   });
 
@@ -85,6 +94,9 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     payload = null;
   }
 
+  if (res.status === 401 && path !== "/login" && path !== "/session" && path !== "/auth-config") {
+    unauthorizedHandler?.();
+  }
   if (!res.ok) {
     const err = (payload as { error?: { code?: string; message?: string } })?.error;
     throw new ApiError(res.status, err?.code ?? "http_error", err?.message ?? "请求失败（HTTP " + res.status + "）");
@@ -95,6 +107,11 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
 export const api = {
   health: () => request<Health>("/health"),
+  authConfig: () => request<AuthConfig>("/auth-config"),
+  session: () => request<AuthSession>("/session"),
+  login: (username: string, password: string) =>
+    request<AuthSession>("/login", { method: "POST", body: { username, password } }),
+  logout: () => request<void>("/logout", { method: "POST" }),
   listProjects: () => request<Project[]>("/projects"),
   createProject: (body: Partial<Project>) => request<Project>("/projects", { method: "POST", body }),
   updateProject: (id: string, body: Partial<Project>) => request<Project>("/projects/" + id, { method: "PATCH", body }),

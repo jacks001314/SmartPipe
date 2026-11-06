@@ -50,6 +50,19 @@ export type AuditEntry = {
   trace_id: string;
 };
 
+export type AuthConfig = {
+  login_enabled: boolean;
+  dev_open: boolean;
+  token_required: boolean;
+};
+
+export type AuthSession = {
+  username: string;
+  display_name: string;
+  mode: string;
+  expires_at?: string;
+};
+
 export type Health = {
   status: string;
   database: boolean;

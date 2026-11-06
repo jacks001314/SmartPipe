@@ -102,8 +102,16 @@ func main() {
 		CrashRetentionDays:    envInt("SMARTPIPE_CRASH_RETENTION_DAYS", 30),
 		RejectedRetentionDays: envInt("SMARTPIPE_CRASH_REJECT_RETENTION_DAYS", 7),
 		MCPPoolName:           envOr("SMARTPIPE_MCP_POOL_NAME", "smartpipe"),
+		AdminUser:             envOr("SMARTPIPE_ADMIN_USER", "admin"),
+		AdminPassword:         os.Getenv("SMARTPIPE_ADMIN_PASSWORD"),
+		AdminPasswordReset:    strings.EqualFold(os.Getenv("SMARTPIPE_ADMIN_PASSWORD_RESET"), "true"),
+		SessionTTL:            envDuration("SMARTPIPE_SESSION_TTL", 12*time.Hour),
+		CookieSecure:          strings.EqualFold(os.Getenv("SMARTPIPE_COOKIE_SECURE"), "true"),
 	})
 
+	if err := api.Bootstrap(context.Background()); err != nil {
+		log.Fatalf("初始化管理员账号失败: %v", err)
+	}
 	api.ApplyRuntimeSettings(context.Background())
 
 	app := iris.New()
@@ -185,4 +193,13 @@ func splitCSV(raw string) []string {
 		}
 	}
 	return out
+}
+
+func envDuration(key string, def time.Duration) time.Duration {
+	if raw := strings.TrimSpace(os.Getenv(key)); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			return d
+		}
+	}
+	return def
 }

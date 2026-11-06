@@ -43,7 +43,13 @@ type Config struct {
 	RejectedRetentionDays int
 	// DevOpen 在未配置 token 时允许无鉴权访问，仅供本地开发。
 	DevOpen bool
-	Version string
+	// AdminUser / AdminPassword 是控制台登录账号；密码为空表示不启用登录。
+	AdminUser          string
+	AdminPassword      string
+	AdminPasswordReset bool
+	SessionTTL         time.Duration
+	CookieSecure       bool
+	Version            string
 }
 
 // API 持有处理请求所需的依赖。
@@ -68,6 +74,12 @@ type API struct {
 	mcpPoolName           string
 	crashRetentionDays    int
 	rejectedRetentionDays int
+	loginEnabled          bool
+	adminUser             string
+	adminPassword         string
+	passwordReset         bool
+	sessionTTL            time.Duration
+	cookieSecure          bool
 }
 
 // New 构造 API。
@@ -102,6 +114,12 @@ func New(cfg Config) *API {
 		mcpPoolName:           strings.TrimSpace(cfg.MCPPoolName),
 		crashRetentionDays:    cfg.CrashRetentionDays,
 		rejectedRetentionDays: cfg.RejectedRetentionDays,
+		loginEnabled:          strings.TrimSpace(cfg.AdminPassword) != "",
+		adminUser:             firstNonEmpty(cfg.AdminUser, "admin"),
+		adminPassword:         cfg.AdminPassword,
+		passwordReset:         cfg.AdminPasswordReset,
+		sessionTTL:            cfg.SessionTTL,
+		cookieSecure:          cfg.CookieSecure,
 	}
 }
 
@@ -117,6 +135,7 @@ type apiError struct {
 
 // Register 把管理路由挂到 Iris 应用上。
 func (a *API) Register(app *iris.Application) {
+	a.registerAuth(app)
 	party := app.Party("/admin")
 	party.Use(a.cors, a.auth)
 
@@ -188,13 +207,18 @@ func (a *API) auth(ctx iris.Context) {
 	}
 	header := ctx.GetHeader("Authorization")
 	got := strings.TrimPrefix(header, "Bearer ")
-	if header == "" || subtle.ConstantTimeCompare([]byte(got), []byte(a.token)) != 1 {
-		ctx.StatusCode(http.StatusUnauthorized)
-		_ = ctx.JSON(envelope{Err: &apiError{Code: "unauthorized", Message: "需要管理员令牌"}})
+	if header != "" && subtle.ConstantTimeCompare([]byte(got), []byte(a.token)) == 1 {
+		ctx.Values().Set("actor", "admin")
+		ctx.Next()
 		return
 	}
-	ctx.Values().Set("actor", "admin")
-	ctx.Next()
+	if sess, ok := a.sessionFromRequest(ctx); ok {
+		ctx.Values().Set("actor", sess.Username)
+		ctx.Values().Set("session", sess)
+		ctx.Next()
+		return
+	}
+	a.unauthorized(ctx, "需要登录或管理员令牌")
 }
 
 func (a *API) health(ctx iris.Context) {
