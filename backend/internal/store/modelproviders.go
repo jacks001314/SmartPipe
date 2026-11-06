@@ -229,7 +229,25 @@ func (s *Store) DeleteModelProvider(ctx context.Context, id string) error {
 	if n == 0 {
 		return ErrNotFound
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.clearModelDefaultIf(ctx, id, "")
+	return nil
+}
+
+// clearModelDefaultIf 在供应商或模型被删/停用时清掉指向它的默认模型设置。
+func (s *Store) clearModelDefaultIf(ctx context.Context, providerID, modelID string) {
+	var provider, model string
+	_ = s.db.QueryRowContext(ctx, `SELECT value FROM runtime_settings WHERE key = 'codex_default_provider'`).Scan(&provider)
+	_ = s.db.QueryRowContext(ctx, `SELECT value FROM runtime_settings WHERE key = 'codex_default_model'`).Scan(&model)
+	if provider != providerID || providerID == "" {
+		return
+	}
+	if modelID != "" && model != modelID {
+		return
+	}
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM runtime_settings WHERE key IN ('codex_default_provider','codex_default_model','codex_default_effort')`)
 }
 
 // AddProviderModel 手工添加或更新一个模型项。
@@ -281,6 +299,10 @@ RETURNING provider_id, model_id, enabled, created_at, updated_at`,
 	if err != nil {
 		return nil, fmt.Errorf("store: set provider model enabled: %w", err)
 	}
+	if !enabled {
+		_, _ = s.db.ExecContext(ctx, `UPDATE projects SET codex_model = '' WHERE codex_model_provider = $1 AND codex_model = $2`, providerID, modelID)
+		s.clearModelDefaultIf(ctx, providerID, modelID)
+	}
 	return &m, nil
 }
 
@@ -295,6 +317,8 @@ func (s *Store) DeleteProviderModel(ctx context.Context, providerID, modelID str
 	if n == 0 {
 		return ErrNotFound
 	}
+	_, _ = s.db.ExecContext(ctx, `UPDATE projects SET codex_model = '' WHERE codex_model_provider = $1 AND codex_model = $2`, providerID, modelID)
+	s.clearModelDefaultIf(ctx, providerID, modelID)
 	return nil
 }
 
