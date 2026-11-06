@@ -87,6 +87,8 @@ func (c *Checker) Dispatch(ctx context.Context, kind, secret string, meta map[st
 		res = c.gitRemote(ctx, secret, meta)
 	case "signing_key":
 		res = Result{OK: len(secret) > 0, Message: "签名密钥已登记（未做联网校验）"}
+	case "model_provider":
+		res = c.modelProvider(ctx, secret, meta)
 	default:
 		res = Result{OK: false, Message: "不支持的凭据类型: " + kind}
 	}
@@ -233,6 +235,35 @@ func (c *Checker) syntropy(ctx context.Context, token string, meta map[string]an
 		return Result{OK: true, Message: "App Server 健康检查通过"}
 	}
 	return Result{Message: fmt.Sprintf("App Server 返回 %d", resp.StatusCode)}
+}
+
+// modelProvider 用 /models 探测模型网关，确认 Base URL 与 Key 可用。
+func (c *Checker) modelProvider(ctx context.Context, apiKey string, meta map[string]any) Result {
+	base := strings.TrimRight(metaString(meta, "base_url", "https://api.openai.com/v1"), "/")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/models", nil)
+	if err != nil {
+		return Result{Message: "构造请求失败"}
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := c.client().Do(req)
+	if err != nil {
+		return Result{Message: "模型网关不可达: " + scrub(err.Error(), apiKey)}
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 16384))
+	if resp.StatusCode == http.StatusOK {
+		var out struct {
+			Data []struct {
+				ID string `json:"id"`
+			} `json:"data"`
+		}
+		_ = json.Unmarshal(body, &out)
+		if len(out.Data) > 0 {
+			return Result{OK: true, Message: fmt.Sprintf("模型网关可用，返回 %d 个模型", len(out.Data))}
+		}
+		return Result{OK: true, Message: "模型网关可用"}
+	}
+	return Result{Message: fmt.Sprintf("模型网关返回 %d: %s", resp.StatusCode, truncate(scrub(string(body), apiKey), 160))}
 }
 
 func (c *Checker) gitRemote(ctx context.Context, key string, meta map[string]any) Result {

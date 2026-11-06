@@ -11,14 +11,16 @@ import (
 const projectColumns = `id, name, description, github_provider, github_repo_url,
     github_default_branch, github_issue_repo, labels_prefix, codeowners_required,
     approver_teams, verify_profile_path, release_profile, bluex_group_ids,
-    lead_agent_template, tool_profile, enabled, created_at, updated_at`
+    lead_agent_template, tool_profile, codex_model_provider, codex_model,
+    codex_reasoning_effort, enabled, created_at, updated_at`
 
 func scanProject(row interface{ Scan(...any) error }) (*Project, error) {
 	var p Project
 	err := row.Scan(&p.ID, &p.Name, &p.Description, &p.GitHubProvider, &p.GitHubRepoURL,
 		&p.GitHubDefaultBranch, &p.GitHubIssueRepo, &p.LabelsPrefix, &p.CodeownersRequired,
 		&p.ApproverTeams, &p.VerifyProfilePath, &p.ReleaseProfile, &p.BluexGroupIDs,
-		&p.LeadAgentTemplate, &p.ToolProfile, &p.Enabled, &p.CreatedAt, &p.UpdatedAt)
+		&p.LeadAgentTemplate, &p.ToolProfile, &p.CodexModelProvider, &p.CodexModel,
+		&p.CodexReasoningEffort, &p.Enabled, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -67,13 +69,15 @@ func (s *Store) CreateProject(ctx context.Context, p *Project) (*Project, error)
 INSERT INTO projects (id, name, description, github_provider, github_repo_url,
     github_default_branch, github_issue_repo, labels_prefix, codeowners_required,
     approver_teams, verify_profile_path, release_profile, bluex_group_ids,
-    lead_agent_template, tool_profile, enabled)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+    lead_agent_template, tool_profile, enabled, codex_model_provider,
+    codex_model, codex_reasoning_effort)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
 RETURNING `+projectColumns,
 		p.ID, p.Name, p.Description, p.GitHubProvider, p.GitHubRepoURL,
 		p.GitHubDefaultBranch, p.GitHubIssueRepo, p.LabelsPrefix, p.CodeownersRequired,
 		p.ApproverTeams, p.VerifyProfilePath, p.ReleaseProfile, p.BluexGroupIDs,
-		p.LeadAgentTemplate, p.ToolProfile, p.Enabled)
+		p.LeadAgentTemplate, p.ToolProfile, p.Enabled, p.CodexModelProvider,
+		p.CodexModel, p.CodexReasoningEffort)
 	out, err := scanProject(row)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -128,13 +132,15 @@ UPDATE projects SET
     github_default_branch = $6, github_issue_repo = $7, labels_prefix = $8,
     codeowners_required = $9, approver_teams = $10, verify_profile_path = $11,
     release_profile = $12, bluex_group_ids = $13, lead_agent_template = $14,
-    tool_profile = $15, enabled = $16, updated_at = now()
+    tool_profile = $15, enabled = $16, codex_model_provider = $17,
+    codex_model = $18, codex_reasoning_effort = $19, updated_at = now()
 WHERE id = $1
 RETURNING `+projectColumns,
 		p.ID, p.Name, p.Description, p.GitHubProvider, p.GitHubRepoURL,
 		p.GitHubDefaultBranch, p.GitHubIssueRepo, p.LabelsPrefix, p.CodeownersRequired,
 		p.ApproverTeams, p.VerifyProfilePath, p.ReleaseProfile, p.BluexGroupIDs,
-		p.LeadAgentTemplate, p.ToolProfile, p.Enabled)
+		p.LeadAgentTemplate, p.ToolProfile, p.Enabled, p.CodexModelProvider,
+		p.CodexModel, p.CodexReasoningEffort)
 	out, err := scanProject(row)
 	if err != nil {
 		if isUniqueViolation(err) {

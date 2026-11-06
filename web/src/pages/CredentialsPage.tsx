@@ -76,6 +76,7 @@ export function CredentialsPage({ notify }: { notify: Notify }) {
     if (form.installation_id.trim()) meta.installation_id = form.installation_id.trim();
     if (form.base_url.trim()) meta.base_url = form.base_url.trim();
     if (form.repo_url.trim()) meta.repo_url = form.repo_url.trim();
+    if (form.kind === "model_provider" && form.api_base.trim()) meta.base_url = form.api_base.trim();
     return meta;
   };
 
@@ -304,6 +305,12 @@ export function CredentialsPage({ notify }: { notify: Notify }) {
                     )}
                   </div>
                 </>
+              )}
+              {form.kind === "model_provider" && (
+                <div className="field full">
+                  <label>API Base URL</label>
+                  <input value={form.api_base} onChange={(e) => setForm((p) => ({ ...p, api_base: e.target.value }))} placeholder="https://api.openai.com/v1" />
+                </div>
               )}
               {form.kind === "github_app" && (
                 <div className="field full">

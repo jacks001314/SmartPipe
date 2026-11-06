@@ -145,3 +145,43 @@ func TestDispatchRecordsLatency(t *testing.T) {
 		t.Fatalf("negative latency: %d", res.Latency)
 	}
 }
+
+func TestModelProviderListsModels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" || r.Header.Get("Authorization") != "Bearer sk-good" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":[{"id":"deepseek-v4-flash"}]}`))
+	}))
+	defer srv.Close()
+
+	res := newChecker().Dispatch(context.Background(), "model_provider", "sk-good", map[string]any{"base_url": srv.URL})
+	if !res.OK {
+		t.Fatalf("expected ok, got %+v", res)
+	}
+	if !strings.Contains(res.Message, "1 个模型") {
+		t.Fatalf("unexpected message %q", res.Message)
+	}
+}
+
+func TestModelProviderDoesNotLeakKey(t *testing.T) {
+	secret := "sk-super-secret-model-key"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"Model is blocked","key":"` + secret + `"}`))
+	}))
+	defer srv.Close()
+
+	res := newChecker().Dispatch(context.Background(), "model_provider", secret, map[string]any{"base_url": srv.URL})
+	if res.OK {
+		t.Fatal("expected failure")
+	}
+	if strings.Contains(res.Message, secret) {
+		t.Fatal("message leaked the api key")
+	}
+	if !strings.Contains(res.Message, "Model is blocked") {
+		t.Fatalf("upstream error was swallowed: %q", res.Message)
+	}
+}

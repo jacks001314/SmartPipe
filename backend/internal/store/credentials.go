@@ -21,16 +21,19 @@ const (
 	CredentialSyntropy   = "syntropy"
 	CredentialGitSSH     = "git_ssh"
 	CredentialSigningKey = "signing_key"
+	// CredentialModelProvider 是模型网关的 API Key，供模型档案引用。
+	CredentialModelProvider = "model_provider"
 )
 
 var allowedKinds = map[string]bool{
-	CredentialGitHubApp:  true,
-	CredentialGitHubPAT:  true,
-	CredentialGitHubHook: true,
-	CredentialLanxin:     true,
-	CredentialSyntropy:   true,
-	CredentialGitSSH:     true,
-	CredentialSigningKey: true,
+	CredentialGitHubApp:     true,
+	CredentialGitHubPAT:     true,
+	CredentialGitHubHook:    true,
+	CredentialLanxin:        true,
+	CredentialSyntropy:      true,
+	CredentialGitSSH:        true,
+	CredentialSigningKey:    true,
+	CredentialModelProvider: true,
 }
 
 // ValidKind 判断凭据类型是否受支持。

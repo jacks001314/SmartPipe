@@ -14,6 +14,39 @@ type migration struct {
 
 var migrations = []migration{
 	{
+		version: 19,
+		name:    "model_providers",
+		sql: `
+CREATE TABLE IF NOT EXISTS model_providers (
+    id                TEXT PRIMARY KEY,
+    name              TEXT NOT NULL,
+    base_url          TEXT NOT NULL DEFAULT '',
+    wire_api          TEXT NOT NULL DEFAULT 'chat',
+    credential_id     TEXT NOT NULL DEFAULT '',
+    enabled           BOOLEAN NOT NULL DEFAULT true,
+    last_tested_at    TIMESTAMPTZ,
+    last_test_ok      BOOLEAN,
+    last_test_message TEXT NOT NULL DEFAULT '',
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS model_providers_name_uniq ON model_providers (name);
+
+CREATE TABLE IF NOT EXISTS provider_models (
+    provider_id TEXT NOT NULL,
+    model_id    TEXT NOT NULL,
+    enabled     BOOLEAN NOT NULL DEFAULT true,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (provider_id, model_id)
+);
+
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS codex_model_provider TEXT NOT NULL DEFAULT '';
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS codex_model TEXT NOT NULL DEFAULT '';
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS codex_reasoning_effort TEXT NOT NULL DEFAULT '';
+`,
+	},	{
 		version: 18,
 		name:    "agent_token_expiry",
 		sql: `

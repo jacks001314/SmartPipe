@@ -13,6 +13,9 @@ export type Project = {
   release_profile: string;
   bluex_group_ids: string;
   lead_agent_template: string;
+  codex_model_provider: string;
+  codex_model: string;
+  codex_reasoning_effort: string;
   tool_profile: string;
   enabled: boolean;
   created_at: string;
@@ -70,7 +73,45 @@ export const CREDENTIAL_KINDS: { value: string; label: string; hint: string }[] 
   { value: "syntropy", label: "Syntropy 服务令牌", hint: "需填 base_url，默认 127.0.0.1:8765" },
   { value: "git_ssh", label: "Git 只读凭据", hint: "需填 repo_url，用于 ls-remote 探测" },
   { value: "signing_key", label: "发版签名密钥", hint: "仅登记，联网校验在 M4" },
+  { value: "model_provider", label: "模型 API Key", hint: "需填 API Base（通常到 /v1 结尾），供模型档案引用" },
 ];
+
+export type ProviderModel = {
+  provider_id: string;
+  model_id: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ModelProvider = {
+  id: string;
+  name: string;
+  base_url: string;
+  wire_api: string;
+  credential_id: string;
+  enabled: boolean;
+  last_tested_at: string | null;
+  last_test_ok: boolean | null;
+  last_test_message: string;
+  models: ProviderModel[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type ModelDefault = {
+  provider_id: string;
+  model: string;
+  reasoning_effort: string;
+};
+
+export type ProviderTestResult = {
+  ok: boolean;
+  message: string;
+  latency_ms: number;
+  model: string;
+  provider: ModelProvider | null;
+};
 
 export type AppServer = {
   id: string;

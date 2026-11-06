@@ -3,6 +3,7 @@ import { api, ApiError, getToken, setToken } from "./api";
 import type { Health } from "./types";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { CredentialsPage } from "./pages/CredentialsPage";
+import { ModelsPage } from "./pages/ModelsPage";
 import { AuditPage } from "./pages/AuditPage";
 import { RuntimePage } from "./pages/RuntimePage";
 import { BridgePage } from "./pages/BridgePage";
@@ -12,11 +13,12 @@ import { CrashPage } from "./pages/CrashPage";
 import { TokenPage } from "./pages/TokenPage";
 import { ToolCallsPage } from "./pages/ToolCallsPage";
 
-type PageKey = "projects" | "credentials" | "runtime" | "tokens" | "toolcalls" | "bridge" | "verify" | "release" | "crash" | "audit";
+type PageKey = "projects" | "credentials" | "models" | "runtime" | "tokens" | "toolcalls" | "bridge" | "verify" | "release" | "crash" | "audit";
 
 const NAV: { key: PageKey; label: string; icon: string }[] = [
   { key: "projects", label: "项目", icon: "▤" },
   { key: "credentials", label: "凭据与连接", icon: "⚿" },
+  { key: "models", label: "模型与推理", icon: "◎" },
   { key: "runtime", label: "Syntropy 运行时", icon: "◫" },
   { key: "tokens", label: "Agent 令牌", icon: "⌘" },
   { key: "toolcalls", label: "工具调用", icon: "⌁" },
@@ -30,6 +32,7 @@ const NAV: { key: PageKey; label: string; icon: string }[] = [
 const META: Record<PageKey, { crumb: string; title: string; sub: string }> = {
   projects: { crumb: "配置中心 / 项目", title: "项目", sub: "管理项目、GitHub 仓库和蓝信群绑定。Agent 只使用 project_id，不接触凭据。" },
   credentials: { crumb: "配置中心 / 凭据与连接", title: "凭据与连接", sub: "凭据密文存储，界面只显示掩码；连接测试由服务端发起。" },
+  models: { crumb: "配置中心 / 模型与推理", title: "模型与推理", sub: "Codex 流水线的模型供应商、模型名与推理强度；项目绑定后自动生效。" },
   runtime: { crumb: "配置中心 / Syntropy 运行时", title: "Syntropy 运行时", sub: "App Server 进程、Master/Worker 节点和 pipeline-lead 实例。" },
   tokens: { crumb: "配置中心 / Agent 令牌", title: "Agent 令牌", sub: "按项目与角色签发 MCP 令牌；明文只显示一次，随时可撤销。" },
   toolcalls: { crumb: "配置中心 / 工具调用", title: "工具调用", sub: "MCP 网关的调用审计与接入地址配置。" },
@@ -139,6 +142,7 @@ export function App() {
         <div className="content">
           {page === "projects" && <ProjectsPage notify={notify} />}
           {page === "credentials" && <CredentialsPage notify={notify} />}
+          {page === "models" && <ModelsPage notify={notify} />}
           {page === "runtime" && <RuntimePage notify={notify} />}
           {page === "tokens" && <TokenPage notify={notify} />}
           {page === "toolcalls" && <ToolCallsPage notify={notify} />}

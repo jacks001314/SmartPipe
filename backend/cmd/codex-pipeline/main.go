@@ -36,17 +36,38 @@ type issue struct {
 }
 
 type project struct {
-	ID         string `json:"id"`
-	Repo       string `json:"github_repo_url"`
-	IssueRepo  string `json:"github_issue_repo"`
-	Default    string `json:"github_default_branch"`
-	VerifyPath string `json:"verify_profile_path"`
+	ID                   string `json:"id"`
+	Repo                 string `json:"github_repo_url"`
+	IssueRepo            string `json:"github_issue_repo"`
+	Default              string `json:"github_default_branch"`
+	VerifyPath           string `json:"verify_profile_path"`
+	CodexModelProvider   string `json:"codex_model_provider"`
+	CodexModel           string `json:"codex_model"`
+	CodexReasoningEffort string `json:"codex_reasoning_effort"`
+}
+
+// modelDefault 是配置台里的全局默认模型（供应商 + 模型）。
+type modelDefault struct {
+	ProviderID      string `json:"provider_id"`
+	Model           string `json:"model"`
+	ReasoningEffort string `json:"reasoning_effort"`
+}
+
+// providerRuntime 是模型供应商的连接信息，用来给 codex 进程注入环境变量。
+type providerRuntime struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	BaseURL string `json:"base_url"`
+	WireAPI string `json:"wire_api"`
+	APIKey  string `json:"api_key"`
 }
 
 type options struct {
 	issueNumber int
 	projectID   string
 	model       string
+	effort      string
+	timeoutSet  bool
 	codexPath   string
 	timeout     time.Duration
 	workDir     string
@@ -71,6 +92,7 @@ type summary struct {
 	Branch     string           `json:"branch"`
 	Commit     string           `json:"commit,omitempty"`
 	Status     string           `json:"status,omitempty"`
+	Model      string           `json:"model,omitempty"`
 	Response   string           `json:"response,omitempty"`
 	PatchBytes int              `json:"patch_bytes"`
 	Files      []string         `json:"files,omitempty"`
@@ -85,7 +107,8 @@ func main() {
 	opts := options{}
 	flag.IntVar(&opts.issueNumber, "issue", 0, "GitHub Issue 编号（必填）")
 	flag.StringVar(&opts.projectID, "project", "", "项目 ID（必填）")
-	flag.StringVar(&opts.model, "model", envOr("SMARTPIPE_CODEX_MODEL", "deepseek-v4-flash"), "模型名")
+	flag.StringVar(&opts.model, "model", envOr("SMARTPIPE_CODEX_MODEL", ""), "模型名；留空时用项目绑定的模型档案")
+	flag.StringVar(&opts.effort, "effort", envOr("SMARTPIPE_CODEX_EFFORT", ""), "推理强度；留空时用项目绑定的模型档案")
 	flag.StringVar(&opts.codexPath, "codex", envOr("SMARTPIPE_CODEX_BIN", ""), "codex 可执行文件")
 	flag.DurationVar(&opts.timeout, "timeout", 20*time.Minute, "单次执行超时")
 	flag.StringVar(&opts.workDir, "work-dir", "", "工作区目录；留空则克隆到临时目录")
@@ -100,6 +123,11 @@ func main() {
 	flag.StringVar(&opts.verifyToken, "verify-token", os.Getenv("SMARTPIPE_VERIFY_TOKEN"), "patch-verifier 令牌")
 	flag.StringVar(&opts.commitRepo, "commit-repo", "", "提交/推送使用的本地工作副本；默认用本次工作区")
 	flag.Parse()
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "timeout" {
+			opts.timeoutSet = true
+		}
+	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -140,6 +168,46 @@ func run(ctx context.Context, opts options) *summary {
 		return fail("project", err)
 	}
 	out.Repo = prj.Repo
+	// 模型以配置台为准：项目绑定 > 全局默认 > 执行器默认模型。
+	if strings.TrimSpace(opts.model) == "" {
+		opts.model = strings.TrimSpace(prj.CodexModel)
+	}
+	if strings.TrimSpace(opts.effort) == "" {
+		opts.effort = strings.TrimSpace(prj.CodexReasoningEffort)
+	}
+	if strings.TrimSpace(opts.model) == "" {
+		if def, err := fetchModelDefault(ctx, opts); err == nil {
+			if strings.TrimSpace(def.Model) != "" {
+				opts.model = def.Model
+				if opts.effort == "" {
+					opts.effort = strings.TrimSpace(def.ReasoningEffort)
+				}
+				if strings.TrimSpace(prj.CodexModelProvider) == "" {
+					prj.CodexModelProvider = strings.TrimSpace(def.ProviderID)
+				}
+			}
+		}
+	}
+	if strings.TrimSpace(opts.model) == "" {
+		opts.model = "deepseek-v4-flash"
+	}
+	out.Model = opts.model
+	var modelEnv []string
+	if providerID := strings.TrimSpace(prj.CodexModelProvider); providerID != "" {
+		rt, err := fetchProviderRuntime(ctx, opts, providerID)
+		if err != nil {
+			return fail("model", err)
+		}
+		if rt.BaseURL != "" {
+			modelEnv = append(modelEnv, "OPENAI_BASE_URL="+rt.BaseURL)
+		}
+		if rt.APIKey != "" {
+			modelEnv = append(modelEnv, "OPENAI_API_KEY="+rt.APIKey)
+		}
+		out.Steps = append(out.Steps, step("model", map[string]any{
+			"provider": rt.Name, "model": opts.model, "wire_api": rt.WireAPI,
+		}))
+	}
 	out.Steps = append(out.Steps, step("issue", map[string]any{"number": iss.Number, "title": iss.Title, "url": iss.URL}))
 
 	// 2. 准备干净工作区
@@ -196,6 +264,8 @@ func run(ctx context.Context, opts options) *summary {
 		Prompt:       prompt,
 		CodexPath:    opts.codexPath,
 		Model:        opts.model,
+		Effort:       opts.effort,
+		Env:          modelEnv,
 		Timeout:      opts.timeout,
 		LogWriter:    os.Stderr,
 		KeepResponse: true,
@@ -325,6 +395,26 @@ func fetchProject(ctx context.Context, o options) (*project, error) {
 	}
 	if out.Data.Default == "" {
 		out.Data.Default = "main"
+	}
+	return &out.Data, nil
+}
+
+func fetchModelDefault(ctx context.Context, o options) (*modelDefault, error) {
+	var out struct {
+		Data modelDefault `json:"data"`
+	}
+	if err := doJSON(ctx, http.MethodGet, o.adminURL+"/admin/model-default", o.adminToken, nil, &out); err != nil {
+		return nil, fmt.Errorf("读取默认模型失败: %w", err)
+	}
+	return &out.Data, nil
+}
+
+func fetchProviderRuntime(ctx context.Context, o options, id string) (*providerRuntime, error) {
+	var out struct {
+		Data providerRuntime `json:"data"`
+	}
+	if err := doJSON(ctx, http.MethodGet, o.adminURL+"/admin/model-providers/"+url.PathEscape(id)+"/runtime", o.adminToken, nil, &out); err != nil {
+		return nil, fmt.Errorf("读取模型供应商失败: %w", err)
 	}
 	return &out.Data, nil
 }

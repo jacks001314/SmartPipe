@@ -7,6 +7,10 @@ import type {
   CrashReport,
   CrashRetention,
   Credential,
+  ModelDefault,
+  ModelProvider,
+  ProviderModel,
+  ProviderTestResult,
   Derivation,
   DispatchRecord,
   Health,
@@ -103,6 +107,26 @@ export const api = {
     request<Credential>("/credentials/" + id + "/enabled", { method: "POST", body: { enabled } }),
   deleteCredential: (id: string) => request<void>("/credentials/" + id, { method: "DELETE" }),
   testCredential: (id: string) => request<TestResult>("/credentials/" + id + "/test", { method: "POST" }),
+  listModelProviders: () => request<ModelProvider[]>("/model-providers"),
+  createModelProvider: (body: { name: string; base_url: string; wire_api?: string; api_key?: string; enabled?: boolean; models?: string[] }) =>
+    request<ModelProvider>("/model-providers", { method: "POST", body }),
+  updateModelProvider: (id: string, body: { name?: string; base_url?: string; wire_api?: string; api_key?: string; enabled?: boolean }) =>
+    request<ModelProvider>("/model-providers/" + id, { method: "PATCH", body }),
+  setModelProviderEnabled: (id: string, enabled: boolean) =>
+    request<ModelProvider>("/model-providers/" + id + "/enabled", { method: "POST", body: { enabled } }),
+  testModelProvider: (id: string, model?: string) =>
+    request<ProviderTestResult>("/model-providers/" + id + "/test", { method: "POST", body: { model: model ?? "" } }),
+  deleteModelProvider: (id: string) => request<void>("/model-providers/" + id, { method: "DELETE" }),
+  addProviderModel: (id: string, modelId: string) =>
+    request<ProviderModel>("/model-providers/" + id + "/models", { method: "POST", body: { model_id: modelId } }),
+  setProviderModelEnabled: (id: string, modelId: string, enabled: boolean) =>
+    request<ProviderModel>("/model-providers/" + id + "/models/" + encodeURIComponent(modelId) + "/enabled", { method: "POST", body: { enabled } }),
+  deleteProviderModel: (id: string, modelId: string) =>
+    request<void>("/model-providers/" + id + "/models/" + encodeURIComponent(modelId), { method: "DELETE" }),
+  refreshProviderModels: (id: string) =>
+    request<{ provider: ModelProvider; count: number }>("/model-providers/" + id + "/models/refresh", { method: "POST" }),
+  getModelDefault: () => request<ModelDefault>("/model-default"),
+  putModelDefault: (body: ModelDefault) => request<ModelDefault>("/model-default", { method: "PUT", body }),
   listAudit: (limit = 100, action = "") =>
     request<AuditEntry[]>("/audit?limit=" + limit + (action ? "&action=" + encodeURIComponent(action) : "")),
 

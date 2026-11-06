@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api";
-import type { Project } from "../types";
+import type { ModelProvider, Project } from "../types";
 import type { Notify } from "../App";
 
 type FormState = {
@@ -12,6 +12,9 @@ type FormState = {
   bluex_group_ids: string;
   verify_profile_path: string;
   lead_agent_template: string;
+  codex_model_provider: string;
+  codex_model: string;
+  codex_reasoning_effort: string;
   tool_profile: string;
   codeowners_required: boolean;
 };
@@ -25,6 +28,9 @@ const EMPTY: FormState = {
   bluex_group_ids: "",
   verify_profile_path: "smartpipe.yaml",
   lead_agent_template: "pipeline-lead-v3",
+  codex_model_provider: "",
+  codex_model: "",
+  codex_reasoning_effort: "",
   tool_profile: "lead",
   codeowners_required: false,
 };
@@ -38,6 +44,7 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
   const [editing, setEditing] = useState<Project | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
   const [saving, setSaving] = useState(false);
+  const [providers, setProviders] = useState<ModelProvider[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -52,6 +59,10 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    void api.listModelProviders().then(setProviders).catch(() => setProviders([]));
+  }, []);
 
   const startCreate = () => {
     setEditing(null);
@@ -70,6 +81,9 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
       bluex_group_ids: p.bluex_group_ids,
       verify_profile_path: p.verify_profile_path,
       lead_agent_template: p.lead_agent_template,
+      codex_model_provider: p.codex_model_provider,
+      codex_model: p.codex_model,
+      codex_reasoning_effort: p.codex_reasoning_effort,
       tool_profile: p.tool_profile,
       codeowners_required: p.codeowners_required,
     });
@@ -114,6 +128,14 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
     if (!q) return true;
     return p.name.toLowerCase().includes(q) || p.github_repo_url.toLowerCase().includes(q);
   });
+
+  const modelLabel = (providerId: string, model: string) => {
+    if (!providerId) return "未绑定（默认模型）";
+    const p = providers.find((m) => m.id === providerId);
+    return p ? (model ? p.name + " · " + model : p.name) : providerId;
+  };
+
+  const boundProvider = providers.find((p) => p.id === form.codex_model_provider) ?? null;
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -190,6 +212,7 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
                   <th>项目</th>
                   <th>GitHub 仓库</th>
                   <th>默认分支</th>
+                  <th>Codex 模型</th>
                   <th>蓝信群</th>
                   <th>状态</th>
                   <th></th>
@@ -207,6 +230,7 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
                       <div className="tiny">{p.github_provider} · 契约 {p.verify_profile_path}</div>
                     </td>
                     <td className="mono">{p.github_default_branch}</td>
+                    <td>{modelLabel(p.codex_model_provider, p.codex_model)}</td>
                     <td>
                       {p.bluex_group_ids ? p.bluex_group_ids.split(",").map((g) => <span key={g} className="chip" style={{ marginRight: 4 }}>{g.trim()}</span>) : <span className="muted">未绑定</span>}
                     </td>
@@ -263,6 +287,42 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
               <div className="field">
                 <label>验证契约路径</label>
                 <input value={form.verify_profile_path} onChange={(e) => set("verify_profile_path", e.target.value)} />
+              </div>
+              <div className="field">
+                <label>Codex 供应商</label>
+                <select
+                  value={form.codex_model_provider}
+                  onChange={(e) => setForm((prev) => ({ ...prev, codex_model_provider: e.target.value, codex_model: "" }))}
+                >
+                  <option value="">未绑定（用默认模型）</option>
+                  {providers.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label>Codex 模型</label>
+                <select
+                  value={form.codex_model}
+                  disabled={!boundProvider}
+                  onChange={(e) => set("codex_model", e.target.value)}
+                >
+                  <option value="">未选择</option>
+                  {(boundProvider?.models ?? []).filter((m) => m.enabled).map((m) => (
+                    <option key={m.model_id} value={m.model_id}>{m.model_id}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label>推理强度</label>
+                <select value={form.codex_reasoning_effort} onChange={(e) => set("codex_reasoning_effort", e.target.value)}>
+                  <option value="">跟随模型默认</option>
+                  <option value="minimal">minimal</option>
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                  <option value="xhigh">xhigh</option>
+                </select>
               </div>
               <div className="field">
                 <label>Lead 模板</label>

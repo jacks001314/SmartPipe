@@ -14,9 +14,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	codex "github.com/pmenglund/codex-sdk-go"
@@ -65,6 +67,43 @@ type Result struct {
 	TimedOut      bool   `json:"timed_out"`
 }
 
+var envMu sync.Mutex
+
+// applyEnvOverrides 把 KEY=VALUE 写入当前进程环境，返回恢复函数。
+// 调用方串行执行，避免并发会话互相覆盖。
+func applyEnvOverrides(env []string) func() {
+	if len(env) == 0 {
+		return func() {}
+	}
+	envMu.Lock()
+	type oldValue struct {
+		value string
+		set   bool
+	}
+	saved := map[string]oldValue{}
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || strings.TrimSpace(key) == "" {
+			continue
+		}
+		if _, seen := saved[key]; !seen {
+			v, exists := os.LookupEnv(key)
+			saved[key] = oldValue{value: v, set: exists}
+		}
+		_ = os.Setenv(key, value)
+	}
+	return func() {
+		for key, old := range saved {
+			if old.set {
+				_ = os.Setenv(key, old.value)
+			} else {
+				_ = os.Unsetenv(key)
+			}
+		}
+		envMu.Unlock()
+	}
+}
+
 func (s Spec) validate() error {
 	if strings.TrimSpace(s.WorkDir) == "" {
 		return fmt.Errorf("%w: work_dir is required", ErrInvalid)
@@ -95,6 +134,10 @@ func Run(ctx context.Context, spec Spec) (*Result, error) {
 	logger := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
 	started := time.Now()
+	// SDK 会把 spec.Env 追加在 os.Environ 之后；同名变量在子进程里可能取到旧值。
+	// 这里先把覆盖项写进当前进程环境，保证配置台的供应商地址与密钥优先生效。
+	restoreEnv := applyEnvOverrides(spec.Env)
+	defer restoreEnv()
 	client, err := codex.New(runCtx, codex.Options{
 		Spawn: codex.SpawnOptions{
 			CodexPath: strings.TrimSpace(spec.CodexPath),

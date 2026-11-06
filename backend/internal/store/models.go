@@ -4,24 +4,27 @@ import "time"
 
 // Project 是一个接入 SmartPipe 的目标项目。
 type Project struct {
-	ID                  string    `json:"id"`
-	Name                string    `json:"name"`
-	Description         string    `json:"description"`
-	GitHubProvider      string    `json:"github_provider"`
-	GitHubRepoURL       string    `json:"github_repo_url"`
-	GitHubDefaultBranch string    `json:"github_default_branch"`
-	GitHubIssueRepo     string    `json:"github_issue_repo"`
-	LabelsPrefix        string    `json:"labels_prefix"`
-	CodeownersRequired  bool      `json:"codeowners_required"`
-	ApproverTeams       string    `json:"approver_teams"`
-	VerifyProfilePath   string    `json:"verify_profile_path"`
-	ReleaseProfile      string    `json:"release_profile"`
-	BluexGroupIDs       string    `json:"bluex_group_ids"`
-	LeadAgentTemplate   string    `json:"lead_agent_template"`
-	ToolProfile         string    `json:"tool_profile"`
-	Enabled             bool      `json:"enabled"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	ID                   string    `json:"id"`
+	Name                 string    `json:"name"`
+	Description          string    `json:"description"`
+	GitHubProvider       string    `json:"github_provider"`
+	GitHubRepoURL        string    `json:"github_repo_url"`
+	GitHubDefaultBranch  string    `json:"github_default_branch"`
+	GitHubIssueRepo      string    `json:"github_issue_repo"`
+	LabelsPrefix         string    `json:"labels_prefix"`
+	CodeownersRequired   bool      `json:"codeowners_required"`
+	ApproverTeams        string    `json:"approver_teams"`
+	VerifyProfilePath    string    `json:"verify_profile_path"`
+	ReleaseProfile       string    `json:"release_profile"`
+	BluexGroupIDs        string    `json:"bluex_group_ids"`
+	LeadAgentTemplate    string    `json:"lead_agent_template"`
+	CodexModelProvider   string    `json:"codex_model_provider"`
+	CodexModel           string    `json:"codex_model"`
+	CodexReasoningEffort string    `json:"codex_reasoning_effort"`
+	ToolProfile          string    `json:"tool_profile"`
+	Enabled              bool      `json:"enabled"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 // Credential 是凭据的对外视图：只有掩码，没有明文。
