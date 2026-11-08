@@ -163,6 +163,8 @@ export function ModelConfigImportModal({
   };
 
   const previewProfiles = preview?.profiles ?? [];
+  const previewWarnings = preview?.warnings ?? [];
+  const resultWarnings = result?.warnings ?? [];
   const previewProviders = preview?.providers ?? [];
   const requiredProviders = new Set<string>();
   for (const profile of previewProfiles) {
@@ -242,7 +244,7 @@ export function ModelConfigImportModal({
       onImported();
       notify(
         `导入完成：${imported.imported_profiles} 个新 Profile，${imported.imported_providers} 个新 Provider` +
-          (imported.warnings.length ? `，有 ${imported.warnings.length} 条提示` : ""),
+          ((imported.warnings ?? []).length ? `，有 ${(imported.warnings ?? []).length} 条提示` : ""),
       );
     } catch (err) {
       notify(err instanceof ApiError ? err.message : "导入配置失败", "error");
@@ -336,9 +338,9 @@ export function ModelConfigImportModal({
                   {result.default.model ? ` 默认模型已切换为 ${result.default.model}。` : ""}
                 </div>
               </div>
-              {result.warnings.length > 0 && (
+              {resultWarnings.length > 0 && (
                 <div className="codex-import-warnings">
-                  {result.warnings.map((warning, index) => (
+                  {resultWarnings.map((warning, index) => (
                     <div key={index}>• {warning}</div>
                   ))}
                 </div>
@@ -437,9 +439,9 @@ export function ModelConfigImportModal({
                 })}
               </div>
 
-              {preview.warnings.length > 0 && (
+              {previewWarnings.length > 0 && (
                 <div className="codex-import-warnings">
-                  {preview.warnings.map((warning, index) => (
+                  {previewWarnings.map((warning, index) => (
                     <div key={index}>• {warning}</div>
                   ))}
                 </div>
