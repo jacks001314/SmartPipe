@@ -1,13 +1,16 @@
 package adminapi
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kataras/iris/v12"
@@ -167,13 +170,36 @@ func (a *API) cloneGitHubRepository(c iris.Context) {
 	go func() {
 		bg, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
-		log, cerr := runGitClone(bg, cloneURL, target, auth, proxy, branch, !existed)
+		var lastWrite time.Time
+		onProgress := func(phase string, pct int, line string) {
+			if pct < 100 && time.Since(lastWrite) < 700*time.Millisecond {
+				return
+			}
+			lastWrite = time.Now()
+			_ = a.store.SetGitHubRepoCloneProgress(context.Background(), full, phase, pct, line)
+		}
+		done := make(chan struct{})
+		go func() {
+			ticker := time.NewTicker(2 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+					_ = a.store.SetGitHubRepoCloneBytes(context.Background(), full, dirSizeBytes(target))
+				}
+			}
+		}()
+		log, cerr := runGitClone(bg, cloneURL, target, auth, proxy, branch, !existed, onProgress)
+		close(done)
 		if cerr != nil {
 			detail := strings.TrimSpace(log + "\n" + cerr.Error())
 			_ = a.store.SetGitHubRepoCloneState(context.Background(), full, "failed", "", detail)
 			return
 		}
 		_ = a.store.SetGitHubRepoCloneState(context.Background(), full, "cloned", target, "")
+		_ = a.store.SetGitHubRepoCloneBytes(context.Background(), full, dirSizeBytes(target))
 	}()
 	_ = c.JSON(envelope{Data: iris.Map{
 		"full_name": full, "path": target, "status": "cloning",
@@ -187,11 +213,12 @@ type githubRepoSummary struct {
 	LocalPath string
 }
 
-// runGitClone 用 askpass 传 token，避免 token 出现在 git 命令行里。
-func runGitClone(ctx context.Context, cloneURL, target, token, proxy, branch string, cleanupOnFail bool) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+// runGitClone 用 askpass 传 token，避免 token 出现在 git 命令行里；
+// 同时解析 git 的 --progress 输出，把阶段和百分比回报给调用方。
+func runGitClone(ctx context.Context, cloneURL, target, token, proxy, branch string, cleanupOnFail bool, onProgress func(phase string, pct int, line string)) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
-	args := []string{"clone", "--quiet"}
+	args := []string{"clone", "--progress"}
 	if proxy != "" {
 		args = append(args, "-c", "http.proxy="+proxy)
 	}
@@ -206,16 +233,51 @@ func runGitClone(ctx context.Context, cloneURL, target, token, proxy, branch str
 		defer os.RemoveAll(filepath.Dir(script))
 		cmd.Env = append(cmd.Env, "GIT_ASKPASS="+script, "GIT_USERNAME=x-access-token", "SMARTPIPE_GIT_TOKEN="+token)
 	}
-	out, err := cmd.CombinedOutput()
-	text := string(out)
-	if ctx.Err() == context.DeadlineExceeded {
-		return text, fmt.Errorf("克隆超时（10 分钟）")
-	}
+	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		return "", err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+	var mu sync.Mutex
+	var logBuf strings.Builder
+	handle := func(raw string) {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			return
+		}
+		mu.Lock()
+		if logBuf.Len() < 64<<10 {
+			logBuf.WriteString(line)
+			logBuf.WriteString("\n")
+		}
+		mu.Unlock()
+		if phase, pct, ok := parseGitProgress(line); ok && onProgress != nil {
+			onProgress(phase, overallCloneProgress(phase, pct), line)
+		}
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); scanGitProgress(stderr, handle) }()
+	go func() { defer wg.Done(); scanGitProgress(stdout, handle) }()
+	wg.Wait()
+	werr := cmd.Wait()
+	mu.Lock()
+	text := logBuf.String()
+	mu.Unlock()
+	if ctx.Err() == context.DeadlineExceeded {
+		return text, fmt.Errorf("克隆超时（30 分钟）")
+	}
+	if werr != nil {
 		if cleanupOnFail {
 			_ = os.RemoveAll(target)
 		}
-		return text, err
+		return text, werr
 	}
 	if branch != "" {
 		checkout := exec.CommandContext(ctx, "git", "-C", target, "checkout", "--quiet", branch)
@@ -225,6 +287,58 @@ func runGitClone(ctx context.Context, cloneURL, target, token, proxy, branch str
 		}
 	}
 	return text, nil
+}
+
+// scanGitProgress 逐段读取 git 输出；进度行以 \r 结尾，普通日志以 \n 结尾。
+func scanGitProgress(r io.Reader, handle func(string)) {
+	br := bufio.NewReaderSize(r, 32<<10)
+	var sb strings.Builder
+	for {
+		b, err := br.ReadByte()
+		if err != nil {
+			if sb.Len() > 0 {
+				handle(sb.String())
+			}
+			return
+		}
+		if b == '\r' || b == '\n' {
+			if sb.Len() > 0 {
+				handle(sb.String())
+				sb.Reset()
+			}
+			continue
+		}
+		sb.WriteByte(b)
+	}
+}
+
+var gitProgressPattern = regexp.MustCompile(`^(?:remote:\s*)?(.+?):\s+(\d+)%`)
+
+func parseGitProgress(line string) (string, int, bool) {
+	m := gitProgressPattern.FindStringSubmatch(strings.TrimSpace(line))
+	if m == nil {
+		return "", 0, false
+	}
+	pct := 0
+	fmt.Sscanf(m[2], "%d", &pct)
+	return strings.TrimSpace(m[1]), pct, true
+}
+
+// overallCloneProgress 把各阶段百分比折算成总体进度，避免进度条来回跳。
+func overallCloneProgress(phase string, pct int) int {
+	name := strings.ToLower(phase)
+	switch {
+	case strings.Contains(name, "receiving"):
+		return 5 + pct*4/5
+	case strings.Contains(name, "resolving"):
+		return 85 + pct/10
+	case strings.Contains(name, "updating") || strings.Contains(name, "checkout"):
+		return 95 + pct/20
+	case strings.Contains(name, "compress") || strings.Contains(name, "enumerat") || strings.Contains(name, "counting"):
+		return 1 + pct*4/100
+	default:
+		return pct
+	}
 }
 
 func writeAskpass() (string, error) {
@@ -272,4 +386,19 @@ func truncateTail(text string, limit int) string {
 		return "：" + text
 	}
 	return "：" + text[len(text)-limit:]
+}
+
+// dirSizeBytes 统计克隆目录当前占用，作为没有 git 进度行时的“已下载”参考。
+func dirSizeBytes(root string) int64 {
+	var total int64
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry == nil || entry.IsDir() {
+			return nil
+		}
+		if info, ierr := entry.Info(); ierr == nil {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
 }

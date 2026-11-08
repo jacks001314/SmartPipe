@@ -21,6 +21,18 @@ const formatTime = (value: string) => {
 
 const formatNumber = (value: number) => (value >= 1000 ? (value / 1000).toFixed(1) + "k" : String(value ?? 0));
 
+const formatBytes = (value?: number) => {
+  if (!value || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return (unit === 0 ? String(Math.round(size)) : size.toFixed(size >= 10 ? 0 : 1)) + " " + units[unit];
+};
+
 export function GitHubPage({ notify }: { notify: Notify }) {
   const [repos, setRepos] = useState<GitHubRepoList | null>(null);
   const [credentials, setCredentials] = useState<Credential[]>([]);
@@ -53,7 +65,9 @@ export function GitHubPage({ notify }: { notify: Notify }) {
   const [cloneDir, setCloneDir] = useState("");
   const [cloneBusy, setCloneBusy] = useState(false);
   const [cloneError, setCloneError] = useState("");
-  const [cloningName, setCloningName] = useState("");
+  const [cloneProgress, setCloneProgress] = useState<{ status: string; pct: number; phase: string; msg: string; bytes: number } | null>(null);
+  const [cloneStartedMs, setCloneStartedMs] = useState(0);
+  const [nowTick, setNowTick] = useState(Date.now());
   const accountScope = repos?.oauth_scope ?? "";
   const scopeHasRepo = accountScope.split(",").map((item) => item.trim()).includes("repo");
 
@@ -190,6 +204,7 @@ export function GitHubPage({ notify }: { notify: Notify }) {
 
   const openClone = (repo: GitHubRepo) => {
     setCloneTarget(repo);
+    setCloneProgress(null);
     setCloneDir((cloneRoot || "/data/repos").replace(/\/+$/, "") + "/" + repo.full_name);
     setCloneError("");
   };
@@ -201,8 +216,8 @@ export function GitHubPage({ notify }: { notify: Notify }) {
     try {
       const res = await api.cloneGithubRepo({ full_name: cloneTarget.full_name, target_dir: cloneDir.trim() });
       notify("开始克隆到 " + res.path, "ok");
-      setCloningName(res.full_name);
-      setCloneTarget(null);
+      setCloneProgress({ status: "cloning", pct: 0, phase: "准备中", msg: "", bytes: 0 });
+      setCloneStartedMs(Date.now());
     } catch (err) {
       setCloneError(err instanceof ApiError ? err.message : "克隆失败");
     } finally {
@@ -210,40 +225,84 @@ export function GitHubPage({ notify }: { notify: Notify }) {
     }
   };
 
+  // 有仓库在后台克隆时，实时刷新行内的进度。
+  const activeClones = (repos?.repos ?? [])
+    .filter((repo) => repo.clone_status === "cloning")
+    .map((repo) => repo.full_name)
+    .join(",");
   useEffect(() => {
-    if (!cloningName) return;
+    if (!activeClones) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const cat = await api.listGitHubRepoCatalog();
+        const byName = new Map((cat.repos ?? []).map((item) => [item.full_name, item]));
+        setRepos((prev) =>
+          prev
+            ? {
+                ...prev,
+                repos: prev.repos.map((item) => {
+                  const fresh = byName.get(item.full_name);
+                  return fresh
+                    ? {
+                        ...item,
+                        local_path: fresh.local_path,
+                        clone_status: fresh.clone_status,
+                        clone_progress: fresh.clone_progress,
+                        clone_phase: fresh.clone_phase,
+                        clone_message: fresh.clone_message,
+                        clone_bytes: fresh.clone_bytes,
+                        clone_error: fresh.clone_error,
+                      }
+                    : item;
+                }),
+              }
+            : prev,
+        );
+      } catch {
+        /* 下一轮再查 */
+      }
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [activeClones]);
+
+  useEffect(() => {
+    if (cloneProgress?.status !== "cloning") return;
+    const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [cloneProgress?.status]);
+
+  // Clone 弹窗里的进度：每 1.5 秒查一次仓库库。
+  useEffect(() => {
+    if (!cloneTarget || cloneProgress?.status !== "cloning") return;
+    const name = cloneTarget.full_name;
     const tick = async () => {
       try {
         const cat = await api.listGitHubRepoCatalog();
-        const repo = (cat.repos ?? []).find((item) => item.full_name === cloningName);
-        if (repo) {
-          setRepos((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  repos: prev.repos.map((item) =>
-                    item.full_name === cloningName
-                      ? { ...item, local_path: repo.local_path, clone_status: repo.clone_status, clone_error: repo.clone_error }
-                      : item,
-                  ),
-                }
-              : prev,
-          );
-        }
-        if (!repo || repo.clone_status !== "cloning") {
-          if (repo?.clone_status === "cloned") notify("克隆完成：" + cloningName, "ok");
-          else if (repo?.clone_status === "failed") notify("克隆失败：" + cloningName + (repo.clone_error ? "：" + repo.clone_error : ""), "error");
-          setCloningName("");
+        const repo = (cat.repos ?? []).find((item) => item.full_name === name);
+        if (!repo) return;
+        setCloneProgress({
+          status: repo.clone_status || "",
+          pct: repo.clone_progress ?? 0,
+          phase: repo.clone_phase || "",
+          msg: repo.clone_message || "",
+          bytes: repo.clone_bytes ?? 0,
+        });
+        if (repo.clone_status === "cloned") {
+          notify("克隆完成：" + name, "ok");
+          setCloneTarget(null);
+          setCloneProgress(null);
           void load();
+        } else if (repo.clone_status === "failed") {
+          setCloneError(repo.clone_error || "克隆失败");
         }
       } catch {
         /* 下一轮再查 */
       }
     };
     void tick();
-    const timer = window.setInterval(() => void tick(), 3000);
+    const timer = window.setInterval(() => void tick(), 1500);
     return () => window.clearInterval(timer);
-  }, [cloningName, load, notify]);
+  }, [cloneTarget, cloneProgress?.status, load, notify]);
 
   const startAccountLogin = async () => {
     setDeviceBusy(true);
@@ -687,7 +746,14 @@ export function GitHubPage({ notify }: { notify: Notify }) {
                           <span className={"chip " + (repo.private ? "warn" : "")}>{repo.private ? "私有" : "公开"}</span>
                           {isInvited(repo) && <span className="chip ok">邀请协作 · {repo.owner}</span>}
                           {!isInvited(repo) && repo.user_visible && <span className="chip">账号可见</span>}
-                          {repo.clone_status === "cloning" && <span className="chip warn">克隆中…</span>}
+                          {repo.clone_status === "cloning" && (
+                            <span
+                              className="chip warn"
+                              title={[repo.clone_phase, repo.clone_message, "已下载 " + formatBytes(repo.clone_bytes)].filter(Boolean).join(" · ")}
+                            >
+                              克隆中 {repo.clone_progress ?? 0}%
+                            </span>
+                          )}
                           {repo.clone_status === "failed" && <span className="chip bad" title={repo.clone_error}>克隆失败</span>}
                           {repo.local_path && repo.clone_status !== "cloning" && <span className="chip ok" title={repo.local_path}>已克隆</span>}
                           {repo.fork && <span className="chip">Fork</span>}
@@ -728,18 +794,52 @@ export function GitHubPage({ notify }: { notify: Notify }) {
             <button className="icon-btn" onClick={() => setCloneTarget(null)}>✕</button>
           </div>
           <div className="modal-body">
-            <div className="field">
-              <label>目标目录</label>
-              <input value={cloneDir} onChange={(event) => setCloneDir(event.target.value)} spellCheck={false} />
-              <div className="tiny">目录已存在且非空时会拒绝克隆；克隆成功后项目创建页即可选到它。</div>
-            </div>
-            {cloneError && <div className="tiny bad-note">{cloneError}</div>}
-            <div className="row-actions" style={{ marginTop: 12, justifyContent: "flex-end" }}>
-              <button className="btn" disabled={cloneBusy} onClick={() => setCloneTarget(null)}>取消</button>
-              <button className="btn primary" disabled={cloneBusy} onClick={() => void submitClone()}>
-                {cloneBusy ? "正在提交…" : "开始克隆"}
-              </button>
-            </div>
+            {cloneProgress?.status === "cloning" ? (
+              <>
+                <div className="clone-progress-head">
+                  <span>
+                    {cloneProgress.phase || "准备中"}
+                    {cloneStartedMs > 0 && (
+                      <span className="tiny" style={{ marginLeft: 8 }}>
+                        已用时 {Math.max(0, Math.floor((nowTick - cloneStartedMs) / 1000))}s
+                      </span>
+                    )}
+                  </span>
+                  <span className="mono">{cloneProgress.pct}%</span>
+                </div>
+                <div className="clone-progress">
+                  <span style={{ width: cloneProgress.pct + "%" }} />
+                </div>
+                <div className="tiny" style={{ marginTop: 8 }}>
+                  已下载 {formatBytes(cloneProgress.bytes)}
+                  {cloneProgress.pct === 0 && cloneStartedMs > 0 && nowTick - cloneStartedMs > 15000 && (
+                    <span className="tiny" style={{ marginLeft: 8 }}>
+                      等 GitHub 返回数据中，服务器在打包仓库，可能较慢
+                    </span>
+                  )}
+                </div>
+                <div className="tiny mono clone-progress-msg">{cloneProgress.msg || "等待 GitHub 返回数据…"}</div>
+                <div className="tiny" style={{ marginTop: 6 }}>克隆在后台继续，可以关闭弹窗去处理别的事情。</div>
+                <div className="row-actions" style={{ marginTop: 12, justifyContent: "flex-end" }}>
+                  <button className="btn" onClick={() => { setCloneTarget(null); setCloneProgress(null); }}>后台运行</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="field">
+                  <label>目标目录</label>
+                  <input value={cloneDir} onChange={(event) => setCloneDir(event.target.value)} spellCheck={false} />
+                  <div className="tiny">目录已存在且非空时会拒绝克隆；克隆成功后项目创建页即可选到它。</div>
+                </div>
+                {cloneError && <div className="tiny bad-note">{cloneError}</div>}
+                <div className="row-actions" style={{ marginTop: 12, justifyContent: "flex-end" }}>
+                  <button className="btn" disabled={cloneBusy} onClick={() => setCloneTarget(null)}>取消</button>
+                  <button className="btn primary" disabled={cloneBusy} onClick={() => void submitClone()}>
+                    {cloneBusy ? "正在提交…" : "开始克隆"}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

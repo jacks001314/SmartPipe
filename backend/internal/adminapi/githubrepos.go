@@ -35,9 +35,14 @@ type githubRepoView struct {
 	// UserVisible 表示账号授权（本人/协作者）这条路径也能看到它。
 	UserVisible bool `json:"user_visible"`
 	// LocalPath 是已克隆的本地目录（为空表示还没克隆）。
-	LocalPath   string `json:"local_path"`
-	CloneError  string `json:"clone_error,omitempty"`
-	CloneStatus string `json:"clone_status"`
+	LocalPath      string `json:"local_path"`
+	CloneError     string `json:"clone_error,omitempty"`
+	CloneStatus    string `json:"clone_status"`
+	CloneProgress  int    `json:"clone_progress"`
+	ClonePhase     string `json:"clone_phase"`
+	CloneMessage   string `json:"clone_message"`
+	CloneStartedAt string `json:"clone_started_at"`
+	CloneBytes     int64  `json:"clone_bytes"`
 }
 
 type githubRepoListView struct {
@@ -286,6 +291,13 @@ func (a *API) buildGitHubRepoList(ctx context.Context) githubRepoListView {
 				view.Repos[i].LocalPath = item.LocalPath
 				view.Repos[i].CloneError = item.CloneError
 				view.Repos[i].CloneStatus = item.CloneStatus
+				view.Repos[i].CloneProgress = item.CloneProgress
+				view.Repos[i].ClonePhase = item.ClonePhase
+				view.Repos[i].CloneMessage = item.CloneMessage
+				view.Repos[i].CloneBytes = item.CloneBytes
+				if item.CloneStarted != nil {
+					view.Repos[i].CloneStartedAt = item.CloneStarted.Format(time.RFC3339)
+				}
 			}
 		}
 	}

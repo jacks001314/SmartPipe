@@ -460,6 +460,10 @@ button { font-family: inherit; }
 .github-pat-row input { flex: 1; min-width: 260px; }
 .repo-picker { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .repo-picker select { flex: 1; min-width: 240px; }
+.clone-progress-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 12.5px; color: #334155; margin-bottom: 6px; }
+.clone-progress { height: 8px; border-radius: 999px; background: #eef2f7; overflow: hidden; }
+.clone-progress span { display: block; height: 100%; background: var(--brand); transition: width .4s ease; }
+.clone-progress-msg { margin-top: 8px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .github-warn-banner {
   display: flex; gap: 10px; align-items: center; justify-content: space-between;
   padding: 8px 18px; background: #fff8e6; border-bottom: 1px solid #f2d59b;

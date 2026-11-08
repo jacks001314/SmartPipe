@@ -61,6 +61,11 @@ export type GitHubRepo = {
   cloned_at?: string;
   clone_error?: string;
   clone_status?: string;
+  clone_progress?: number;
+  clone_phase?: string;
+  clone_message?: string;
+  clone_started_at?: string;
+  clone_bytes?: number;
 };
 
 export type GitHubRepoList = {
