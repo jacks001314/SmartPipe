@@ -291,7 +291,7 @@ func (a *API) startGitHubOAuth(c iris.Context) {
 	a.audit(ctx, c, "github.oauth.start", "setting", githubOAuthClientKey, nil, "ok", nil)
 	_ = c.JSON(envelope{Data: iris.Map{
 		"flow_id": flowID, "user_code": code.UserCode, "verification_uri": code.VerificationURI,
-		"expires_in": code.ExpiresIn, "interval": code.Interval,
+		"expires_in": code.ExpiresIn, "interval": code.Interval, "requested_scope": scope,
 	}})
 }
 

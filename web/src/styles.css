@@ -442,3 +442,6 @@ button { font-family: inherit; }
 }
 .github-proxy-hint { flex-basis: 100%; margin: 0; }
 .bad-note { color: var(--danger); }
+
+.github-device-warn { width: 100%; }
+.github-device-warn .tiny { margin: 0; }

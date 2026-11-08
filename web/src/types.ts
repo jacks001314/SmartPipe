@@ -64,6 +64,7 @@ export type GitHubRepoList = {
   source: string;
   oauth_login: string;
   oauth_authorized: boolean;
+  oauth_scope: string;
   repos: GitHubRepo[];
   warning?: string;
   error?: string;
@@ -91,6 +92,7 @@ export type GitHubDeviceFlow = {
   verification_uri: string;
   expires_in: number;
   interval: number;
+  requested_scope?: string;
 };
 
 export type GitHubOAuthPoll = {

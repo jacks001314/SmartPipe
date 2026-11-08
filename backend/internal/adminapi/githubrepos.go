@@ -41,6 +41,7 @@ type githubRepoListView struct {
 	Source          string           `json:"source"`
 	OAuthLogin      string           `json:"oauth_login"`
 	OAuthAuthorized bool             `json:"oauth_authorized"`
+	OAuthScope      string           `json:"oauth_scope"`
 	Repos           []githubRepoView `json:"repos"`
 	Warning         string           `json:"warning,omitempty"`
 	Error           string           `json:"error,omitempty"`
@@ -116,6 +117,7 @@ func (a *API) listGitHubRepositories(c iris.Context) {
 			userToken = secret
 			userLogin, _ = oauthCred.Metadata["login"].(string)
 			view.OAuthAuthorized = true
+			view.OAuthScope, _ = oauthCred.Metadata["scope"].(string)
 		}
 	}
 	if userToken == "" {

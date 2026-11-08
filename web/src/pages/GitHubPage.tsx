@@ -38,6 +38,8 @@ export function GitHubPage({ notify }: { notify: Notify }) {
   const [proxyBusy, setProxyBusy] = useState("");
   const [proxyNote, setProxyNote] = useState("");
   const [proxyNoteOk, setProxyNoteOk] = useState(true);
+  const accountScope = repos?.oauth_scope ?? "";
+  const scopeHasRepo = accountScope.split(",").map((item) => item.trim()).includes("repo");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -326,9 +328,17 @@ export function GitHubPage({ notify }: { notify: Notify }) {
                 <code className="github-device-code">{device.user_code}</code>
                 <a className="btn small" href={device.verification_uri} target="_blank" rel="noreferrer">打开 GitHub</a>
               </div>
+            ) : oauth?.authorized && !scopeHasRepo ? (
+              <div className="github-device github-device-warn">
+                <span className="chip warn">账号已授权但缺少 repo 权限</span>
+                <span className="tiny">当前授权只能读公开仓库，被邀请的私有仓库看不到；重新授权一次即可。</span>
+                <button className="btn small primary" onClick={() => void startAccountLogin()}>重新授权</button>
+                <button className="btn small" onClick={() => void disconnectAccount()}>解绑账号</button>
+              </div>
             ) : oauth?.authorized ? (
               <div className="github-device">
                 <span className="chip ok">账号已授权{oauth.login ? " · " + oauth.login : ""}</span>
+                <span className="tiny">权限：{accountScope || "默认"}</span>
                 <button className="btn small" onClick={() => void disconnectAccount()}>解绑账号</button>
               </div>
             ) : (
