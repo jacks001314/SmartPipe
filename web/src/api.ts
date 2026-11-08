@@ -1,4 +1,4 @@
-import type { AgentItem, AgentToken, AppServer, AuditEntry, AuthConfig, AuthSession, BridgeLink, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelDefault, ModelProvider, ProviderModel, ProviderTestResult, Derivation, DispatchRecord, Health, IssueAttempt, IssuePlan, Project, ProjectBinding, ReleaseCandidate, ReleaseRecord, ReleaseRun, RepoOp, MCPConfig, TestResult, ToolCall, UserIdentity, VerificationRecord, WebhookDelivery, GitHubAppSetup, GitHubAppSetupStatus } from "./types";
+import type { AgentItem, AgentToken, AppServer, AuditEntry, AuthConfig, AuthSession, BridgeLink, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Derivation, DispatchRecord, Health, IssueAttempt, IssuePlan, Project, ProjectBinding, ReleaseCandidate, ReleaseRecord, ReleaseRun, RepoOp, MCPConfig, TestResult, ToolCall, UserIdentity, VerificationRecord, WebhookDelivery, GitHubAppSetup, GitHubAppSetupStatus } from "./types";
 
 const TOKEN_KEY = "smartpipe.adminToken";
 
@@ -124,8 +124,14 @@ export const api = {
   putModelDefault: (body: ModelDefault) => request<ModelDefault>("/model-default", { method: "PUT", body }),
   previewModelConfigImport: (source: string, content: string) =>
     request<ModelConfigImportPreview>("/model-config/import/preview", { method: "POST", body: { source, content } }),
-  importModelConfig: (source: string, content: string) =>
-    request<ModelConfigImportResult>("/model-config/import", { method: "POST", body: { source, content } }),
+  importModelConfig: (source: string, content: string, profileKeys: string[], providerKeys: string[]) =>
+    request<ModelConfigImportResult>("/model-config/import", { method: "POST", body: { source, content, profile_keys: profileKeys, provider_keys: providerKeys } }),
+  listModelProfiles: () => request<ModelProfile[]>("/model-profiles"),
+  setModelProfileEnabled: (id: string, enabled: boolean) =>
+    request<ModelProfile>("/model-profiles/" + id + "/enabled", { method: "POST", body: { enabled } }),
+  setModelProfileDefault: (id: string) =>
+    request<ModelDefault>("/model-profiles/" + id + "/default", { method: "POST" }),
+  deleteModelProfile: (id: string) => request<void>("/model-profiles/" + id, { method: "DELETE" }),
   listLanxinBots: (sync = false) => request<LanxinBot[]>("/lanxin/bots" + (sync ? "?sync=1" : "")),
   createLanxinBot: (body: { name: string; app_id: string; app_secret: string; api_base?: string; require_at_me?: boolean }) =>
     request<LanxinBot>("/lanxin/bots", { method: "POST", body }),

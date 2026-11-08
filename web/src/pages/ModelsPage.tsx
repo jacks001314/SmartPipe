@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api";
-import type { ModelDefault, ModelProvider } from "../types";
+import type { ModelDefault, ModelProfile, ModelProvider } from "../types";
 import type { Notify } from "../App";
 import { ModelConfigImportModal } from "./ModelConfigImportModal";
 
@@ -20,6 +20,7 @@ const EMPTY_PROVIDER: ProviderForm = { name: "", base_url: "", wire_api: "chat",
 
 export function ModelsPage({ notify }: { notify: Notify }) {
   const [items, setItems] = useState<ModelProvider[]>([]);
+  const [profiles, setProfiles] = useState<ModelProfile[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -39,9 +40,12 @@ export function ModelsPage({ notify }: { notify: Notify }) {
   const load = useCallback(async (keepId?: string) => {
     setLoading(true);
     try {
-      const [providers, def] = await Promise.all([api.listModelProviders(), api.getModelDefault()]);
+      const [providers, def, profileItems] = await Promise.all([
+        api.listModelProviders(), api.getModelDefault(), api.listModelProfiles(),
+      ]);
       setItems(providers);
       setDefaults(def);
+      setProfiles(profileItems);
       setSelectedId((prev) => {
         const want = keepId ?? prev;
         if (want && providers.some((p) => p.id === want)) return want;
@@ -208,6 +212,37 @@ export function ModelsPage({ notify }: { notify: Notify }) {
     }
   };
 
+  const toggleProfile = async (profile: ModelProfile) => {
+    try {
+      await api.setModelProfileEnabled(profile.id, !profile.enabled);
+      notify(profile.enabled ? "Profile 已停用" : "Profile 已启用");
+      await load();
+    } catch (err) {
+      notify(err instanceof ApiError ? err.message : "操作失败", "error");
+    }
+  };
+
+  const makeProfileDefault = async (profile: ModelProfile) => {
+    try {
+      await api.setModelProfileDefault(profile.id);
+      notify("默认模型已切换到 " + profile.name);
+      await load();
+    } catch (err) {
+      notify(err instanceof ApiError ? err.message : "设置默认 Profile 失败", "error");
+    }
+  };
+
+  const removeProfile = async (profile: ModelProfile) => {
+    if (!window.confirm("删除 Profile " + profile.name + "？已有供应商和模型目录会保留。")) return;
+    try {
+      await api.deleteModelProfile(profile.id);
+      notify("Profile 已删除");
+      await load();
+    } catch (err) {
+      notify(err instanceof ApiError ? err.message : "删除失败", "error");
+    }
+  };
+
   const saveDefault = async (next: ModelDefault) => {
     setDefaults(next);
     try {
@@ -227,6 +262,49 @@ export function ModelsPage({ notify }: { notify: Notify }) {
         <div>
           <strong>统一管理模型供应商、模型目录与默认推理强度。</strong>
           可以从本机 Codex 配置导入，也可以手动添加；项目绑定后自动生效，未绑定项目使用这里的默认模型。
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <div className="card-title">模型 Profile</div>
+            <div className="card-sub">{profiles.length} 个可复用配置 · 名称、模型、供应商与推理强度成组保存</div>
+          </div>
+          <button className="btn" onClick={() => setImportOpen(true)}>从 Codex 导入</button>
+        </div>
+        <div className="card-body" style={{ padding: 0 }}>
+          {profiles.length === 0 ? (
+            <div className="empty" style={{ padding: "18px 16px" }}>
+              <div className="tiny">还没有 Profile。导入本机 Codex 配置后，可在这里启停或设为默认模型。</div>
+            </div>
+          ) : (
+            <table className="table">
+              <thead><tr><th>Profile</th><th>模型</th><th>供应商</th><th>推理强度</th><th>状态</th><th></th></tr></thead>
+              <tbody>
+                {profiles.map((profile) => {
+                  const isDefault = defaults.provider_id === profile.provider_id && defaults.model === profile.model && defaults.reasoning_effort === profile.reasoning_effort;
+                  return (
+                    <tr key={profile.id}>
+                      <td><div className="strong">{profile.name}</div><div className="tiny">{profile.source === "codex" ? "Codex 导入" : profile.source || "手动"}</div></td>
+                      <td className="mono">{profile.model}</td>
+                      <td>{profile.provider_name || profile.provider_id}</td>
+                      <td className="tiny">{profile.reasoning_effort || "默认"}</td>
+                      <td>
+                        <span className={"chip " + (profile.enabled ? "ok" : "warn")}><span className="dot" />{profile.enabled ? "启用" : "停用"}</span>
+                        {isDefault && <span className="chip ok" style={{ marginLeft: 6 }}>默认</span>}
+                      </td>
+                      <td><div className="row-actions">
+                        {!isDefault && profile.enabled && <button className="btn small" onClick={() => void makeProfileDefault(profile)}>设为默认</button>}
+                        <button className="btn small" onClick={() => void toggleProfile(profile)}>{profile.enabled ? "停用" : "启用"}</button>
+                        <button className="btn small danger" onClick={() => void removeProfile(profile)}>删除</button>
+                      </div></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
 
@@ -461,7 +539,7 @@ export function ModelsPage({ notify }: { notify: Notify }) {
         open={importOpen}
         notify={notify}
         onClose={() => setImportOpen(false)}
-        onImported={(providerID) => { if (providerID) void load(providerID); }}
+        onImported={() => void load()}
       />
 
       <div className={"modal-backdrop" + (createOpen ? " open" : "")}>

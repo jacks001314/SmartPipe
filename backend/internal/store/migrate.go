@@ -14,6 +14,26 @@ type migration struct {
 
 var migrations = []migration{
 	{
+		version: 23,
+		name:    "model_profiles",
+		sql: `
+CREATE TABLE IF NOT EXISTS model_profiles (
+    id               TEXT PRIMARY KEY,
+    name             TEXT NOT NULL,
+    provider_id      TEXT NOT NULL REFERENCES model_providers(id) ON DELETE CASCADE,
+    model_id         TEXT NOT NULL,
+    reasoning_effort TEXT NOT NULL DEFAULT '',
+    enabled          BOOLEAN NOT NULL DEFAULT TRUE,
+    source           TEXT NOT NULL DEFAULT '',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS model_profiles_name_uniq ON model_profiles (lower(name));
+CREATE INDEX IF NOT EXISTS model_profiles_provider_idx ON model_profiles (provider_id, name);
+`,
+	},
+	{
 		version: 22,
 		name:    "lanxin_multi_bots",
 		sql: `

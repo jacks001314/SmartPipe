@@ -19,6 +19,10 @@ import (
 func (a *API) registerModels(party iris.Party) {
 	party.Post("/model-config/import/preview", a.previewModelConfigImport)
 	party.Post("/model-config/import", a.importModelConfig)
+	party.Get("/model-profiles", a.listModelProfiles)
+	party.Post("/model-profiles/{id}/enabled", a.setModelProfileEnabled)
+	party.Post("/model-profiles/{id}/default", a.setModelProfileDefault)
+	party.Delete("/model-profiles/{id}", a.deleteModelProfile)
 	party.Get("/model-providers", a.listModelProviders)
 	party.Post("/model-providers", a.createModelProvider)
 	party.Get("/model-providers/{id}", a.getModelProvider)

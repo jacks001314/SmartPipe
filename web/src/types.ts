@@ -213,33 +213,59 @@ export type ModelDefault = {
   reasoning_effort: string;
 };
 
+export type ModelProfile = {
+  id: string;
+  name: string;
+  provider_id: string;
+  provider_name: string;
+  model: string;
+  reasoning_effort: string;
+  enabled: boolean;
+  source: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ModelConfigImportProvider = {
   key: string;
   name: string;
   base_url: string;
   wire_api: string;
+  api_key_source: "toml" | "saved" | "env" | "missing";
   has_api_key: boolean;
   has_existing_credential: boolean;
   env_key: string;
   requires_openai_auth: boolean;
-  models: string[];
   action: "create" | "update";
 };
 
-export type ModelConfigImportPreview = {
-  provider_count: number;
-  create_count: number;
-  update_count: number;
-  providers: ModelConfigImportProvider[];
-  default_model: string;
+export type ModelConfigImportProfile = {
+  key: string;
+  model: string;
+  provider_key: string;
+  provider_name: string;
   reasoning_effort: string;
+  api_key_source: "toml" | "saved" | "env" | "missing";
+  action: "create" | "update";
+  provider_missing: boolean;
+};
+
+export type ModelConfigImportPreview = {
+  profile_count: number;
+  provider_count: number;
+  default_profile_key: string;
+  profiles: ModelConfigImportProfile[];
+  providers: ModelConfigImportProvider[];
   warnings: string[];
 };
 
 export type ModelConfigImportResult = {
   source: string;
-  imported: number;
-  updated: number;
+  imported_profiles: number;
+  updated_profiles: number;
+  imported_providers: number;
+  updated_providers: number;
+  profiles: ModelProfile[];
   providers: ModelProvider[];
   default: ModelDefault;
   warnings: string[];

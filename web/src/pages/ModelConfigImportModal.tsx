@@ -8,7 +8,13 @@ type DirectoryCandidate = { path: string; file: File };
 
 const MAX_CONFIG_BYTES = 1024 * 1024;
 
-const EXAMPLE_CONFIG = `model = "gpt-5.4"
+const EXAMPLE_CONFIG = `profile = "team-gateway"
+model = "gpt-5.4"
+model_provider = "team-gateway"
+model_reasoning_effort = "high"
+
+[profiles.team-gateway]
+model = "gpt-5.4"
 model_provider = "team-gateway"
 model_reasoning_effort = "high"
 
@@ -18,27 +24,20 @@ base_url = "https://gateway.example.com/v1"
 wire_api = "responses"
 experimental_bearer_token = "sk-..."`;
 
-const MODE_COPY: Record<ImportMode, { title: string; hint: string }> = {
-  file: {
-    title: "选择 config.toml",
-    hint: "从本机选择 ~/.codex/config.toml。浏览器只读取你明确选择的文件。",
-  },
-  directory: {
-    title: "选择 Codex 目录",
-    hint: "选择 ~/.codex 或任意包含 config.toml 的目录，系统会列出找到的配置文件。",
-  },
-  text: {
-    title: "粘贴或手动输入",
-    hint: "可直接粘贴 Codex TOML；也支持少量字段，例如只录入 model_providers 与默认模型。",
-  },
+const MODE_COPY: Record<ImportMode, string> = {
+  file: "从本机选择 ~/.codex/config.toml。浏览器只读取你明确选择的文件。",
+  directory: "选择 ~/.codex 或包含 config.toml 的目录，系统会列出找到的配置文件。",
+  text: "直接粘贴 Codex TOML，支持 Profile、Provider 和顶层默认模型。",
 };
 
-function keyStatus(provider: ModelConfigImportPreview["providers"][number]) {
-  if (provider.has_api_key) return { text: "将加密保存", tone: "ok" };
-  if (provider.has_existing_credential) return { text: "沿用已保存 Key", tone: "ok" };
-  if (provider.env_key) return { text: "需补 Key · " + provider.env_key, tone: "warn" };
-  return { text: "未提供 Key", tone: "warn" };
-}
+const keyLabel = (source: string) => ({
+  toml: "TOML",
+  saved: "已保存",
+  env: "ENV",
+  missing: "未提供",
+}[source] ?? source);
+
+const keyTone = (source: string) => source === "toml" || source === "saved" ? "ok" : "warn";
 
 export function ModelConfigImportModal({
   open,
@@ -49,12 +48,14 @@ export function ModelConfigImportModal({
   open: boolean;
   notify: Notify;
   onClose: () => void;
-  onImported: (providerID: string) => void;
+  onImported: () => void;
 }) {
   const [mode, setMode] = useState<ImportMode>("file");
   const [source, setSource] = useState("");
   const [content, setContent] = useState("");
   const [preview, setPreview] = useState<ModelConfigImportPreview | null>(null);
+  const [selectedProfiles, setSelectedProfiles] = useState<Set<string>>(new Set());
+  const [selectedProviders, setSelectedProviders] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<ModelConfigImportResult | null>(null);
   const [directoryFiles, setDirectoryFiles] = useState<DirectoryCandidate[]>([]);
   const [busy, setBusy] = useState<"" | "preview" | "import">("");
@@ -71,20 +72,27 @@ export function ModelConfigImportModal({
     setSource("");
     setContent("");
     setPreview(null);
+    setSelectedProfiles(new Set());
+    setSelectedProviders(new Set());
     setResult(null);
     setDirectoryFiles([]);
     setBusy("");
   }, [open]);
 
   const close = () => {
-    if (busy) return;
-    onClose();
+    if (!busy) onClose();
+  };
+
+  const clearPreview = () => {
+    setPreview(null);
+    setSelectedProfiles(new Set());
+    setSelectedProviders(new Set());
+    setResult(null);
   };
 
   const changeMode = (next: ImportMode) => {
     setMode(next);
-    setPreview(null);
-    setResult(null);
+    clearPreview();
   };
 
   const readFile = async (file: File, nextSource: string) => {
@@ -100,8 +108,7 @@ export function ModelConfigImportModal({
       }
       setContent(text);
       setSource(nextSource);
-      setPreview(null);
-      setResult(null);
+      clearPreview();
     } catch {
       notify("读取本机配置文件失败", "error");
     }
@@ -122,8 +129,7 @@ export function ModelConfigImportModal({
       .sort((a, b) => a.path.length - b.path.length || a.path.localeCompare(b.path));
     input.value = "";
     setDirectoryFiles(candidates);
-    setPreview(null);
-    setResult(null);
+    clearPreview();
     if (candidates.length === 0) {
       setContent("");
       setSource("");
@@ -148,7 +154,9 @@ export function ModelConfigImportModal({
       const next = await api.previewModelConfigImport(source || "手动输入", content);
       setPreview(next);
       setResult(null);
-      notify("解析完成，请确认供应商与默认模型");
+      setSelectedProfiles(new Set());
+      setSelectedProviders(new Set());
+      notify(`解析完成：${next.profile_count} 个 Profile，${next.provider_count} 个 Provider`);
     } catch (err) {
       notify(err instanceof ApiError ? err.message : "解析配置失败", "error");
     } finally {
@@ -156,16 +164,72 @@ export function ModelConfigImportModal({
     }
   };
 
-  const executeImport = async () => {
+  const toggleProfile = (key: string, checked: boolean) => {
     if (!preview) return;
+    const nextProfiles = new Set(selectedProfiles);
+    const nextProviders = new Set(selectedProviders);
+    checked ? nextProfiles.add(key) : nextProfiles.delete(key);
+    const profile = preview.profiles.find((item) => item.key === key);
+    if (checked && profile && !profile.provider_missing) nextProviders.add(profile.provider_key);
+    setSelectedProfiles(nextProfiles);
+    setSelectedProviders(nextProviders);
+  };
+
+  const toggleProvider = (key: string, checked: boolean) => {
+    if (!preview) return;
+    const nextProviders = new Set(selectedProviders);
+    const nextProfiles = new Set(selectedProfiles);
+    checked ? nextProviders.add(key) : nextProviders.delete(key);
+    if (!checked) {
+      for (const profile of preview.profiles) {
+        if (profile.provider_key === key) nextProfiles.delete(profile.key);
+      }
+    }
+    setSelectedProviders(nextProviders);
+    setSelectedProfiles(nextProfiles);
+  };
+
+  const toggleAllProfiles = (checked: boolean) => {
+    if (!preview) return;
+    if (!checked) {
+      setSelectedProfiles(new Set());
+      return;
+    }
+    const nextProfiles = new Set(selectedProfiles);
+    const nextProviders = new Set(selectedProviders);
+    for (const profile of preview.profiles) {
+      if (profile.provider_missing) continue;
+      nextProfiles.add(profile.key);
+      nextProviders.add(profile.provider_key);
+    }
+    setSelectedProfiles(nextProfiles);
+    setSelectedProviders(nextProviders);
+  };
+
+  const toggleAllProviders = (checked: boolean) => {
+    if (!preview) return;
+    if (!checked) {
+      setSelectedProviders(new Set());
+      setSelectedProfiles(new Set());
+      return;
+    }
+    setSelectedProviders(new Set(preview.providers.map((provider) => provider.key)));
+  };
+
+  const executeImport = async () => {
+    if (!preview || (selectedProfiles.size === 0 && selectedProviders.size === 0)) return;
     setBusy("import");
     try {
-      const imported = await api.importModelConfig(source || "手动输入", content);
+      const imported = await api.importModelConfig(
+        source || "手动输入",
+        content,
+        Array.from(selectedProfiles),
+        Array.from(selectedProviders),
+      );
       setResult(imported);
-      const firstProvider = imported.providers[0]?.id ?? "";
-      if (firstProvider) onImported(firstProvider);
+      onImported();
       notify(
-        `导入完成：新增 ${imported.imported} 个，更新 ${imported.updated} 个供应商` +
+        `导入完成：${imported.imported_profiles} 个新 Profile，${imported.imported_providers} 个新 Provider` +
           (imported.warnings.length ? `，有 ${imported.warnings.length} 条提示` : ""),
       );
     } catch (err) {
@@ -175,151 +239,161 @@ export function ModelConfigImportModal({
     }
   };
 
-  const copy = MODE_COPY[mode];
+  const allProfilesChecked = !!preview && preview.profiles.filter((p) => !p.provider_missing).length > 0 &&
+    preview.profiles.filter((p) => !p.provider_missing).every((p) => selectedProfiles.has(p.key));
+  const allProvidersChecked = !!preview && preview.providers.length > 0 &&
+    preview.providers.every((p) => selectedProviders.has(p.key));
 
   return (
     <div className={"modal-backdrop" + (open ? " open" : "")}>
-      <div className="modal" style={{ width: "min(920px, 100%)" }}>
+      <div className="modal" style={{ width: "min(980px, 100%)", maxHeight: "calc(100vh - 36px)" }}>
         <div className="modal-head">
           <div>
-            <div className="modal-title">导入 Codex 模型配置</div>
-            <div className="modal-sub">先解析预览，再写入供应商、模型目录与默认模型；密钥只进入加密凭据库。</div>
+            <div className="modal-title">导入本机模型配置</div>
+            <div className="modal-sub">勾选一项或多项写入 Master；Profile 会自动携带它依赖的 Provider，导入的模型同时启用。</div>
           </div>
           <button className="icon-btn" onClick={close} disabled={!!busy}>✕</button>
         </div>
 
-        <div className="modal-body">
+        <div className="modal-body" style={{ overflow: "auto", maxHeight: "calc(100vh - 205px)" }}>
+          <div style={{ marginBottom: 12 }}>
+            <div className="tiny" style={{ fontWeight: 650, marginBottom: 6 }}>配置来源</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              {(["file", "directory", "text"] as ImportMode[]).map((item) => (
+                <button key={item} className={"btn small " + (mode === item ? "primary" : "")} onClick={() => changeMode(item)} disabled={!!busy}>
+                  {item === "file" ? "本机文件" : item === "directory" ? "指定目录" : "手动输入"}
+                </button>
+              ))}
+              <span className="tiny mono" style={{ marginLeft: 4 }}>{source || "尚未选择配置"}</span>
+            </div>
+            <div className="tiny" style={{ marginTop: 5 }}>{MODE_COPY[mode]}</div>
+            <div style={{ marginTop: 9 }}>
+              <input ref={fileInput} type="file" accept=".toml,text/plain,application/toml" style={{ display: "none" }} onChange={(event) => void chooseFile(event)} />
+              <input ref={directoryInput} type="file" multiple style={{ display: "none" }} onChange={(event) => void chooseDirectory(event)} />
+              {mode === "file" && <button className="btn" disabled={!!busy} onClick={() => fileInput.current?.click()}>选择 config.toml</button>}
+              {mode === "directory" && <button className="btn" disabled={!!busy} onClick={() => directoryInput.current?.click()}>选择目录</button>}
+              {mode === "directory" && directoryFiles.length > 1 && (
+                <select value={source} onChange={(event) => void selectDirectoryFile(event.target.value)} disabled={!!busy} style={{ marginLeft: 8, minWidth: 300 }}>
+                  {directoryFiles.map((item) => <option key={item.path} value={item.path}>{item.path}</option>)}
+                </select>
+              )}
+            </div>
+          </div>
+
+          {mode === "text" && (
+            <textarea
+              value={content}
+              onChange={(event) => { setContent(event.target.value); setSource("手动输入"); clearPreview(); }}
+              placeholder={EXAMPLE_CONFIG}
+              spellCheck={false}
+              style={{ width: "100%", minHeight: 210, padding: 12, borderRadius: 10, border: "1px solid var(--line)", fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace", fontSize: 12, lineHeight: 1.55, resize: "vertical" }}
+            />
+          )}
+
+          {mode !== "text" && content && (
+            <div className="tiny" style={{ marginBottom: 12, padding: "9px 11px", borderRadius: 8, background: "#edf4ff", color: "#24508f" }}>
+              已读取 {source} · {content.length.toLocaleString()} 个字符 · API Key 不回显
+            </div>
+          )}
+
           {result ? (
             <>
               <div className="notice">
                 <span>✓</span>
                 <div>
-                  <strong>配置已导入。</strong>
-                  新增 {result.imported} 个供应商，更新 {result.updated} 个；默认模型
-                  {result.default.model ? `已切换为 ${result.default.model}` : "未切换"}。
+                  <strong>已写入模型配置。</strong>
+                  新增 {result.imported_profiles} 个 Profile、{result.imported_providers} 个 Provider；更新
+                  {result.updated_profiles} 个 Profile、{result.updated_providers} 个 Provider。
+                  {result.default.model ? ` 默认模型已切换为 ${result.default.model}。` : ""}
                 </div>
               </div>
               {result.warnings.length > 0 && (
-                <div style={{ border: "1px solid #f2d18a", background: "#fff9eb", borderRadius: 10, padding: 14, marginTop: 14 }}>
-                  <div style={{ fontSize: 13, fontWeight: 650, marginBottom: 8 }}>需要处理</div>
+                <div style={{ border: "1px solid #f2d18a", background: "#fff9eb", borderRadius: 10, padding: 12, marginTop: 12 }}>
                   {result.warnings.map((warning, index) => (
                     <div key={index} className="tiny" style={{ color: "#8a5b00", marginTop: index ? 6 : 0 }}>• {warning}</div>
                   ))}
                 </div>
               )}
             </>
-          ) : (
-            <>
-              <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-                {(["file", "directory", "text"] as ImportMode[]).map((item) => (
-                  <button
-                    key={item}
-                    className={"btn " + (mode === item ? "primary" : "")}
-                    onClick={() => changeMode(item)}
-                    disabled={!!busy}
-                  >
-                    {item === "file" ? "本机文件" : item === "directory" ? "指定目录" : "手动输入"}
-                  </button>
-                ))}
+          ) : preview ? (
+            <div style={{ display: "grid", gap: 14 }}>
+              <div style={{ border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden" }}>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Profile</th><th>Model</th><th>Provider</th><th>推理强度</th><th>API Key</th>
+                      <th style={{ width: 60, textAlign: "center" }}><input type="checkbox" checked={allProfilesChecked} onChange={(event) => toggleAllProfiles(event.target.checked)} /> 选择</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.profiles.length === 0 ? (
+                      <tr><td colSpan={6} className="tiny" style={{ textAlign: "center", padding: 18 }}>配置中没有 Profile</td></tr>
+                    ) : preview.profiles.map((profile) => (
+                      <tr key={profile.key}>
+                        <td><div className="strong">{profile.key}</div><div className="tiny">{profile.action === "update" ? "更新已有" : "新建"}</div></td>
+                        <td className="mono tiny">{profile.model}</td>
+                        <td><div>{profile.provider_name || profile.provider_key}</div>{profile.provider_missing && <div className="tiny" style={{ color: "var(--danger)" }}>Provider 缺失</div>}</td>
+                        <td className="tiny">{profile.reasoning_effort || "默认"}</td>
+                        <td><span className={"chip " + keyTone(profile.api_key_source)}>{keyLabel(profile.api_key_source)}</span></td>
+                        <td style={{ textAlign: "center" }}><input type="checkbox" disabled={profile.provider_missing} checked={selectedProfiles.has(profile.key)} onChange={(event) => toggleProfile(profile.key, event.target.checked)} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
 
-              <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 16, background: "#fbfcfe" }}>
-                <div style={{ fontSize: 13, fontWeight: 650 }}>{copy.title}</div>
-                <div className="tiny" style={{ marginTop: 4, lineHeight: 1.7 }}>{copy.hint}</div>
-
-                {mode === "file" && (
-                  <div style={{ marginTop: 12 }}>
-                    <input ref={fileInput} type="file" accept=".toml,text/plain,application/toml" style={{ display: "none" }} onChange={(event) => void chooseFile(event)} />
-                    <button className="btn primary" disabled={!!busy} onClick={() => fileInput.current?.click()}>选择 config.toml</button>
-                  </div>
-                )}
-
-                {mode === "directory" && (
-                  <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-                    <input ref={directoryInput} type="file" multiple style={{ display: "none" }} onChange={(event) => void chooseDirectory(event)} />
-                    <div>
-                      <button className="btn primary" disabled={!!busy} onClick={() => directoryInput.current?.click()}>选择目录</button>
-                    </div>
-                    {directoryFiles.length > 1 && (
-                      <div className="field">
-                        <label>找到 {directoryFiles.length} 个 config.toml</label>
-                        <select value={source} onChange={(event) => void selectDirectoryFile(event.target.value)} disabled={!!busy}>
-                          {directoryFiles.map((item) => <option key={item.path} value={item.path}>{item.path}</option>)}
-                        </select>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {mode === "text" && (
-                  <textarea
-                    value={content}
-                    onChange={(event) => { setContent(event.target.value); setPreview(null); setResult(null); setSource("手动输入"); }}
-                    placeholder={EXAMPLE_CONFIG}
-                    spellCheck={false}
-                    style={{ width: "100%", minHeight: 220, marginTop: 12, padding: 12, borderRadius: 10, border: "1px solid var(--line)", fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace", fontSize: 12, lineHeight: 1.55, resize: "vertical" }}
-                  />
-                )}
-
-                {mode !== "text" && content && (
-                  <div className="tiny" style={{ marginTop: 12, padding: "9px 11px", borderRadius: 8, background: "#edf4ff", color: "#24508f" }}>
-                    已读取 {source} · {content.length.toLocaleString()} 个字符 · 密钥不会回显
-                  </div>
-                )}
+              <div style={{ border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden" }}>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Provider</th><th>Base URL</th><th>格式</th><th>API Key</th>
+                      <th style={{ width: 60, textAlign: "center" }}><input type="checkbox" checked={allProvidersChecked} onChange={(event) => toggleAllProviders(event.target.checked)} /> 选择</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.providers.map((provider) => (
+                      <tr key={provider.key}>
+                        <td><div className="strong">{provider.name}</div><div className="tiny mono">{provider.key} · {provider.action === "update" ? "更新" : "新建"}</div></td>
+                        <td className="mono tiny" style={{ maxWidth: 330, wordBreak: "break-all" }}>{provider.base_url}</td>
+                        <td><span className="chip">{provider.wire_api}</span></td>
+                        <td><span className={"chip " + keyTone(provider.api_key_source)}>{keyLabel(provider.api_key_source)}</span>{provider.env_key && <div className="tiny mono" style={{ marginTop: 3 }}>{provider.env_key}</div>}</td>
+                        <td style={{ textAlign: "center" }}><input type="checkbox" checked={selectedProviders.has(provider.key)} onChange={(event) => toggleProvider(provider.key, event.target.checked)} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
 
-              {preview && (
-                <div style={{ marginTop: 16 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 14, fontWeight: 650 }}>导入预览</div>
-                      <div className="tiny">新增 {preview.create_count} 个 · 更新 {preview.update_count} 个 · 默认模型 {preview.default_model || "不切换"}{preview.reasoning_effort ? " · " + preview.reasoning_effort : ""}</div>
-                    </div>
-                    <span className="chip ok"><span className="dot" />解析通过</span>
-                  </div>
-
-                  <table className="table">
-                    <thead><tr><th>供应商</th><th>Base URL</th><th>协议</th><th>密钥</th><th>模型</th><th>动作</th></tr></thead>
-                    <tbody>
-                      {preview.providers.map((provider) => {
-                        const status = keyStatus(provider);
-                        return (
-                          <tr key={provider.key}>
-                            <td><div className="strong">{provider.name}</div><div className="tiny mono">{provider.key}</div></td>
-                            <td className="tiny mono" style={{ maxWidth: 250, wordBreak: "break-all" }}>{provider.base_url}</td>
-                            <td><span className="chip">{provider.wire_api}</span></td>
-                            <td><span className={"chip " + status.tone}>{status.text}</span></td>
-                            <td className="tiny">{provider.models.length ? provider.models.join(", ") : "—"}</td>
-                            <td><span className={"chip " + (provider.action === "update" ? "warn" : "ok")}>{provider.action === "update" ? "更新" : "新增"}</span></td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-
-                  {preview.warnings.length > 0 && (
-                    <div style={{ border: "1px solid #f2d18a", background: "#fff9eb", borderRadius: 10, padding: 12, marginTop: 12 }}>
-                      {preview.warnings.map((warning, index) => (
-                        <div key={index} className="tiny" style={{ color: "#8a5b00", marginTop: index ? 6 : 0 }}>• {warning}</div>
-                      ))}
-                    </div>
-                  )}
+              {preview.warnings.length > 0 && (
+                <div style={{ border: "1px solid #f2d18a", background: "#fff9eb", borderRadius: 10, padding: 12 }}>
+                  {preview.warnings.map((warning, index) => (
+                    <div key={index} className="tiny" style={{ color: "#8a5b00", marginTop: index ? 6 : 0 }}>• {warning}</div>
+                  ))}
                 </div>
               )}
-            </>
+            </div>
+          ) : (
+            <div className="empty" style={{ padding: "24px 16px" }}>
+              <h3 style={{ fontSize: 13 }}>读取配置后先预览，再确定要导入的 Profile 和 Provider。</h3>
+              <div className="tiny">选择 Profile 时会自动勾选它依赖的 Provider；导入的模型默认启用。</div>
+            </div>
           )}
         </div>
 
         <div className="modal-foot">
-          <div className="tiny">{result ? "可以关闭窗口继续编辑供应商，或补充缺少的 API Key。" : "导入会更新同名供应商；已有模型目录不会删除。"}</div>
+          <div className="tiny">
+            {result ? "可以关闭窗口，在模型配置页继续调整 Profile 或 Provider。" : "同名 Profile/Provider 会更新，已有模型目录不会删除。"}
+          </div>
           <div>
             {result ? (
               <button className="btn primary" onClick={onClose}>完成</button>
             ) : (
               <>
                 <button className="btn" onClick={close} disabled={!!busy}>取消</button>{" "}
-                <button className="btn" disabled={!!busy || !content.trim()} onClick={() => void parsePreview()}>{busy === "preview" ? "解析中…" : "解析预览"}</button>{" "}
-                <button className="btn primary" disabled={!!busy || !preview} onClick={() => void executeImport()}>{busy === "import" ? "导入中…" : "确认导入"}</button>
+                <button className="btn" disabled={!!busy || !content.trim()} onClick={() => void parsePreview()}>{busy === "preview" ? "读取中…" : "读取配置"}</button>{" "}
+                <button className="btn primary" disabled={!!busy || !preview || (selectedProfiles.size === 0 && selectedProviders.size === 0)} onClick={() => void executeImport()}>
+                  {busy === "import" ? "导入中…" : `导入 ${selectedProfiles.size} 个 Profile / ${selectedProviders.size} 个 Provider`}
+                </button>
               </>
             )}
           </div>
