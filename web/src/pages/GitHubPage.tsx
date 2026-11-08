@@ -34,16 +34,22 @@ export function GitHubPage({ notify }: { notify: Notify }) {
   const [oauth, setOauth] = useState<GitHubOAuthView | null>(null);
   const [device, setDevice] = useState<GitHubDeviceFlow | null>(null);
   const [deviceBusy, setDeviceBusy] = useState(false);
+  const [proxyURL, setProxyURL] = useState("");
+  const [proxyBusy, setProxyBusy] = useState("");
+  const [proxyNote, setProxyNote] = useState("");
+  const [proxyNoteOk, setProxyNoteOk] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [repoList, creds, projs, oauthView] = await Promise.all([
+      const [repoList, creds, projs, oauthView, proxyView] = await Promise.all([
         api.listGitHubRepos(),
         api.listCredentials(),
         api.listProjects(),
         api.getGithubOAuth(),
+        api.getGithubProxy(),
       ]);
+      setProxyURL(proxyView.url ?? "");
       setRepos({ ...repoList, repos: repoList.repos ?? [] });
       setOauth(oauthView);
       setCredentials(creds ?? []);
@@ -115,6 +121,39 @@ export function GitHubPage({ notify }: { notify: Notify }) {
       window.clearInterval(timer);
     };
   }, [device, load, notify]);
+
+  const saveProxy = async () => {
+    setProxyBusy("save");
+    setProxyNote("");
+    try {
+      const view = await api.setGithubProxy(proxyURL.trim());
+      setProxyURL(view.url);
+      setProxyNote(view.url ? "代理已保存，GitHub 登录与仓库请求会走它" : "已切换为直连");
+      setProxyNoteOk(true);
+      notify(view.url ? "GitHub 代理已保存" : "已清除 GitHub 代理");
+      await load();
+    } catch (err) {
+      setProxyNote(err instanceof ApiError ? err.message : "保存代理失败");
+      setProxyNoteOk(false);
+    } finally {
+      setProxyBusy("");
+    }
+  };
+
+  const testProxy = async () => {
+    setProxyBusy("test");
+    setProxyNote("");
+    try {
+      const res = await api.testGithubProxy(proxyURL.trim());
+      setProxyNote((res.ok ? "代理可用：" : "代理不可用：") + res.message + `（${res.latency_ms}ms）`);
+      setProxyNoteOk(res.ok);
+    } catch (err) {
+      setProxyNote(err instanceof ApiError ? err.message : "测试代理失败");
+      setProxyNoteOk(false);
+    } finally {
+      setProxyBusy("");
+    }
+  };
 
   const startAccountLogin = async () => {
     setDeviceBusy(true);
@@ -258,6 +297,25 @@ export function GitHubPage({ notify }: { notify: Notify }) {
               </div>
             </>
           )}
+          <div className="github-proxy">
+            <span className="github-proxy-label">网络代理</span>
+            <input
+              value={proxyURL}
+              onChange={(event) => setProxyURL(event.target.value)}
+              placeholder="http://172.17.0.1:7890（留空表示直连）"
+              spellCheck={false}
+            />
+            <button className="btn small" disabled={!!proxyBusy} onClick={() => void saveProxy()}>
+              {proxyBusy === "save" ? "保存中…" : "保存"}
+            </button>
+            <button className="btn small" disabled={!!proxyBusy} onClick={() => void testProxy()}>
+              {proxyBusy === "test" ? "测试中…" : "测试"}
+            </button>
+            {proxyNote && <span className={"tiny " + (proxyNoteOk ? "" : "bad-note")}>{proxyNote}</span>}
+            <span className="tiny github-proxy-hint">
+              支持 http / https / socks5；容器部署请填宿主机代理地址，登录和仓库请求都会走这里。
+            </span>
+          </div>
           <div className="github-account-auth">
             <div className="tiny">
               App 安装只能看到已安装的仓库；登录 GitHub 账号后，别人仓库里邀请你参与的项目也会一起列出来。

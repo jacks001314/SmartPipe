@@ -3,6 +3,7 @@ package adminapi
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -91,7 +92,7 @@ func (a *API) listGitHubRepositories(c iris.Context) {
 			lastErr = err
 			continue
 		}
-		repos, err := fetchGitHubInstallationRepos(ctx, apiBase, token)
+		repos, err := a.fetchGitHubInstallationRepos(ctx, apiBase, token)
 		if err != nil {
 			lastErr = err
 			continue
@@ -133,7 +134,7 @@ func (a *API) listGitHubRepositories(c iris.Context) {
 	}
 	if userToken != "" {
 		apiBase := github.DefaultAPIBase
-		login, repos, err := fetchGitHubUserRepos(ctx, apiBase, userToken)
+		login, repos, err := a.fetchGitHubUserRepos(ctx, apiBase, userToken)
 		if err != nil {
 			lastErr = err
 		} else {
@@ -180,8 +181,11 @@ func mergeGitHubRepoViews(dst []githubRepoView, index map[string]int, list []git
 }
 
 // newGitHubClient 基于 go-github 构造客户端；企业版通过 api_base 覆盖默认端点。
-func newGitHubClient(apiBase, token string) (*gh.Client, error) {
-	client := gh.NewClient(nil).WithAuthToken(token)
+func newGitHubClient(httpClient *http.Client, apiBase, token string) (*gh.Client, error) {
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	client := gh.NewClient(httpClient).WithAuthToken(token)
 	base := strings.TrimRight(strings.TrimSpace(apiBase), "/")
 	if base == "" || base == strings.TrimRight(github.DefaultAPIBase, "/") {
 		return client, nil
@@ -232,8 +236,8 @@ func repoView(repo *gh.Repository) githubRepoView {
 }
 
 // fetchGitHubInstallationRepos 读取 GitHub App 安装授权范围内的仓库。
-func fetchGitHubInstallationRepos(ctx context.Context, apiBase, token string) ([]githubRepoView, error) {
-	client, err := newGitHubClient(apiBase, token)
+func (a *API) fetchGitHubInstallationRepos(ctx context.Context, apiBase, token string) ([]githubRepoView, error) {
+	client, err := newGitHubClient(a.currentGitHubClient(), apiBase, token)
 	if err != nil {
 		return nil, fmt.Errorf("构造 GitHub 客户端失败：%w", err)
 	}
@@ -256,8 +260,8 @@ func fetchGitHubInstallationRepos(ctx context.Context, apiBase, token string) ([
 }
 
 // fetchGitHubUserRepos 用 PAT 读取账号本人、协作者与组织内可见的仓库。
-func fetchGitHubUserRepos(ctx context.Context, apiBase, token string) (string, []githubRepoView, error) {
-	client, err := newGitHubClient(apiBase, token)
+func (a *API) fetchGitHubUserRepos(ctx context.Context, apiBase, token string) (string, []githubRepoView, error) {
+	client, err := newGitHubClient(a.currentGitHubClient(), apiBase, token)
 	if err != nil {
 		return "", nil, fmt.Errorf("构造 GitHub 客户端失败：%w", err)
 	}

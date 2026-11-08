@@ -433,3 +433,12 @@ button { font-family: inherit; }
 .github-account-auth .tiny { flex: 1; min-width: 260px; margin: 0; }
 .github-device { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .github-device-code { font-family: "Cascadia Code", Consolas, monospace; font-size: 14px; letter-spacing: 2px; padding: 4px 10px; border: 1px dashed var(--brand); border-radius: 8px; color: var(--brand); background: var(--brand-soft); }
+
+.github-proxy { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.github-proxy-label { font-size: 11.5px; font-weight: 650; color: var(--muted); }
+.github-proxy input {
+  width: 300px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px;
+  font-size: 12px; font-family: "Cascadia Code", Consolas, monospace; color: var(--ink);
+}
+.github-proxy-hint { flex-basis: 100%; margin: 0; }
+.bad-note { color: var(--danger); }

@@ -70,6 +70,7 @@ func (a *API) ApplyRuntimeSettings(ctx context.Context) {
 	if v, err := a.store.GetSetting(ctx, "mcp_pool_name"); err == nil && strings.TrimSpace(v) != "" {
 		a.mcpPoolName = strings.TrimSpace(v)
 	}
+	a.applyStoredGitHubProxy(ctx)
 }
 
 func (a *API) mcpConfig(c iris.Context) {

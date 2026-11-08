@@ -52,13 +52,26 @@ type Client struct {
 	gh *gh.Client
 }
 
+// httpClient 是包内所有 GitHub HTTP 请求共用的客户端，部署方可以注入带代理的版本。
+var httpClient = &http.Client{Timeout: 30 * time.Second}
+
+// SetHTTPClient 替换包内默认客户端（例如注入代理）。
+func SetHTTPClient(client *http.Client) {
+	if client != nil {
+		httpClient = client
+	}
+}
+
+// HTTPClient 返回当前包内使用的客户端。
+func HTTPClient() *http.Client { return httpClient }
+
 // New 构造客户端；token 可以是 PAT 或 installation token。
 func New(baseURL, token string) *Client {
 	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if base == "" {
 		base = DefaultAPIBase
 	}
-	hc := &http.Client{Timeout: 30 * time.Second}
+	hc := httpClient
 	client := gh.NewClient(hc)
 	if token = strings.TrimSpace(token); token != "" {
 		client = client.WithAuthToken(token)
@@ -291,7 +304,7 @@ func InstallationToken(ctx context.Context, apiBase, appID, installationID, priv
 	req.Header.Set("Authorization", "Bearer "+jwt)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", time.Time{}, err
 	}

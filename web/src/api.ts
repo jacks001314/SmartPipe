@@ -1,4 +1,4 @@
-import type { AgentItem, AgentToken, AppServer, AuditEntry, AuthConfig, AuthSession, BridgeLink, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Derivation, DispatchRecord, Health, IssueAttempt, IssuePlan, Project, ProjectBinding, ReleaseCandidate, ReleaseRecord, ReleaseRun, RepoOp, MCPConfig, TestResult, ToolCall, UserIdentity, VerificationRecord, WebhookDelivery, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList } from "./types";
+import type { AgentItem, AgentToken, AppServer, AuditEntry, AuthConfig, AuthSession, BridgeLink, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Derivation, DispatchRecord, Health, IssueAttempt, IssuePlan, Project, ProjectBinding, ReleaseCandidate, ReleaseRecord, ReleaseRun, RepoOp, MCPConfig, TestResult, ToolCall, UserIdentity, VerificationRecord, WebhookDelivery, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView } from "./types";
 
 const TOKEN_KEY = "smartpipe.adminToken";
 
@@ -85,6 +85,9 @@ export const api = {
   listCredentials: (projectId?: string) =>
     request<Credential[]>("/credentials" + (projectId ? "?project_id=" + encodeURIComponent(projectId) : "")),
   listGitHubRepos: () => request<GitHubRepoList>("/github/repositories"),
+  getGithubProxy: () => request<GitHubProxyView>("/github/proxy"),
+  setGithubProxy: (url: string) => request<GitHubProxyView>("/github/proxy", { method: "PUT", body: { url } }),
+  testGithubProxy: (url: string) => request<{ ok: boolean; message: string; latency_ms: number }>("/github/proxy/test", { method: "POST", body: { url } }),
   startGithubApp: () => request<GitHubAppSetup>("/github/app/start", { method: "POST" }),
   getGithubAppStatus: (setup_id: string) =>
     request<GitHubAppSetupStatus>("/github/app/status/" + encodeURIComponent(setup_id)),

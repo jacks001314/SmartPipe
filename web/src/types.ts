@@ -79,6 +79,12 @@ export type GitHubOAuthView = {
   credential_id: string;
 };
 
+export type GitHubProxyView = {
+  url: string;
+  enabled: boolean;
+  source: string;
+};
+
 export type GitHubDeviceFlow = {
   flow_id: string;
   user_code: string;

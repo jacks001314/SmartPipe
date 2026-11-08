@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kataras/iris/v12"
@@ -72,6 +73,8 @@ type API struct {
 	botToken              string
 	mcpURL                string
 	mcpPoolName           string
+	githubHTTPMu          sync.RWMutex
+	githubHTTP            *http.Client
 	crashRetentionDays    int
 	rejectedRetentionDays int
 	loginEnabled          bool
@@ -172,6 +175,7 @@ func (a *API) Register(app *iris.Application) {
 	a.registerGitHubOAuth(party)
 	a.registerGitHubApp(party)
 	a.registerGitHubRepos(party)
+	a.registerGitHubProxy(party)
 	a.registerLanxinInternal(app)
 }
 
