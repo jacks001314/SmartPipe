@@ -65,9 +65,9 @@ sudo ./scripts/install.sh --install-docker \
 安装动作会：
 
 1. 安装/更新代码到 `/opt/smartpipe`；
-2. 创建 `deploy/data/{runtime,verify,releases,go,go-cache,npm}`；
+2. 创建 `deploy/data/{verify,releases,go,go-cache,npm}`；
 3. 校验 Compose 配置并构建 `smartpipe:local`；
-4. 启动五个服务；
+4. 启动四个服务；
 5. 等待全部健康检查通过。
 
 也可以先手写环境文件再安装：

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,28 +17,21 @@ import (
 	"github.com/kataras/iris/v12"
 
 	"smartpipe/backend/internal/conncheck"
-	rt "smartpipe/backend/internal/runtime"
 	"smartpipe/backend/internal/store"
 )
 
 // Config 是管理 API 的依赖注入配置。
 type Config struct {
-	Store          *store.Store
-	Checker        *conncheck.Checker
-	Runtime        *rt.Manager
-	AdminToken     string
-	AllowOrigins   []string
-	AppServerBin   string
-	RuntimeDataDir string
-	AppServerToken string
-	VerifyURL      string
-	VerifyToken    string
-	ReleaseURL     string
-	ReleaseToken   string
-	BotAddr        string
-	BotToken       string
-	MCPURL         string
-	MCPPoolName    string
+	Store        *store.Store
+	Checker      *conncheck.Checker
+	AdminToken   string
+	AllowOrigins []string
+	VerifyURL    string
+	VerifyToken  string
+	ReleaseURL   string
+	ReleaseToken string
+	BotAddr      string
+	BotToken     string
 	// CrashRetentionDays 原始崩溃包保留天数（0 表示用默认 30 天）。
 	CrashRetentionDays int
 	// RejectedRetentionDays 被拒绝上报的保留天数（0 表示默认 7 天）。
@@ -57,22 +51,16 @@ type Config struct {
 type API struct {
 	store                 *store.Store
 	checker               *conncheck.Checker
-	runtime               *rt.Manager
 	token                 string
 	origins               []string
 	devOpen               bool
 	version               string
-	appServerBinary       string
-	runtimeDataDir        string
-	appServerToken        string
 	verifyURL             string
 	verifyToken           string
 	releaseURL            string
 	releaseToken          string
 	botAddr               string
 	botToken              string
-	mcpURL                string
-	mcpPoolName           string
 	githubHTTPMu          sync.RWMutex
 	githubHTTP            *http.Client
 	crashRetentionDays    int
@@ -93,30 +81,20 @@ func New(cfg Config) *API {
 	if checker == nil {
 		checker = conncheck.New()
 	}
-	runtimeManager := cfg.Runtime
-	if runtimeManager == nil {
-		runtimeManager = rt.NewManager()
-	}
 	token := strings.TrimSpace(cfg.AdminToken)
 	return &API{
 		store:                 cfg.Store,
 		checker:               checker,
-		runtime:               runtimeManager,
 		token:                 token,
 		origins:               cfg.AllowOrigins,
 		devOpen:               cfg.DevOpen || token == "",
 		version:               cfg.Version,
-		appServerBinary:       cfg.AppServerBin,
-		runtimeDataDir:        cfg.RuntimeDataDir,
-		appServerToken:        cfg.AppServerToken,
 		verifyURL:             strings.TrimSpace(cfg.VerifyURL),
 		verifyToken:           strings.TrimSpace(cfg.VerifyToken),
 		releaseURL:            strings.TrimSpace(cfg.ReleaseURL),
 		releaseToken:          strings.TrimSpace(cfg.ReleaseToken),
 		botAddr:               strings.TrimSpace(cfg.BotAddr),
 		botToken:              strings.TrimSpace(cfg.BotToken),
-		mcpURL:                strings.TrimSpace(cfg.MCPURL),
-		mcpPoolName:           strings.TrimSpace(cfg.MCPPoolName),
 		crashRetentionDays:    cfg.CrashRetentionDays,
 		rejectedRetentionDays: cfg.RejectedRetentionDays,
 		loginEnabled:          strings.TrimSpace(cfg.AdminPassword) != "",
@@ -310,4 +288,24 @@ func decodeBody(c iris.Context, out any) error {
 		return errors.New("请求体为空")
 	}
 	return json.Unmarshal(body, out)
+}
+
+// firstNonEmpty 返回第一个非空字符串。
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// intQuery 读取正整数查询参数，非法或缺失时用 fallback。
+func intQuery(c iris.Context, key string, fallback int) int {
+	if v := c.URLParam(key); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return fallback
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SmartPipe Linux installer.
-# Docker mode installs the five services through deploy/docker-compose.yml.
+# Docker mode installs the four services through deploy/docker-compose.yml.
 # Binary mode installs a build.sh bundle and the units in deploy/systemd.
 set -euo pipefail
 
@@ -251,7 +251,7 @@ install_docker_mode() {
   docker compose version >/dev/null
 
   local env_path="$INSTALL_DIR/deploy/.env"
-  mkdir -p "$INSTALL_DIR/deploy/data/runtime" "$INSTALL_DIR/deploy/data/verify" \
+  mkdir -p "$INSTALL_DIR/deploy/data/verify" \
     "$INSTALL_DIR/deploy/data/releases" "$INSTALL_DIR/deploy/data/go" \
     "$INSTALL_DIR/deploy/data/go-cache" "$INSTALL_DIR/deploy/data/npm"
   chown -R 10001:10001 "$INSTALL_DIR/deploy/data"
@@ -300,7 +300,7 @@ install_binary_mode() {
   if [[ -d "$bundle/configs" ]]; then cp -a "$bundle/configs/." "$INSTALL_DIR/configs/"; fi
 
   install -d -m 0750 -o smartpipe -g smartpipe \
-    /var/lib/smartpipe/runtime /var/lib/smartpipe/verify /var/lib/smartpipe/releases \
+    /var/lib/smartpipe/verify /var/lib/smartpipe/releases \
     /var/lib/smartpipe/go /var/lib/smartpipe/go-cache /var/lib/smartpipe/npm
   install -d -m 0750 /etc/smartpipe
 

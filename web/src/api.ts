@@ -1,4 +1,4 @@
-import type { AgentItem, AgentToken, AppServer, AuditEntry, AuthConfig, AuthSession, BridgeLink, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Derivation, DispatchRecord, Health, IssueAttempt, IssuePlan, Project, ProjectBinding, ReleaseCandidate, ReleaseRecord, ReleaseRun, RepoOp, MCPConfig, TestResult, ToolCall, UserIdentity, VerificationRecord, WebhookDelivery, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubPATView, GitHubRepoCatalog, GitHubRepo } from "./types";
+import type { AuditEntry, AuthConfig, AuthSession, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Health, IssueAttempt, Project, ReleaseCandidate, ReleaseRecord, ReleaseRun, RepoOp, TestResult, UserIdentity, VerificationRecord, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubPATView, GitHubRepoCatalog, GitHubRepo } from "./types";
 
 const TOKEN_KEY = "smartpipe.adminToken";
 
@@ -178,61 +178,19 @@ export const api = {
   listAudit: (limit = 100, action = "") =>
     request<AuditEntry[]>("/audit?limit=" + limit + (action ? "&action=" + encodeURIComponent(action) : "")),
 
-  listAppServers: () => request<AppServer[]>("/runtime/app-servers"),
-  startAppServer: (body: { name?: string; addr?: string; binary?: string; token?: string; data_dir?: string }) =>
-    request<AppServer>("/runtime/app-servers", { method: "POST", body }),
-  stopAppServer: (id: string) => request<AppServer>("/runtime/app-servers/" + id + "/stop", { method: "POST" }),
-  removeAppServer: (id: string) => request<void>("/runtime/app-servers/" + id, { method: "DELETE" }),
-  restartAppServer: (id: string) => request<AppServer>("/runtime/app-servers/" + id + "/restart", { method: "POST" }),
-  appServerLogs: (id: string, lines = 200) =>
-    request<{ id: string; lines: number; log: string }>("/runtime/app-servers/" + id + "/logs?lines=" + lines),
-  masterStatus: (id: string) => request<Record<string, unknown>>("/runtime/app-servers/" + id + "/master/status"),
-  masterRegistry: (id: string) => request<Record<string, unknown>>("/runtime/app-servers/" + id + "/master/registry"),
-  deployMaster: (id: string, body: { name: string; target?: string }) =>
-    request<Record<string, unknown>>("/runtime/app-servers/" + id + "/master/deploy", { method: "POST", body }),
-  nodeList: (id: string) => request<Record<string, unknown>>("/runtime/app-servers/" + id + "/nodes"),
-  listAgents: (id: string) => request<AgentItem[]>("/runtime/app-servers/" + id + "/agents"),
-  deployAgent: (id: string, body: { project_id?: string; name: string; template_name?: string; target_node_id?: string; bind_lead?: boolean }) =>
-    request<Record<string, unknown>>("/runtime/app-servers/" + id + "/agents", { method: "POST", body }),
-  agentOperation: (id: string, op: string) =>
-    request<Record<string, unknown>>("/runtime/app-servers/" + id + "/agent-operations/" + op),
-
   listIdentities: (platform = "", projectId = "") =>
     request<UserIdentity[]>("/identities?platform=" + encodeURIComponent(platform) + (projectId ? "&project_id=" + encodeURIComponent(projectId) : "")),
   upsertIdentity: (body: { platform?: string; platform_user_id: string; project_id?: string | null; github_login: string; display_name?: string; enabled?: boolean }) =>
     request<UserIdentity>("/identities", { method: "POST", body }),
   deleteIdentity: (id: number) => request<void>("/identities/" + id, { method: "DELETE" }),
 
-  listBridgeLinks: (limit = 100) => request<BridgeLink[]>("/bridge/links?limit=" + limit),
-  listWebhookDeliveries: (limit = 50) => request<WebhookDelivery[]>("/bridge/deliveries?limit=" + limit),
-  listDispatches: (limit = 50) => request<DispatchRecord[]>("/bridge/dispatches?limit=" + limit),
-  listBindings: () => request<ProjectBinding[]>("/bridge/bindings"),
-  listPlans: (limit = 50) => request<IssuePlan[]>("/bridge/plans?limit=" + limit),
-  upsertBinding: (projectId: string, body: { app_server_id: string; lead_agent_id: string; lead_agent_name?: string; app_server_addr?: string; agent_project_id?: string }) =>
-    request<ProjectBinding>("/bridge/bindings/" + encodeURIComponent(projectId), { method: "PUT", body }),
-  deleteBinding: (projectId: string) =>
-    request<void>("/bridge/bindings/" + encodeURIComponent(projectId), { method: "DELETE" }),
-  redispatch: (linkId: number) =>
-    request<BridgeLink>("/bridge/links/" + linkId + "/redispatch", { method: "POST" }),
-
   listVerifications: (limit = 50) => request<VerificationRecord[]>("/verifications?limit=" + limit),
   listAttempts: (limit = 50) => request<IssueAttempt[]>("/attempts?limit=" + limit),
-  listDerivations: (limit = 50) => request<Derivation[]>("/derivations?limit=" + limit),
   listReleases: (limit = 50) => request<ReleaseRecord[]>("/releases?limit=" + limit),
   createRelease: (body: { project_id?: string; repo?: string; version: string; commit: string; artifact_globs?: string[]; notes?: string }) =>
     request<{ record: ReleaseRecord; report: Record<string, unknown> }>("/releases", { method: "POST", body }),
   listReleaseRuns: (limit = 50) => request<ReleaseRun[]>("/releases/runs?limit=" + limit),
-  listAgentTokens: (projectId?: string) =>
-    request<AgentToken[]>("/agent-tokens" + (projectId ? "?project_id=" + encodeURIComponent(projectId) : "")),
-  createAgentToken: (body: { project_id?: string; role: string; name: string; expires_in_hours?: number }) =>
-    request<{ token: string; record: AgentToken }>("/agent-tokens", { method: "POST", body }),
-  revokeAgentToken: (id: string) => request<{ id: string; enabled: boolean }>("/agent-tokens/" + id + "/revoke", { method: "POST" }),
-  listToolCalls: (tool = "", limit = 100) =>
-    request<ToolCall[]>("/tool-calls?limit=" + limit + (tool ? "&tool=" + encodeURIComponent(tool) : "")),
   listRepoOps: (limit = 100) => request<RepoOp[]>("/repo-ops?limit=" + limit),
-  getMCPConfig: () => request<MCPConfig>("/runtime/mcp-config"),
-  updateMCPConfig: (body: { url: string; pool_name: string }) =>
-    request<MCPConfig>("/runtime/mcp-config", { method: "PUT", body }),
 
   crashRetention: () => request<CrashRetention>("/crashes/retention"),
   runCrashRetention: () => request<CrashRetention>("/crashes/retention/run", { method: "POST" }),

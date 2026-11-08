@@ -18,7 +18,7 @@ echo "== env =="
 go version
 git --version 2>/dev/null || true
 echo "== build =="
-for c in admin-api bridge patch-verifier mcp-gateway bot; do
+for c in admin-api bridge patch-verifier bot; do
   go build -trimpath -o "$BIN/$c" "./cmd/$c"
   printf 'built %-16s %s bytes\n' "$c" "$(stat -c%s "$BIN/$c")"
 done

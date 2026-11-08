@@ -7,8 +7,6 @@
 //	SMARTPIPE_BRIDGE_ADDR      监听地址，默认 :8090
 //	SMARTPIPE_BRIDGE_TOKEN     调用 /bridge/* 的内部令牌（为空则不校验）
 //	GITHUB_WEBHOOK_SECRET      Webhook 签名密钥（为空时取凭据库里的全局 github_webhook_secret）
-//	SMARTPIPE_APPSERVER_ADDR   启用 lead 派单时 App Server 地址（按项目绑定里的地址优先）
-//	SMARTPIPE_APPSERVER_TOKEN  App Server 桌面会话令牌
 //	SMARTPIPE_BOT_ADDR         bot 内网地址，设置后把 issue_url 回执到蓝信会话
 //	SMARTPIPE_BOT_INTERNAL_TOKEN bot /internal/reply 的内部令牌
 package main
@@ -30,7 +28,6 @@ import (
 	"smartpipe/backend/internal/crash"
 	"smartpipe/backend/internal/secretbox"
 	"smartpipe/backend/internal/store"
-	"smartpipe/backend/internal/syntropyclient"
 )
 
 // resolveProjectByChat 返回可用的项目 ID：优先用调用方给的 project_id，
@@ -74,14 +71,7 @@ func main() {
 		log.Println("警告: 未配置 webhook secret，/webhooks/github 将跳过签名校验（仅限本地开发）")
 	}
 
-	var lead *bridge.LeadDispatcher
 	svc := bridge.NewService(st, nil)
-	if addr := strings.TrimSpace(os.Getenv("SMARTPIPE_APPSERVER_ADDR")); addr != "" {
-		lead = bridge.NewLeadDispatcher(st)
-		lead.Token = strings.TrimSpace(os.Getenv("SMARTPIPE_APPSERVER_TOKEN"))
-		svc.WithDispatcher(lead)
-		log.Printf("启用 lead 派单，默认 App Server %s", addr)
-	}
 	var botNotifier bridge.Notifier
 	if addr := strings.TrimSpace(os.Getenv("SMARTPIPE_BOT_ADDR")); addr != "" {
 		botNotifier = bridge.NewBotNotifier(addr, strings.TrimSpace(os.Getenv("SMARTPIPE_BOT_INTERNAL_TOKEN")))
@@ -90,19 +80,6 @@ func main() {
 	}
 
 	approvals := &bridge.ApprovalService{Store: st, GroupNotify: botNotifier}
-	appToken := strings.TrimSpace(os.Getenv("SMARTPIPE_APPSERVER_TOKEN"))
-	approvals.NotifyLead = func(ctx context.Context, projectID, text string) error {
-		b, err := st.GetBinding(ctx, projectID)
-		if err != nil {
-			return err
-		}
-		agentProject := strings.TrimSpace(b.AgentProjectID)
-		if agentProject == "" {
-			agentProject = b.ProjectID
-		}
-		_, err = syntropyclient.New(b.AppServerAddr, appToken).SendAgentMessage(ctx, agentProject, b.LeadAgentID, text)
-		return err
-	}
 	webhook := &bridge.WebhookHandler{Store: st, Secret: secret, Approvals: approvals}
 	bridgeToken := strings.TrimSpace(os.Getenv("SMARTPIPE_BRIDGE_TOKEN"))
 
@@ -296,15 +273,6 @@ func main() {
 			return
 		}
 		payload := map[string]any{"data": outcome}
-		if lead != nil && outcome.Status == "created" && outcome.Report != nil {
-			link := &store.BridgeLink{ProjectID: &project.ID, Repo: repo, IssueNumber: outcome.IssueNumber,
-				IssueURL: outcome.IssueURL, UserID: in.Bundle.UserID}
-			if agentID, derr := lead.Dispatch(r.Context(), link, project, crash.Title(in.Bundle)); derr != nil {
-				payload["dispatch_error"] = derr.Error()
-			} else {
-				payload["lead_agent_id"] = agentID
-			}
-		}
 		status := http.StatusCreated
 		switch outcome.Status {
 		case "deduped":

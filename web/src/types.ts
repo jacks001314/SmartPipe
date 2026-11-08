@@ -360,53 +360,6 @@ export type ProviderTestResult = {
   provider: ModelProvider | null;
 };
 
-export type AppServer = {
-  id: string;
-  name: string;
-  addr: string;
-  binary: string;
-  pid: number;
-  status: string;
-  health: string;
-  version: string;
-  started_at: string;
-  exit_code: number | null;
-  last_error: string;
-  log_path: string;
-  data_dir: string;
-};
-
-export type AgentItem = {
-  id: string;
-  name?: string;
-  displayName?: string;
-  projectId?: string;
-  phase?: string;
-  desiredState?: string;
-  templateName?: string;
-  nodeId?: string;
-  [key: string]: unknown;
-};
-
-export type BridgeLink = {
-  id: number;
-  source_message_id: string;
-  channel: string;
-  chat_id: string;
-  user_id: string;
-  project_id: string | null;
-  repo: string;
-  issue_number: number;
-  issue_url: string;
-  lead_agent_id: string;
-  dispatch_status: string;
-  dispatch_error: string;
-  dispatched_at: string | null;
-  receipt_status: string;
-  receipt_error: string;
-  created_at: string;
-};
-
 export type LanxinMessage = {
   id: number;
   platform_message_id: string;
@@ -427,46 +380,6 @@ export type LanxinMessage = {
   issue_url: string;
   created_at: string;
   updated_at: string;
-};
-
-export type ProjectBinding = {
-  project_id: string;
-  app_server_id: string;
-  app_server_addr: string;
-  agent_project_id: string;
-  lead_agent_id: string;
-  lead_agent_name: string;
-  updated_at: string;
-};
-
-export type DispatchRecord = {
-  id: number;
-  link_id: number;
-  agent_id: string;
-  status: string;
-  message: string;
-  at: string;
-};
-
-export type WebhookDelivery = {
-  delivery_id: string;
-  event: string;
-  repo: string;
-  received_at: string;
-};
-
-export type IssuePlan = {
-  id: number;
-  repo: string;
-  issue_number: number;
-  version: number;
-  body: string;
-  content_hash: string;
-  author: string;
-  created_at: string;
-  approved: boolean;
-  approver: string;
-  approved_at: string | null;
 };
 
 export type VerifyCheck = {
@@ -504,19 +417,6 @@ export type IssueAttempt = {
   state: string;
   last_verification_id: number | null;
   updated_at: string;
-};
-
-export type Derivation = {
-  id: number;
-  project_id: string | null;
-  issue_ref: string;
-  agent_name: string;
-  agent_id: string;
-  operation_id: string;
-  approval_version: number;
-  approval_hash: string;
-  status: string;
-  created_at: string;
 };
 
 export type ReleaseArtifact = {
@@ -599,37 +499,6 @@ export type CrashReport = {
   occurred_at: string | null;
   created_at: string;
   updated_at: string;
-};
-
-export type AgentToken = {
-  id: string;
-  project_id: string | null;
-  role: string;
-  name: string;
-  prefix: string;
-  enabled: boolean;
-  last_used_at: string | null;
-  expires_at: string | null;
-  created_at: string;
-};
-
-export type ToolCall = {
-  id: number;
-  project_id: string | null;
-  token_id: string;
-  agent_name: string;
-  role: string;
-  tool: string;
-  status: string;
-  duration_ms: number;
-  args_summary: Record<string, unknown>;
-  error: string;
-  created_at: string;
-};
-
-export type MCPConfig = {
-  url: string;
-  pool_name: string;
 };
 
 export type RepoOp = {

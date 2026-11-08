@@ -34,10 +34,9 @@ var ErrInvalidMessage = errors.New("bridge: invalid message")
 
 // Service 编排去重与建单。
 type Service struct {
-	store      *store.Store
-	clientFor  func(ctx context.Context, projectID *string) (*github.Client, error)
-	dispatcher Dispatcher
-	notifier   Notifier
+	store     *store.Store
+	clientFor func(ctx context.Context, projectID *string) (*github.Client, error)
+	notifier  Notifier
 }
 
 // NewService 构造桥接服务；clientFor 为 nil 时使用凭据库解析。
@@ -48,12 +47,6 @@ func NewService(st *store.Store, clientFor func(context.Context, *string) (*gith
 		}
 	}
 	return &Service{store: st, clientFor: clientFor}
-}
-
-// WithDispatcher 挂上任务派发器；nil 表示只建单不派发。
-func (s *Service) WithDispatcher(d Dispatcher) *Service {
-	s.dispatcher = d
-	return s
 }
 
 // WithNotifier 挂上来源会话回执（蓝信）；nil 表示不回执。
@@ -87,7 +80,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg Message) (*store.Bridge
 		v := msg.ProjectID
 		projectID = &v
 	}
-	project, repo, labels, err := s.resolveTarget(ctx, projectID)
+	_, repo, labels, err := s.resolveTarget(ctx, projectID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -129,7 +122,6 @@ func (s *Service) HandleMessage(ctx context.Context, msg Message) (*store.Bridge
 	if err != nil {
 		return nil, false, err
 	}
-	link = s.dispatch(ctx, link, project, msg.Title)
 	s.receipt(ctx, link, msg)
 	return link, true, nil
 }
@@ -164,25 +156,6 @@ func (s *Service) receipt(ctx context.Context, link *store.BridgeLink, msg Messa
 
 func formatID(id int64) string {
 	return fmt.Sprintf("%d", id)
-}
-
-// dispatch 尽力把任务投给 pipeline-lead；失败只记录在链路上，不影响建单结果。
-func (s *Service) dispatch(ctx context.Context, link *store.BridgeLink, project *store.Project, title string) *store.BridgeLink {
-	if s.dispatcher == nil {
-		_ = s.store.MarkDispatched(ctx, link.ID, "", "skipped", "no dispatcher configured")
-		return s.reload(ctx, link)
-	}
-	agentID, err := s.dispatcher.Dispatch(ctx, link, project, title)
-	status, detail := "sent", ""
-	switch {
-	case errors.Is(err, ErrNoBinding):
-		status, detail = "unbound", "项目未绑定 pipeline-lead"
-	case err != nil:
-		status, detail = "failed", err.Error()
-	}
-	_ = s.store.MarkDispatched(ctx, link.ID, agentID, status, detail)
-	_ = s.store.RecordDispatch(ctx, store.Dispatch{LinkID: link.ID, AgentID: agentID, Status: status, Message: detail})
-	return s.reload(ctx, link)
 }
 
 func (s *Service) reload(ctx context.Context, link *store.BridgeLink) *store.BridgeLink {

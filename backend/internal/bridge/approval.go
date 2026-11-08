@@ -43,8 +43,6 @@ type ApprovalService struct {
 	ClientFor func(ctx context.Context, projectID *string) (*github.Client, error)
 	// GroupNotify 把方案登记与批准两个里程碑同步到项目绑定的蓝信群；nil 表示不通知。
 	GroupNotify Notifier
-	// NotifyLead 在批准后通知 pipeline-lead；nil 表示只记录。
-	NotifyLead func(ctx context.Context, projectID, text string) error
 }
 
 // NormalizePlan 统一换行与首尾空白，保证哈希稳定。
@@ -152,13 +150,7 @@ func (s *ApprovalService) HandleComment(ctx context.Context, ev CommentEvent) (A
 			TargetID: fmt.Sprintf("%s#%d", repo, ev.IssueNumber), ProjectID: projectIDPtr(project),
 			Result: "ok", Detail: map[string]any{"version": version, "hash": actual},
 		})
-		if s.NotifyLead != nil && project != nil {
-			text := fmt.Sprintf("Issue %s 的方案 v%d 已获 @%s 批准（指纹 %s）。请开始实现：派生所需 doer/test Agent，完成后在干净副本验证并合并，最后回到 Issue 汇报。",
-				issueURL(ev, repo), version, approval.Approver, shortHash(actual))
-			if err := s.NotifyLead(ctx, project.ID, text); err != nil {
-				return ApprovalOutcome{Action: "approved_notify_failed", Version: version, Hash: actual, Message: err.Error()}, nil
-			}
-		}
+
 		return ApprovalOutcome{Action: "approved", Version: version, Hash: actual}, nil
 	}
 	return ApprovalOutcome{Action: "ignored"}, nil

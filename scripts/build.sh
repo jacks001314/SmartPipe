@@ -87,7 +87,6 @@ LDFLAGS="-s -w -X main.version=$VERSION"
     "admin-api ./cmd/admin-api" \
     "bridge ./cmd/bridge" \
     "patch-verifier ./cmd/patch-verifier" \
-    "mcp-gateway ./cmd/mcp-gateway" \
     "bot ./cmd/bot" \
     "botdiag ./cmd/botdiag" \
     "codex-runner ./cmd/codex-runner" \

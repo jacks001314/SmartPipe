@@ -10,25 +10,19 @@ import (
 	"smartpipe/backend/internal/store"
 )
 
-func newApprovalService(env *testEnv) (*ApprovalService, *int) {
-	notified := new(int)
-	svc := &ApprovalService{
+func newApprovalService(env *testEnv) *ApprovalService {
+	return &ApprovalService{
 		Store: env.store,
 		ClientFor: func(ctx context.Context, projectID *string) (*github.Client, error) {
 			return github.New(env.gh.URL, "test-token"), nil
 		},
-		NotifyLead: func(ctx context.Context, projectID, text string) error {
-			*notified++
-			return nil
-		},
 	}
-	return svc, notified
 }
 
 func TestPlanThenApprove(t *testing.T) {
 	env := newEnv(t)
 	project := env.project(t, true)
-	svc, notified := newApprovalService(env)
+	svc := newApprovalService(env)
 
 	out, err := svc.HandleComment(context.Background(), CommentEvent{
 		Repo: "example/core", IssueNumber: 42, CommentID: 1,
@@ -48,9 +42,6 @@ func TestPlanThenApprove(t *testing.T) {
 	if !errors.Is(err, ErrNotMaintainer) || denied.Action != "approve_denied" {
 		t.Fatalf("expected not maintainer, got %+v err=%v", denied, err)
 	}
-	if *notified != 0 {
-		t.Fatal("lead must not be notified before approval")
-	}
 
 	ok, err := svc.HandleComment(context.Background(), CommentEvent{
 		Repo: "example/core", IssueNumber: 42, CommentID: 3,
@@ -58,9 +49,6 @@ func TestPlanThenApprove(t *testing.T) {
 	})
 	if err != nil || ok.Action != "approved" || ok.Version != 1 {
 		t.Fatalf("approve: %+v err=%v", ok, err)
-	}
-	if *notified != 1 {
-		t.Fatalf("lead notified %d times, want 1", *notified)
 	}
 	if _, err := env.store.GetApproval(context.Background(), "example/core", 42, 1); err != nil {
 		t.Fatalf("approval not stored: %v", err)
@@ -73,16 +61,13 @@ func TestPlanThenApprove(t *testing.T) {
 	if err != nil || dup.Action != "approve_duplicate" {
 		t.Fatalf("duplicate approve: %+v err=%v", dup, err)
 	}
-	if *notified != 1 {
-		t.Fatal("duplicate approval must not notify lead again")
-	}
 	_ = project
 }
 
 func TestApproveRejectsTamperedPlan(t *testing.T) {
 	env := newEnv(t)
 	env.project(t, true)
-	svc, _ := newApprovalService(env)
+	svc := newApprovalService(env)
 	if out, err := svc.HandleComment(context.Background(), CommentEvent{
 		Repo: "example/core", IssueNumber: 7, CommentID: 1, Body: "/plan 原方案", User: "lead", Association: "MEMBER",
 	}); err != nil || out.Action != "plan_created" {
@@ -105,7 +90,7 @@ func TestApproveRejectsTamperedPlan(t *testing.T) {
 func TestApproveUnknownVersion(t *testing.T) {
 	env := newEnv(t)
 	env.project(t, true)
-	svc, _ := newApprovalService(env)
+	svc := newApprovalService(env)
 	out, err := svc.HandleComment(context.Background(), CommentEvent{
 		Repo: "example/core", IssueNumber: 9, CommentID: 1, Body: "/approve v3", User: "owner", Association: "OWNER",
 	})

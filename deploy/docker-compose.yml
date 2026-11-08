@@ -1,4 +1,4 @@
-# SmartPipe 容器部署：五个服务共用 Dockerfile 产出的同一个镜像。
+# SmartPipe 容器部署：四个服务共用 Dockerfile 产出的同一个镜像。
 #
 # 首次部署：
 #   cp deploy/.env.example deploy/.env   # 填写数据库、蓝信和随机令牌
@@ -46,7 +46,6 @@ services:
       SMARTPIPE_WEB_DIST: /app/web
       # 服务端自动读取 Codex 配置的位置；宿主目录用 SMARTPIPE_CODEX_HOME 覆盖。
       SMARTPIPE_CODEX_CONFIG: /config/codex/config.toml
-      SMARTPIPE_RUNTIME_DATA: /data/runtime
       SMARTPIPE_VERIFY_URL: http://patch-verifier:8095
       SMARTPIPE_RELEASE_URL: http://patch-verifier:8095
       SMARTPIPE_BOT_ADDR: http://bot:8093
@@ -55,7 +54,6 @@ services:
     ports:
       - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_ADMIN_PORT:-8092}:8092"
     volumes:
-      - ./data/runtime:/data/runtime
       - ./data/repos:/data/repos
       - ${SMARTPIPE_CODEX_HOME:-/home/jacks/.codex}:/config/codex:ro
     depends_on:

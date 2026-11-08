@@ -10,39 +10,33 @@ import (
 
 // BridgeLink 记录一条蓝信（或其它渠道）消息与 GitHub Issue 的绑定。
 type BridgeLink struct {
-	ID              int64      `json:"id"`
-	SourceMessageID string     `json:"source_message_id"`
-	Channel         string     `json:"channel"`
-	ChatID          string     `json:"chat_id"`
-	UserID          string     `json:"user_id"`
-	ProjectID       *string    `json:"project_id"`
-	Repo            string     `json:"repo"`
-	IssueNumber     int        `json:"issue_number"`
-	IssueURL        string     `json:"issue_url"`
-	LeadAgentID     string     `json:"lead_agent_id"`
-	DispatchStatus  string     `json:"dispatch_status"`
-	DispatchError   string     `json:"dispatch_error"`
-	DispatchedAt    *time.Time `json:"dispatched_at"`
-	ReceiptStatus   string     `json:"receipt_status"`
-	ReceiptError    string     `json:"receipt_error"`
-	CreatedAt       time.Time  `json:"created_at"`
+	ID              int64     `json:"id"`
+	SourceMessageID string    `json:"source_message_id"`
+	Channel         string    `json:"channel"`
+	ChatID          string    `json:"chat_id"`
+	UserID          string    `json:"user_id"`
+	ProjectID       *string   `json:"project_id"`
+	Repo            string    `json:"repo"`
+	IssueNumber     int       `json:"issue_number"`
+	IssueURL        string    `json:"issue_url"`
+	ReceiptStatus   string    `json:"receipt_status"`
+	ReceiptError    string    `json:"receipt_error"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // ErrDuplicate 表示重复消息或重复 webhook 投递。
 var ErrDuplicate = errors.New("store: duplicate")
 
 const bridgeLinkColumns = `id, source_message_id, channel, chat_id, user_id, project_id,
-    repo, issue_number, issue_url, lead_agent_id, dispatch_status, dispatch_error, dispatched_at,
-    receipt_status, receipt_error, created_at`
+    repo, issue_number, issue_url, receipt_status, receipt_error, created_at`
 
 func scanBridgeLink(row interface{ Scan(...any) error }) (*BridgeLink, error) {
 	var (
 		l       BridgeLink
 		project sql.NullString
-		at      sql.NullTime
 	)
 	err := row.Scan(&l.ID, &l.SourceMessageID, &l.Channel, &l.ChatID, &l.UserID, &project,
-		&l.Repo, &l.IssueNumber, &l.IssueURL, &l.LeadAgentID, &l.DispatchStatus, &l.DispatchError, &at,
+		&l.Repo, &l.IssueNumber, &l.IssueURL,
 		&l.ReceiptStatus, &l.ReceiptError, &l.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -53,10 +47,6 @@ func scanBridgeLink(row interface{ Scan(...any) error }) (*BridgeLink, error) {
 	if project.Valid {
 		v := project.String
 		l.ProjectID = &v
-	}
-	if at.Valid {
-		t := at.Time
-		l.DispatchedAt = &t
 	}
 	return &l, nil
 }
@@ -105,16 +95,6 @@ RETURNING `+bridgeLinkColumns,
 		return nil, fmt.Errorf("store: create bridge link: %w", err)
 	}
 	return out, nil
-}
-
-// MarkDispatched 记录派单结果：status 取 queued/sent/failed/skipped。
-func (s *Store) MarkDispatched(ctx context.Context, id int64, agentID, status, errMsg string) error {
-	_, err := s.db.ExecContext(ctx, `
-UPDATE bridge_links
-   SET lead_agent_id = $2, dispatch_status = $3, dispatch_error = $4,
-       dispatched_at = CASE WHEN $3 = 'sent' THEN now() ELSE NULL END
- WHERE id = $1`, id, agentID, status, errMsg)
-	return err
 }
 
 // MarkReceipt 记录蓝信回执结果。

@@ -55,7 +55,13 @@ export function AuditPage({ notify }: { notify: Notify }) {
               <option value="">全部动作</option>
               <option value="project">项目</option>
               <option value="credential">凭据</option>
-              <option value="runtime">运行时</option>
+              <option value="github">GitHub</option>
+              <option value="issue">Issue</option>
+              <option value="patch">补丁验证</option>
+              <option value="release">发版</option>
+              <option value="crash">崩溃上报</option>
+              <option value="model">模型</option>
+              <option value="lanxin">蓝信</option>
             </select>
             <button className="btn" onClick={() => void load()}>刷新</button>
           </div>

@@ -17,7 +17,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -27,7 +26,6 @@ import (
 
 	"smartpipe/backend/internal/adminapi"
 	"smartpipe/backend/internal/conncheck"
-	rt "smartpipe/backend/internal/runtime"
 	"smartpipe/backend/internal/secretbox"
 	"smartpipe/backend/internal/store"
 )
@@ -76,32 +74,20 @@ func main() {
 	}
 	origins := splitCSV(os.Getenv("SMARTPIPE_CORS_ORIGINS"))
 
-	runtimeData := envOr("SMARTPIPE_RUNTIME_DATA", "")
-	runtimeManager := rt.NewManager()
-	if runtimeData != "" {
-		runtimeManager = rt.NewManagerWithState(filepath.Join(runtimeData, "instances.json"))
-	}
-
 	api := adminapi.New(adminapi.Config{
 		Store:                 st,
 		Checker:               conncheck.New(),
-		Runtime:               runtimeManager,
 		AdminToken:            adminToken,
 		AllowOrigins:          origins,
 		Version:               version,
-		AppServerBin:          envOr("SMARTPIPE_APPSERVER_BIN", defaultAppServerBinary()),
-		RuntimeDataDir:        runtimeData,
-		AppServerToken:        strings.TrimSpace(os.Getenv("SMARTPIPE_APPSERVER_TOKEN")),
 		VerifyURL:             envOr("SMARTPIPE_VERIFY_URL", ""),
 		VerifyToken:           strings.TrimSpace(os.Getenv("SMARTPIPE_VERIFY_TOKEN")),
 		ReleaseURL:            envOr("SMARTPIPE_RELEASE_URL", ""),
 		ReleaseToken:          strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_TOKEN")),
 		BotAddr:               envOr("SMARTPIPE_BOT_ADDR", ""),
 		BotToken:              strings.TrimSpace(os.Getenv("SMARTPIPE_BOT_INTERNAL_TOKEN")),
-		MCPURL:                envOr("SMARTPIPE_MCP_URL", ""),
 		CrashRetentionDays:    envInt("SMARTPIPE_CRASH_RETENTION_DAYS", 30),
 		RejectedRetentionDays: envInt("SMARTPIPE_CRASH_REJECT_RETENTION_DAYS", 7),
-		MCPPoolName:           envOr("SMARTPIPE_MCP_POOL_NAME", "smartpipe"),
 		AdminUser:             envOr("SMARTPIPE_ADMIN_USER", "admin"),
 		AdminPassword:         os.Getenv("SMARTPIPE_ADMIN_PASSWORD"),
 		AdminPasswordReset:    strings.EqualFold(os.Getenv("SMARTPIPE_ADMIN_PASSWORD_RESET"), "true"),
@@ -112,7 +98,6 @@ func main() {
 	if err := api.Bootstrap(context.Background()); err != nil {
 		log.Fatalf("初始化管理员账号失败: %v", err)
 	}
-	api.ApplyRuntimeSettings(context.Background())
 
 	app := iris.New()
 	app.Use(iris.Compression)
@@ -164,21 +149,6 @@ func main() {
 	if err := app.Listen(addr, iris.WithOptimizations); err != nil && !errors.Is(err, iris.ErrServerClosed) {
 		log.Fatalf("HTTP 服务异常退出: %v", err)
 	}
-}
-
-// defaultAppServerBinary 优先取同目录下的 syntropy-app-server[.exe]。
-func defaultAppServerBinary() string {
-	name := "syntropy-app-server"
-	if strings.EqualFold(filepath.Ext(os.Args[0]), ".exe") {
-		name += ".exe"
-	}
-	if exe, err := os.Executable(); err == nil {
-		candidate := filepath.Join(filepath.Dir(exe), name)
-		if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
-			return candidate
-		}
-	}
-	return ""
 }
 
 func envOr(key, fallback string) string {
