@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -16,15 +17,16 @@ import (
 
 // Inbound 是归一化后的入站消息（与平台解耦，Orchestrator 只认这个结构）。
 type Inbound struct {
-	Platform          string `json:"platform"`           // 固定 "lanxin"
-	PlatformMessageID string `json:"platformMessageId"`  // msgId，幂等键
-	ChatType          string `json:"chatType"`           // "p2p" | "group"
-	SenderID          string `json:"senderId"`           // 蓝信 staffId（用户标识）
+	Platform          string `json:"platform"`          // 固定 "lanxin"
+	PlatformMessageID string `json:"platformMessageId"` // msgId，幂等键
+	ChatType          string `json:"chatType"`          // "p2p" | "group"
+	SenderID          string `json:"senderId"`          // 蓝信 staffId（用户标识）
 	SenderName        string `json:"senderName"`
 	GroupID           string `json:"groupId,omitempty"`
+	GroupName         string `json:"groupName,omitempty"`
 	ConversationID    string `json:"conversationId,omitempty"`
-	MsgType           string `json:"msgType"`            // 原始 msgType
-	Text              string `json:"text"`               // 归一化文本（text/format 均提取）
+	MsgType           string `json:"msgType"` // 原始 msgType
+	Text              string `json:"text"`    // 归一化文本（text/format 均提取）
 	IsAtMe            bool   `json:"isAtMe"`
 
 	// Reply 回复该消息的便捷函数（由 Handler 注入；不参与 JSON 序列化）。
@@ -109,6 +111,12 @@ func truncate(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
+// ErrUnboundChat 表示消息来自没有绑定项目的群/会话，需要管理员先绑定。
+var ErrUnboundChat = errors.New("bot: chat is not bound to a project")
+
+// ErrNoGitHubCredential 表示消息已收下，但项目还没有可用的 GitHub 凭据，暂时无法建单。
+var ErrNoGitHubCredential = errors.New("bot: no github credential")
+
 // BridgeDispatcher 把蓝信文本直接交给 bridge：建 GitHub Issue、去重、回执都由 bridge 完成。
 // 回执走 bot 的 /internal/reply，所以这里不再重复回复。
 type BridgeDispatcher struct {
@@ -127,12 +135,14 @@ func (d BridgeDispatcher) Dispatch(ctx context.Context, msg Inbound) error {
 		title = "蓝信反馈"
 	}
 	body := map[string]any{
-		"message_id": msg.PlatformMessageID,
-		"chat_id":    chatID,
-		"chat_type":  msg.ChatType,
-		"user_id":    msg.SenderID,
-		"title":      title,
-		"body":       msg.Text,
+		"message_id":  msg.PlatformMessageID,
+		"chat_id":     chatID,
+		"chat_type":   msg.ChatType,
+		"user_id":     msg.SenderID,
+		"sender_name": msg.SenderName,
+		"group_name":  msg.GroupName,
+		"title":       title,
+		"body":        msg.Text,
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -158,6 +168,12 @@ func (d BridgeDispatcher) Dispatch(ctx context.Context, msg Inbound) error {
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		log.Printf("[bot] bridge dispatch failed http=%d body=%s", resp.StatusCode, truncate(string(data), 200))
+		if resp.StatusCode == http.StatusBadRequest && strings.Contains(string(data), "没有匹配到项目") {
+			return ErrUnboundChat
+		}
+		if resp.StatusCode == http.StatusBadRequest && strings.Contains(string(data), "no enabled GitHub credential") {
+			return ErrNoGitHubCredential
+		}
 		return fmt.Errorf("bot: bridge dispatch http %d", resp.StatusCode)
 	}
 	log.Printf("[bot] dispatched to bridge chat=%s msgId=%s", chatID, msg.PlatformMessageID)

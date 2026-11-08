@@ -1,9 +1,8 @@
-// Package github 是 SmartPipe 需要的最小 GitHub REST 客户端：
-// 建 Issue、写评论、加标签、读 Issue。只用标准库，便于在测试里替换 BaseURL。
+// Package github 是 SmartPipe 用到的 GitHub REST 能力，内部基于 google/go-github，
+// 对外保留最小接口：建 Issue、评论、标签、读取 Issue，以及 App 安装令牌。
 package github
 
 import (
-	"bytes"
 	"context"
 	"crypto"
 	"crypto/rand"
@@ -17,9 +16,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
-	"net/url"
+
+	gh "github.com/google/go-github/v68/github"
 )
 
 // DefaultAPIBase 是 GitHub.com 的 REST 入口。
@@ -47,6 +48,8 @@ type Client struct {
 	BaseURL string
 	Token   string
 	HTTP    *http.Client
+
+	gh *gh.Client
 }
 
 // New 构造客户端；token 可以是 PAT 或 installation token。
@@ -55,7 +58,79 @@ func New(baseURL, token string) *Client {
 	if base == "" {
 		base = DefaultAPIBase
 	}
-	return &Client{BaseURL: base, Token: strings.TrimSpace(token), HTTP: &http.Client{Timeout: 30 * time.Second}}
+	hc := &http.Client{Timeout: 30 * time.Second}
+	client := gh.NewClient(hc)
+	if token = strings.TrimSpace(token); token != "" {
+		client = client.WithAuthToken(token)
+	}
+	if base != DefaultAPIBase {
+		if u, err := url.Parse(base + "/"); err == nil {
+			client.BaseURL = u
+			client.UploadURL = uploadURLFor(base)
+		}
+	}
+	return &Client{BaseURL: base, Token: token, HTTP: hc, gh: client}
+}
+
+// uploadURLFor 返回 Release 附件上传基地址：GitHub.com 用 uploads.github.com，
+// 企业版把 api.<host> 换成 uploads.<host>；本地假服务保持原地址。
+func uploadURLFor(base string) *url.URL {
+	u, err := url.Parse(strings.TrimRight(base, "/") + "/")
+	if err != nil {
+		return nil
+	}
+	switch {
+	case u.Host == "api.github.com":
+		u.Host = "uploads.github.com"
+	case strings.HasPrefix(u.Host, "api."):
+		u.Host = "uploads." + strings.TrimPrefix(u.Host, "api.")
+	}
+	return u
+}
+
+// wrapErr 把 go-github 的 ErrorResponse 映射成项目内的 APIError，保持 IsNotFound 等判断不变。
+func wrapErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	var er *gh.ErrorResponse
+	if errors.As(err, &er) && er.Response != nil {
+		body := strings.TrimSpace(er.Message)
+		if body == "" {
+			body = err.Error()
+		}
+		return &APIError{Status: er.Response.StatusCode, Body: body}
+	}
+	return err
+}
+
+func toIssue(in *gh.Issue) *Issue {
+	if in == nil {
+		return nil
+	}
+	out := &Issue{
+		Number:  in.GetNumber(),
+		HTMLURL: in.GetHTMLURL(),
+		Title:   in.GetTitle(),
+		Body:    in.GetBody(),
+		State:   in.GetState(),
+	}
+	for _, l := range in.Labels {
+		out.Labels = append(out.Labels, Label{Name: l.GetName()})
+	}
+	if u := in.GetUser(); u != nil {
+		out.User = &User{Login: u.GetLogin()}
+	}
+	if in.CreatedAt != nil {
+		out.CreatedAt = in.CreatedAt.Time
+	}
+	if in.UpdatedAt != nil {
+		out.UpdatedAt = in.UpdatedAt.Time
+	}
+	if in.PullRequestLinks != nil {
+		out.PullRequest = json.RawMessage(`{"url":""}`)
+	}
+	return out
 }
 
 // Label 是 GitHub 标签。
@@ -82,69 +157,21 @@ type Issue struct {
 	UpdatedAt   time.Time       `json:"updated_at"`
 }
 
-func (c *Client) do(ctx context.Context, method, path string, payload any, out any) error {
-	var body io.Reader
-	if payload != nil {
-		raw, err := json.Marshal(payload)
-		if err != nil {
-			return fmt.Errorf("github: encode body: %w", err)
-		}
-		body = bytes.NewReader(raw)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, body)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
-	}
-	client := c.HTTP
-	if client == nil {
-		client = http.DefaultClient
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("github: %s %s: %w", method, path, err)
-	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return &APIError{Status: resp.StatusCode, Body: string(data)}
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return &APIError{Status: resp.StatusCode, Body: string(data)}
-	}
-	if out != nil && len(bytes.TrimSpace(data)) > 0 {
-		if err := json.Unmarshal(data, out); err != nil {
-			return fmt.Errorf("github: decode response: %w", err)
-		}
-	}
-	return nil
-}
-
 // CreateIssue 在 owner/repo 建 Issue。
 func (c *Client) CreateIssue(ctx context.Context, repo, title, body string, labels []string) (*Issue, error) {
 	owner, name, err := SplitRepo(repo)
 	if err != nil {
 		return nil, err
 	}
-	payload := map[string]any{"title": title, "body": body}
+	req := &gh.IssueRequest{Title: gh.String(title), Body: gh.String(body)}
 	if len(labels) > 0 {
-		payload["labels"] = labels
+		req.Labels = &labels
 	}
-	var out Issue
-	if err := c.do(ctx, http.MethodPost, "/repos/"+owner+"/"+name+"/issues", payload, &out); err != nil {
-		return nil, err
+	issue, _, err := c.gh.Issues.Create(ctx, owner, name, req)
+	if err != nil {
+		return nil, wrapErr(err)
 	}
-	return &out, nil
+	return toIssue(issue), nil
 }
 
 // Comment 在指定 Issue 下写评论。
@@ -153,8 +180,8 @@ func (c *Client) Comment(ctx context.Context, repo string, number int, body stri
 	if err != nil {
 		return err
 	}
-	return c.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, name, number),
-		map[string]string{"body": body}, nil)
+	_, _, err = c.gh.Issues.CreateComment(ctx, owner, name, number, &gh.IssueComment{Body: gh.String(body)})
+	return wrapErr(err)
 }
 
 // AddLabels 给 Issue 追加标签。
@@ -164,8 +191,8 @@ func (c *Client) AddLabels(ctx context.Context, repo string, number int, labels 
 		return err
 	}
 	add := func() error {
-		return c.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/issues/%d/labels", owner, name, number),
-			map[string]any{"labels": labels}, nil)
+		_, _, err := c.gh.Issues.AddLabelsToIssue(ctx, owner, name, number, labels)
+		return wrapErr(err)
 	}
 	err = add()
 	if err == nil {
@@ -194,26 +221,20 @@ func (c *Client) EnsureLabel(ctx context.Context, repo, label string) error {
 	if label == "" {
 		return nil
 	}
-	var existing struct {
-		Name string `json:"name"`
+	if _, _, err := c.gh.Issues.GetLabel(ctx, owner, name, label); err == nil {
+		return nil
+	} else if !IsNotFound(wrapErr(err)) {
+		return wrapErr(err)
 	}
-	getErr := c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/labels/%s", owner, name, url.PathEscape(label)), nil, &existing)
-	if getErr == nil {
+	_, _, err = c.gh.Issues.CreateLabel(ctx, owner, name, &gh.Label{Name: gh.String(label), Color: gh.String("ededed")})
+	if err == nil {
 		return nil
 	}
 	var apiErr *APIError
-	if !errors.As(getErr, &apiErr) || apiErr.Status != http.StatusNotFound {
-		return getErr
-	}
-	createErr := c.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/labels", owner, name),
-		map[string]any{"name": label, "color": "ededed"}, nil)
-	if createErr == nil {
-		return nil
-	}
-	if errors.As(createErr, &apiErr) && apiErr.Status == http.StatusUnprocessableEntity {
+	if errors.As(wrapErr(err), &apiErr) && apiErr.Status == http.StatusUnprocessableEntity {
 		return nil // 并发创建时可能已经存在
 	}
-	return createErr
+	return wrapErr(err)
 }
 
 // GetIssue 读取 Issue。
@@ -222,11 +243,11 @@ func (c *Client) GetIssue(ctx context.Context, repo string, number int) (*Issue,
 	if err != nil {
 		return nil, err
 	}
-	var out Issue
-	if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/issues/%d", owner, name, number), nil, &out); err != nil {
-		return nil, err
+	issue, _, err := c.gh.Issues.Get(ctx, owner, name, number)
+	if err != nil {
+		return nil, wrapErr(err)
 	}
-	return &out, nil
+	return toIssue(issue), nil
 }
 
 // SplitRepo 把 "owner/repo" 拆开，也接受完整 URL。

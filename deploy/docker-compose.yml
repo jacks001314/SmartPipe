@@ -22,6 +22,13 @@ x-service: &service
   env_file:
     - .env
   init: true
+  dns:
+    - ${SMARTPIPE_DNS_PRIMARY:-192.168.1.1}
+    - ${SMARTPIPE_DNS_SECONDARY:-223.5.5.5}
+  # 本机 DNS 会把 github.com 解析到当前网络无法到达的边缘节点；映射到可用的
+  # GitHub 边缘地址。其他部署可用 SMARTPIPE_GITHUB_IP 覆盖。
+  extra_hosts:
+    - "github.com:${SMARTPIPE_GITHUB_IP:-140.82.112.3}"
   security_opt:
     - no-new-privileges:true
   logging:

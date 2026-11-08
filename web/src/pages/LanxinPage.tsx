@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api";
-import type { BridgeLink, LanxinConfig, LanxinGroup, Project } from "../types";
+import type { LanxinConfig, LanxinGroup, LanxinMessage, Project } from "../types";
 import type { Notify } from "../App";
 
 type FormState = {
@@ -22,7 +22,7 @@ export function LanxinPage({ notify }: { notify: Notify }) {
   const [form, setForm] = useState<FormState>(EMPTY);
   const [projects, setProjects] = useState<Project[]>([]);
   const [groups, setGroups] = useState<LanxinGroup[]>([]);
-  const [messages, setMessages] = useState<BridgeLink[]>([]);
+  const [messages, setMessages] = useState<LanxinMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -153,6 +153,14 @@ export function LanxinPage({ notify }: { notify: Notify }) {
     form.api_base.trim() !== (config?.api_base ?? "") ||
     form.app_secret !== "";
   const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? id;
+  const statusLabel = (status: string) =>
+    ({
+      issue_created: "已建单",
+      filtered: "已过滤",
+      unbound: "未绑定项目",
+      failed: "处理失败",
+      received: "已接收",
+    }[status] ?? status);
 
   if (loading) {
     return <div className="card"><div className="empty">加载蓝信配置…</div></div>;
@@ -331,7 +339,8 @@ export function LanxinPage({ notify }: { notify: Notify }) {
                 <tr>
                   <th>时间</th>
                   <th>会话</th>
-                  <th>用户</th>
+                  <th>发送人</th>
+                  <th>内容</th>
                   <th>项目</th>
                   <th>Issue</th>
                   <th>状态</th>
@@ -341,15 +350,16 @@ export function LanxinPage({ notify }: { notify: Notify }) {
                 {messages.map((m) => (
                   <tr key={m.id}>
                     <td className="tiny">{new Date(m.created_at).toLocaleString()}</td>
-                    <td className="mono">{m.chat_id}</td>
-                    <td className="mono">{m.user_id}</td>
+                    <td className="mono">{m.group_name || m.chat_id}</td>
+                    <td>{m.sender_name || <span className="mono">{m.user_id}</span>}</td>
+                    <td className="tiny" title={m.text}>{m.text ? (m.text.length > 60 ? m.text.slice(0, 60) + "…" : m.text) : "—"}</td>
                     <td>{m.project_id ? projectName(m.project_id) : <span className="muted">未匹配</span>}</td>
                     <td>{m.issue_number ? "#" + m.issue_number : "—"}</td>
                     <td>
-                      <span className={"chip " + (m.dispatch_status === "ok" ? "ok" : m.dispatch_status ? "warn" : "")}>
-                        <span className="dot" />{m.dispatch_status || "待派单"}
+                      <span className={"chip " + (m.status === "issue_created" ? "ok" : m.status === "failed" ? "bad" : "warn")}>
+                        <span className="dot" />{statusLabel(m.status)}
                       </span>
-                      {m.dispatch_error && <div className="tiny">{m.dispatch_error}</div>}
+                      {m.reason && <div className="tiny">{m.reason}</div>}
                     </td>
                   </tr>
                 ))}

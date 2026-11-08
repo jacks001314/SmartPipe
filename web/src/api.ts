@@ -1,39 +1,4 @@
-import type {
-  AgentItem,
-  AgentToken,
-  AppServer,
-  AuditEntry,
-  AuthConfig,
-  AuthSession,
-  BridgeLink,
-  CrashReport,
-  CrashRetention,
-  Credential,
-  LanxinConfig,
-  LanxinGroup,
-  LanxinTestResult,
-  ModelDefault,
-  ModelProvider,
-  ProviderModel,
-  ProviderTestResult,
-  Derivation,
-  DispatchRecord,
-  Health,
-  IssueAttempt,
-  IssuePlan,
-  Project,
-  ProjectBinding,
-  ReleaseCandidate,
-  ReleaseRecord,
-  ReleaseRun,
-  RepoOp,
-  MCPConfig,
-  TestResult,
-  ToolCall,
-  UserIdentity,
-  VerificationRecord,
-  WebhookDelivery,
-} from "./types";
+import type { AgentItem, AgentToken, AppServer, AuditEntry, AuthConfig, AuthSession, BridgeLink, CrashReport, CrashRetention, Credential, LanxinConfig, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelDefault, ModelProvider, ProviderModel, ProviderTestResult, Derivation, DispatchRecord, Health, IssueAttempt, IssuePlan, Project, ProjectBinding, ReleaseCandidate, ReleaseRecord, ReleaseRun, RepoOp, MCPConfig, TestResult, ToolCall, UserIdentity, VerificationRecord, WebhookDelivery, GitHubAppSetup, GitHubAppSetupStatus } from "./types";
 
 const TOKEN_KEY = "smartpipe.adminToken";
 
@@ -119,6 +84,16 @@ export const api = {
     request<Project>("/projects/" + id + "/enabled", { method: "POST", body: { enabled } }),
   listCredentials: (projectId?: string) =>
     request<Credential[]>("/credentials" + (projectId ? "?project_id=" + encodeURIComponent(projectId) : "")),
+  startGithubApp: () => request<GitHubAppSetup>("/github/app/start", { method: "POST" }),
+  getGithubAppStatus: (setup_id: string) =>
+    request<GitHubAppSetupStatus>("/github/app/status/" + encodeURIComponent(setup_id)),
+  getGithubOAuth: () => request<GitHubOAuthView>("/github/oauth"),
+  saveGithubOAuth: (body: { client_id: string; scope: string }) =>
+    request<GitHubOAuthView>("/github/oauth", { method: "PUT", body }),
+  startGithubOAuth: () => request<GitHubDeviceFlow>("/github/oauth/device", { method: "POST" }),
+  pollGithubOAuth: (flow_id: string) =>
+    request<GitHubOAuthPoll>("/github/oauth/poll", { method: "POST", body: { flow_id } }),
+  deleteGithubOAuth: () => request<void>("/github/oauth", { method: "DELETE" }),
   createCredential: (body: { project_id?: string | null; kind: string; name: string; value: string; metadata?: Record<string, unknown> }) =>
     request<Credential>("/credentials", { method: "POST", body }),
   rotateCredential: (id: string, value: string) =>
@@ -156,7 +131,7 @@ export const api = {
   bindLanxinGroup: (groupId: string, projectId: string) =>
     request<{ group_id: string; project_id: string }>("/lanxin/groups/bind", { method: "POST", body: { group_id: groupId, project_id: projectId } }),
   unbindLanxinGroup: (groupId: string) => request<void>("/lanxin/groups/" + encodeURIComponent(groupId), { method: "DELETE" }),
-  listLanxinMessages: (limit = 30) => request<BridgeLink[]>("/lanxin/messages?limit=" + limit),
+  listLanxinMessages: (limit = 30) => request<LanxinMessage[]>("/lanxin/messages?limit=" + limit),
   listAudit: (limit = 100, action = "") =>
     request<AuditEntry[]>("/audit?limit=" + limit + (action ? "&action=" + encodeURIComponent(action) : "")),
 

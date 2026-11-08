@@ -33,7 +33,6 @@ import (
 	"smartpipe/backend/internal/syntropyclient"
 )
 
-
 // resolveProjectByChat 返回可用的项目 ID：优先用调用方给的 project_id，
 // 找不到时按蓝信群/会话反查（管理员在配置台维护的 bluex_group_ids）。
 func resolveProjectByChat(ctx context.Context, st *store.Store, projectID, chatID string) string {
@@ -130,17 +129,105 @@ func main() {
 			msg.ProjectID = p
 		}
 
+		// 先把入站事实写进收件箱，再建单；未绑定或建单失败也留痕，控制台可见。
+		var projectPtr *string
+		if msg.ProjectID != "" {
+			projectPtr = &msg.ProjectID
+		}
+		if _, recErr := st.RecordLanxinInbound(r.Context(), store.LanxinMessage{
+			PlatformMessageID: msg.MessageID,
+			ChatType:          msg.ChatType,
+			ChatID:            msg.ChatID,
+			UserID:            msg.UserID,
+			SenderName:        msg.SenderName,
+			GroupName:         msg.GroupName,
+			MsgType:           "text",
+			Text:              msg.Body,
+			IsAtMe:            true,
+			ProjectID:         projectPtr,
+			Status:            store.LanxinStatusReceived,
+		}); recErr != nil {
+			log.Printf("[bridge] record lanxin inbound: %v", recErr)
+		}
+		if msg.ProjectID == "" {
+			_ = st.MarkLanxinMessage(r.Context(), msg.MessageID, store.LanxinStatusUnbound, "群/会话未绑定项目", 0, "")
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "没有匹配到项目：请先在「蓝信配置」把群绑定到项目"})
+			return
+		}
+
 		link, created, err := svc.HandleMessage(r.Context(), msg)
 		if err != nil {
+			_ = st.MarkLanxinMessage(r.Context(), msg.MessageID, store.LanxinStatusFailed, err.Error(), 0, "")
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
+		_ = st.MarkLanxinMessage(r.Context(), msg.MessageID, store.LanxinStatusIssueCreated, "", link.IssueNumber, link.IssueURL)
 		status := http.StatusOK
 		if created {
 			status = http.StatusCreated
 		}
 		writeJSON(w, status, map[string]any{"link": link, "created": created})
 	})
+	// /bridge/inbound 记录未进入建单流程的消息（未 @、非文本、命令等），保证收件箱完整。
+	mux.HandleFunc("/bridge/inbound", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if bridgeToken != "" && r.Header.Get("X-Bridge-Token") != bridgeToken {
+			http.Error(w, "invalid bridge token", http.StatusUnauthorized)
+			return
+		}
+		var in struct {
+			MessageID  string `json:"message_id"`
+			ChatType   string `json:"chat_type"`
+			ChatID     string `json:"chat_id"`
+			UserID     string `json:"user_id"`
+			SenderName string `json:"sender_name"`
+			GroupName  string `json:"group_name"`
+			MsgType    string `json:"msg_type"`
+			Text       string `json:"text"`
+			IsAtMe     bool   `json:"is_at_me"`
+			Reason     string `json:"reason"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(in.MessageID) == "" {
+			http.Error(w, "message_id is required", http.StatusBadRequest)
+			return
+		}
+		projectID := resolveProjectByChat(r.Context(), st, "", in.ChatID)
+		var projectPtr *string
+		if projectID != "" {
+			projectPtr = &projectID
+		}
+		status := store.LanxinStatusReceived
+		if strings.TrimSpace(in.Reason) != "" {
+			status = store.LanxinStatusFiltered
+		}
+		rec, err := st.RecordLanxinInbound(r.Context(), store.LanxinMessage{
+			PlatformMessageID: in.MessageID,
+			ChatType:          in.ChatType,
+			ChatID:            in.ChatID,
+			UserID:            in.UserID,
+			SenderName:        in.SenderName,
+			GroupName:         in.GroupName,
+			MsgType:           in.MsgType,
+			Text:              in.Text,
+			IsAtMe:            in.IsAtMe,
+			ProjectID:         projectPtr,
+			Status:            status,
+			Reason:            strings.TrimSpace(in.Reason),
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"message": rec})
+	})
+
 	crashSvc := &crash.Service{
 		Store: st,
 		Forge: func(ctx context.Context, projectID *string) (crash.Forge, error) {

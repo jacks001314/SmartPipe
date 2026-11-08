@@ -1,9 +1,10 @@
 package bot
 
 import (
-	"strings"
 	"context"
+	"errors"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ type Handler struct {
 	snd   Sender
 	disp  Dispatcher
 	crash *CrashIntake
+	inbox InboxReporter
 
 	seenMu sync.Mutex
 	seen   map[string]time.Time // msgId -> first seen，幂等键
@@ -29,6 +31,31 @@ func NewHandler(cfg Config, snd Sender, disp Dispatcher) *Handler {
 func (h *Handler) WithCrash(c *CrashIntake) *Handler {
 	h.crash = c
 	return h
+}
+
+// WithInbox 挂上收件箱上报；未挂载时只影响记录，不影响原有处理逻辑。
+func (h *Handler) WithInbox(r InboxReporter) *Handler {
+	h.inbox = r
+	return h
+}
+
+// reportInbox 记录一条未进入建单流程的消息；失败只记日志，不阻塞消息处理。
+func (h *Handler) reportInbox(ctx context.Context, m *lanxin.InboundMessage, reason string) {
+	if h.inbox == nil || m == nil || m.MsgID == "" {
+		return
+	}
+	chatID := strings.TrimSpace(m.GroupID)
+	if chatID == "" {
+		chatID = m.From
+	}
+	err := h.inbox.Report(ctx, InboxReport{
+		MessageID: m.MsgID, ChatType: m.ChatType, ChatID: chatID, UserID: m.From,
+		SenderName: m.SenderName, GroupName: m.GroupName, MsgType: m.MsgType,
+		Text: m.TextContent(), IsAtMe: m.Reminder != nil && m.Reminder.IsAtMe, Reason: reason,
+	})
+	if err != nil {
+		log.Printf("[bot] inbox report failed msgId=%s: %v", m.MsgID, err)
+	}
 }
 
 const crashHelp = "发送一个 crash_bundle.json 文件（≤256KB），我会自动建单并回执 Issue 链接。\n" +
@@ -66,6 +93,16 @@ func (h *Handler) HandleEvent(ctx context.Context, ev lanxin.Event) error {
 		if msg == nil {
 			return nil
 		}
+		// 真实网关的部分报文不带 chatType；事件类型本身就是可靠来源。
+		if strings.TrimSpace(msg.ChatType) == "" {
+			if ev.Type == lanxin.EventGroupMessage {
+				msg.ChatType = "group"
+			} else {
+				msg.ChatType = "p2p"
+			}
+			log.Printf("[bot] chatType missing, inferred=%s type=%s msgId=%s data=%s",
+				msg.ChatType, ev.Type, msg.MsgID, truncate(string(ev.Data), 2000))
+		}
 		return h.handleMessage(ctx, msg)
 	case lanxin.EventApproveCardCB:
 		// 审批卡片回调：M3 门禁/人工审批接入时启用。
@@ -90,9 +127,11 @@ func (h *Handler) handleMessage(ctx context.Context, m *lanxin.InboundMessage) e
 	text := m.TextContent()
 	if mediaType, ids := m.MediaAttachment(); len(ids) > 0 {
 		if m.ChatType == "group" && h.cfg.RequireAtMe && (m.Reminder == nil || !m.Reminder.IsAtMe) {
+			h.reportInbox(ctx, m, "群消息未 @ 机器人")
 			return nil
 		}
 		if h.crash == nil {
+			h.reportInbox(ctx, m, "未开启一键上报")
 			return h.reply(ctx, m, "当前机器人未开启一键上报，请把问题描述发给 pipeline-lead。")
 		}
 		chatID := m.GroupID
@@ -113,10 +152,12 @@ func (h *Handler) handleMessage(ctx context.Context, m *lanxin.InboundMessage) e
 	}
 	// 只处理文本类。
 	if m.MsgType != "text" && m.MsgType != "format" && m.MsgType != "formatText" {
+		h.reportInbox(ctx, m, "暂不处理的消息类型")
 		log.Printf("[bot] skip non-text msgType=%s msgId=%s", m.MsgType, m.MsgID)
 		return nil
 	}
 	if text == "/crash" && h.crash != nil {
+		h.reportInbox(ctx, m, "命令已在本地处理")
 		return h.reply(ctx, m, crashHelp)
 	}
 
@@ -124,19 +165,23 @@ func (h *Handler) handleMessage(ctx context.Context, m *lanxin.InboundMessage) e
 	case "p2p":
 		// 个人机器人只有创建者能私聊，无需白名单。
 		if text == "/new" {
+			h.reportInbox(ctx, m, "命令已在本地处理")
 			return h.reply(ctx, m, "已开启新会话：此前的上下文记忆已重置。")
 		}
 		return h.dispatch(ctx, m, text, false)
 	case "group":
 		if h.cfg.RequireAtMe && (m.Reminder == nil || !m.Reminder.IsAtMe) {
+			h.reportInbox(ctx, m, "群消息未 @ 机器人")
 			return nil // 未 @ 机器人的群消息不处理
 		}
 		if text == "/new" {
+			h.reportInbox(ctx, m, "命令已在本地处理")
 			return h.reply(ctx, m, "已开启新会话：此前的上下文记忆已重置。")
 		}
 		return h.dispatch(ctx, m, text, true)
 	default:
-		log.Printf("[bot] unknown chatType=%q msgId=%s", m.ChatType, m.MsgID)
+		h.reportInbox(ctx, m, "未知会话类型")
+		log.Printf("[bot] unknown chatType=%q msgId=%s groupId=%s", m.ChatType, m.MsgID, m.GroupID)
 		return nil
 	}
 }
@@ -149,6 +194,7 @@ func (h *Handler) dispatch(ctx context.Context, m *lanxin.InboundMessage, text s
 		SenderID:          m.From,
 		SenderName:        m.SenderName,
 		GroupID:           m.GroupID,
+		GroupName:         m.GroupName,
 		ConversationID:    m.ConversationID,
 		MsgType:           m.MsgType,
 		Text:              text,
@@ -158,7 +204,13 @@ func (h *Handler) dispatch(ctx context.Context, m *lanxin.InboundMessage, text s
 		return h.reply(ctx, m, replyText)
 	}
 	if err := h.disp.Dispatch(ctx, in); err != nil {
-		_ = h.reply(ctx, m, "消息处理失败，请稍后重试。")
+		if errors.Is(err, ErrUnboundChat) {
+			_ = h.reply(ctx, m, "这个群还没有绑定项目，请联系管理员在「蓝信配置」里绑定后再发送。")
+		} else if errors.Is(err, ErrNoGitHubCredential) {
+			_ = h.reply(ctx, m, "消息已收到，但项目还没有配置 GitHub 凭据；管理员配置后即可自动建单。")
+		} else {
+			_ = h.reply(ctx, m, "消息处理失败，请稍后重试。")
+		}
 		return err
 	}
 	return nil

@@ -3,10 +3,12 @@ module smartpipe/backend
 go 1.26.10
 
 require (
+	github.com/google/go-github/v68 v68.0.0
 	github.com/gorilla/websocket v1.5.1
 	github.com/jackc/pgx/v5 v5.7.4
 	github.com/kataras/iris/v12 v12.2.11
 	github.com/pmenglund/codex-sdk-go v0.166.0
+	golang.org/x/crypto v0.31.0
 	gopkg.in/yaml.v3 v3.0.1
 	smartpipe/sdks/lanxin v0.0.0
 )
@@ -23,6 +25,7 @@ require (
 	github.com/flosch/pongo2/v4 v4.0.2 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/gomarkdown/markdown v0.0.0-20240328165702-4d01890c35c0 // indirect
+	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/css v1.0.0 // indirect
 	github.com/iris-contrib/schema v0.0.6 // indirect
@@ -49,7 +52,6 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/yosssi/ace v0.0.5 // indirect
-	golang.org/x/crypto v0.31.0 // indirect
 	golang.org/x/exp v0.0.0-20240404231335-c0f41cb1a7a0 // indirect
 	golang.org/x/net v0.24.0 // indirect
 	golang.org/x/sync v0.10.0 // indirect

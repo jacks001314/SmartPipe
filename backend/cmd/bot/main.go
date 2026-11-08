@@ -27,6 +27,9 @@ type wsRunner struct {
 func startWS(parent context.Context, cfg bot.Config) *wsRunner {
 	client := lanxin.New(cfg.AppID, cfg.AppSecret, lanxin.WithAPIBase(cfg.APIBase))
 	handler := bot.NewHandler(cfg, client, bot.NewDispatcher(cfg, client))
+	if cfg.BridgeURL != "" {
+		handler = handler.WithInbox(bot.BridgeInbox{BaseURL: cfg.BridgeURL, Token: cfg.BridgeToken})
+	}
 	if cfg.CrashIngestURL != "" {
 		handler = handler.WithCrash(&bot.CrashIntake{
 			IngestURL: cfg.CrashIngestURL, Token: cfg.CrashToken, ProjectID: cfg.CrashProject,

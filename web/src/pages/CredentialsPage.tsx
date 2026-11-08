@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api";
-import { CREDENTIAL_KINDS, type Credential, type Project } from "../types";
+import { CREDENTIAL_KINDS, type Credential, type GitHubAppSetup, type GitHubAppSetupStatus, type Project } from "../types";
 import type { Notify } from "../App";
 
 const KIND_LABEL: Record<string, string> = {
@@ -46,6 +46,9 @@ export function CredentialsPage({ notify }: { notify: Notify }) {
   const [busy, setBusy] = useState("");
   const [rotateTarget, setRotateTarget] = useState<Credential | null>(null);
   const [rotateValue, setRotateValue] = useState("");
+  const [appSetup, setAppSetup] = useState<GitHubAppSetup | null>(null);
+  const [appStatus, setAppStatus] = useState<GitHubAppSetupStatus | null>(null);
+  const [appBusy, setAppBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -62,6 +65,64 @@ export function CredentialsPage({ notify }: { notify: Notify }) {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (!appSetup) return;
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const res = await api.getGithubAppStatus(appSetup.setup_id);
+        if (stopped) return;
+        setAppStatus(res);
+        if (res.status === "installed") {
+          setAppSetup(null);
+          notify("GitHub 已连接" + (res.app_slug ? "：" + res.app_slug : ""), "ok");
+          await load();
+        } else if (res.status === "expired" || res.status === "error") {
+          setAppSetup(null);
+          notify(res.message || (res.status === "expired" ? "连接已过期，请重新发起" : "GitHub 连接失败"), "error");
+        }
+      } catch (err) {
+        if (stopped) return;
+        setAppSetup(null);
+        notify(err instanceof ApiError ? err.message : "查询 GitHub 连接状态失败", "error");
+      }
+    };
+    void tick();
+    const timer = window.setInterval(() => void tick(), Math.max(appSetup.poll_interval || 2, 2) * 1000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [appSetup, load, notify]);
+
+  const connectGithub = async () => {
+    const authWindow = window.open("about:blank", "_blank");
+    setAppBusy(true);
+    setAppStatus({ status: "pending", message: "正在创建 GitHub 连接" });
+    try {
+      const setup = await api.startGithubApp();
+      setAppSetup(setup);
+      if (authWindow) {
+        authWindow.location.href = setup.launch_url;
+      } else {
+        notify("浏览器拦截了 GitHub 窗口，请点击页面里的连接链接继续", "error");
+      }
+    } catch (err) {
+      authWindow?.close();
+      setAppStatus(null);
+      notify(err instanceof ApiError ? err.message : "发起 GitHub 连接失败", "error");
+    } finally {
+      setAppBusy(false);
+    }
+  };
+
+  const githubAppCred = items.find((item) => item.kind === "github_app" && item.enabled);
+  const githubAppSlug = typeof githubAppCred?.metadata.slug === "string" ? githubAppCred.metadata.slug : "";
+  const githubAppOwner = typeof githubAppCred?.metadata.owner === "string" ? githubAppCred.metadata.owner : "";
+  const appReopenUrl = appStatus?.status === "created" && appStatus.app_slug
+    ? "https://github.com/apps/" + encodeURIComponent(appStatus.app_slug) + "/installations/new"
+    : appSetup?.launch_url || "";
 
   const projectName = (id: string | null) => {
     if (!id) return "全局";
@@ -164,6 +225,56 @@ export function CredentialsPage({ notify }: { notify: Notify }) {
         <div>
           <strong>凭据只以密文保存。</strong>
           保存后接口只返回 <span className="mono">****</span> 掩码；连接测试由服务端发起，错误信息会脱敏。
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <div className="card-title">GitHub 接入</div>
+            <div className="card-sub">在控制台发起连接，浏览器完成 GitHub 登录确认后自动回到这里；应用凭据由后台加密保存。</div>
+          </div>
+          {githubAppCred && (
+            <span className="chip ok"><span className="dot" />已连接{githubAppSlug ? " · " + githubAppSlug : ""}</span>
+          )}
+        </div>
+        <div className="card-body">
+          {appSetup ? (
+            <>
+              <div>已打开 GitHub 连接流程。请在弹出窗口登录并确认创建、安装 SmartPipe GitHub App。</div>
+              <div className="tiny" style={{ marginTop: 8 }}>
+                {appStatus?.message || "等待 GitHub 返回…"}
+              </div>
+              <div className="row-actions" style={{ marginTop: 12 }}>
+                <a className="btn" href={appReopenUrl} target="_blank" rel="noreferrer">重新打开 GitHub</a>
+                <button className="btn" onClick={() => { setAppSetup(null); setAppStatus(null); }}>取消</button>
+              </div>
+            </>
+          ) : githubAppCred ? (
+            <>
+              <div>
+                {githubAppOwner ? <><b>{githubAppOwner}</b> / </> : null}
+                <b>{githubAppSlug || "GitHub App"}</b> 已安装。后台会按需自动换取 installation token，不需要手工维护 PAT。
+              </div>
+              <div className="row-actions" style={{ marginTop: 12 }}>
+                <button className="btn" disabled={appBusy} onClick={() => void connectGithub()}>重新连接</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                点“连接 GitHub”后，系统会打开 GitHub，由你完成登录、创建应用和选择仓库。确认完成后自动返回产品，App ID、私钥和安装编号会加密写入凭据库。
+              </div>
+              <div className="tiny" style={{ marginTop: 8 }}>
+                不需要填写 Client ID、安装编号，也不需要手工创建 PAT。
+              </div>
+              <div className="row-actions" style={{ marginTop: 12 }}>
+                <button className="btn primary" disabled={appBusy} onClick={() => void connectGithub()}>
+                  {appBusy ? "正在准备…" : "连接 GitHub"}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
 

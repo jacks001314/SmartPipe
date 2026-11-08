@@ -110,16 +110,22 @@ func (a *API) putLanxinConfig(c iris.Context) {
 		a.badRequest(c, "App ID 不能为空")
 		return
 	}
+	// 常见手误：把 API Base 粘进 App Secret。Secret 一旦是 URL，连接测试只会报鉴权或网络错误。
+	secret := strings.TrimSpace(in.AppSecret)
+	if strings.HasPrefix(secret, "http://") || strings.HasPrefix(secret, "https://") {
+		a.badRequest(c, "App Secret 填成了网关地址，请填写蓝信应用凭证里的 App Secret")
+		return
+	}
 	ctx := c.Request().Context()
 	meta := map[string]any{"app_id": in.AppID, "api_base": in.APIBase}
 	cred, err := a.findLanxinCredential(ctx)
 	switch {
 	case err == store.ErrNotFound:
-		if strings.TrimSpace(in.AppSecret) == "" {
+		if secret == "" {
 			a.badRequest(c, "首次配置必须填写 App Secret")
 			return
 		}
-		cred, err = a.store.CreateCredential(ctx, nil, store.CredentialLanxin, "lanxin-app", in.AppSecret, meta)
+		cred, err = a.store.CreateCredential(ctx, nil, store.CredentialLanxin, "lanxin-app", secret, meta)
 		if err != nil {
 			a.fail(c, err)
 			return
@@ -128,8 +134,8 @@ func (a *API) putLanxinConfig(c iris.Context) {
 		a.fail(c, err)
 		return
 	default:
-		if strings.TrimSpace(in.AppSecret) != "" {
-			if _, err := a.store.RotateCredential(ctx, cred.ID, in.AppSecret); err != nil {
+		if secret != "" {
+			if _, err := a.store.RotateCredential(ctx, cred.ID, secret); err != nil {
 				a.fail(c, err)
 				return
 			}
@@ -156,7 +162,7 @@ func (a *API) putLanxinConfig(c iris.Context) {
 		view.RequireAtMe = false
 	}
 	a.audit(ctx, c, "lanxin.config.update", "credential", cred.ID, nil, "ok",
-		map[string]any{"app_id": in.AppID, "secret_rotated": strings.TrimSpace(in.AppSecret) != ""})
+		map[string]any{"app_id": in.AppID, "secret_rotated": secret != ""})
 	_ = c.JSON(envelope{Data: view})
 }
 
@@ -313,23 +319,16 @@ func (a *API) unbindLanxinGroup(c iris.Context) {
 }
 
 func (a *API) listLanxinMessages(c iris.Context) {
-	limit := 50
-	items, err := a.store.ListBridgeLinks(c.Request().Context(), limit*3)
+	limit := c.URLParamIntDefault("limit", 50)
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	items, err := a.store.ListLanxinMessages(c.Request().Context(), limit)
 	if err != nil {
 		a.fail(c, err)
 		return
 	}
-	out := make([]store.BridgeLink, 0, limit)
-	for _, item := range items {
-		if !strings.EqualFold(item.Channel, "lanxin") && !strings.EqualFold(item.Channel, "bluex") {
-			continue
-		}
-		out = append(out, item)
-		if len(out) >= limit {
-			break
-		}
-	}
-	_ = c.JSON(envelope{Data: out})
+	_ = c.JSON(envelope{Data: items})
 }
 
 func (a *API) internalLanxinConfig(c iris.Context) {

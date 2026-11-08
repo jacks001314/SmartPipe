@@ -214,6 +214,10 @@ func (c *Checker) lanxin(ctx context.Context, appSecret string, meta map[string]
 	if strings.TrimSpace(appSecret) == "" {
 		return Result{Message: "缺少 App Secret：请重新填写并保存"}
 	}
+	// 旧配置里可能存过一次网关地址；空白保存不会覆盖它，测试时只会得到网络或鉴权错误。
+	if lower := strings.ToLower(strings.TrimSpace(appSecret)); strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		return Result{Message: "App Secret 目前是网关地址（旧配置残留）：请在 App Secret 框重新粘贴真实密钥并保存，不能留空"}
+	}
 	q := url.Values{}
 	q.Set("grant_type", "client_credential")
 	q.Set("appid", appID)

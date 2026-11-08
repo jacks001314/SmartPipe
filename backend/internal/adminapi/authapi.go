@@ -26,6 +26,7 @@ func (a *API) registerAuth(app *iris.Application) {
 	pub.Post("/login", a.login)
 	pub.Post("/logout", a.logout)
 	pub.Get("/session", a.sessionInfo)
+	a.registerGitHubAppPublic(pub)
 }
 
 // Bootstrap 按环境变量创建首个管理员账号。已有账号时不会覆盖密码，

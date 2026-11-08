@@ -3,15 +3,13 @@ package github
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
-	"strings"
+
+	gh "github.com/google/go-github/v68/github"
 )
 
 // Release 是 GitHub Release 的响应子集。
@@ -40,22 +38,23 @@ func (c *Client) ListIssuesByLabel(ctx context.Context, repo, label string, limi
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	q := url.Values{}
-	q.Set("state", "open")
-	q.Set("per_page", strconv.Itoa(limit))
+	opts := &gh.IssueListByRepoOptions{
+		State:       "open",
+		ListOptions: gh.ListOptions{PerPage: limit},
+	}
 	if label != "" {
-		q.Set("labels", label)
+		opts.Labels = []string{label}
 	}
-	var out []Issue
-	if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/issues?%s", owner, name, q.Encode()), nil, &out); err != nil {
-		return nil, err
+	items, _, err := c.gh.Issues.ListByRepo(ctx, owner, name, opts)
+	if err != nil {
+		return nil, wrapErr(err)
 	}
-	issues := make([]Issue, 0, len(out))
-	for _, issue := range out {
-		if len(issue.PullRequest) > 0 && string(issue.PullRequest) != "null" {
+	issues := make([]Issue, 0, len(items))
+	for _, item := range items {
+		if item == nil || item.PullRequestLinks != nil {
 			continue
 		}
-		issues = append(issues, issue)
+		issues = append(issues, *toIssue(item))
 	}
 	return issues, nil
 }
@@ -69,17 +68,15 @@ func (c *Client) BranchSHA(ctx context.Context, repo, ref string) (string, error
 	if ref == "" {
 		ref = "main"
 	}
-	var out struct {
-		SHA string `json:"sha"`
+	commit, _, err := c.gh.Repositories.GetCommit(ctx, owner, name, ref, nil)
+	if err != nil {
+		return "", wrapErr(err)
 	}
-	path := fmt.Sprintf("/repos/%s/%s/commits/%s", owner, name, url.PathEscape(ref))
-	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
-		return "", err
-	}
-	if out.SHA == "" {
+	sha := commit.GetSHA()
+	if sha == "" {
 		return "", fmt.Errorf("github: branch %s has no commit", ref)
 	}
-	return out.SHA, nil
+	return sha, nil
 }
 
 // TagSHA 读取已存在 tag 指向的提交；tag 不存在时返回空串与 nil。
@@ -88,20 +85,14 @@ func (c *Client) TagSHA(ctx context.Context, repo, tag string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	var out struct {
-		Object struct {
-			SHA  string `json:"sha"`
-			Type string `json:"type"`
-		} `json:"object"`
-	}
-	path := fmt.Sprintf("/repos/%s/%s/git/ref/tags/%s", owner, name, url.PathEscape(tag))
-	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
-		if IsNotFound(err) {
+	ref, _, err := c.gh.Git.GetRef(ctx, owner, name, "tags/"+tag)
+	if err != nil {
+		if IsNotFound(wrapErr(err)) {
 			return "", nil
 		}
-		return "", err
+		return "", wrapErr(err)
 	}
-	return out.Object.SHA, nil
+	return ref.GetObject().GetSHA(), nil
 }
 
 // CreateTagRef 创建轻量 tag。
@@ -110,8 +101,11 @@ func (c *Client) CreateTagRef(ctx context.Context, repo, tag, sha string) error 
 	if err != nil {
 		return err
 	}
-	payload := map[string]string{"ref": "refs/tags/" + tag, "sha": sha}
-	return c.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/git/refs", owner, name), payload, nil)
+	_, _, err = c.gh.Git.CreateRef(ctx, owner, name, &gh.Reference{
+		Ref:    gh.String("refs/tags/" + tag),
+		Object: &gh.GitObject{SHA: gh.String(sha)},
+	})
+	return wrapErr(err)
 }
 
 // DeleteTagRef 删除 tag；不存在时视为成功。
@@ -120,11 +114,29 @@ func (c *Client) DeleteTagRef(ctx context.Context, repo, tag string) error {
 	if err != nil {
 		return err
 	}
-	err = c.do(ctx, http.MethodDelete, fmt.Sprintf("/repos/%s/%s/git/refs/tags/%s", owner, name, url.PathEscape(tag)), nil, nil)
-	if IsNotFound(err) {
+	_, err = c.gh.Git.DeleteRef(ctx, owner, name, "tags/"+tag)
+	if IsNotFound(wrapErr(err)) {
 		return nil
 	}
-	return err
+	return wrapErr(err)
+}
+
+func toRelease(in *gh.RepositoryRelease) *Release {
+	if in == nil {
+		return nil
+	}
+	out := &Release{
+		ID:         in.GetID(),
+		HTMLURL:    in.GetHTMLURL(),
+		TagName:    in.GetTagName(),
+		Name:       in.GetName(),
+		Draft:      in.GetDraft(),
+		Prerelease: in.GetPrerelease(),
+	}
+	if in.CreatedAt != nil {
+		out.CreatedAt = in.CreatedAt.Time
+	}
+	return out
 }
 
 // CreateRelease 创建 GitHub Release（tag 必须已存在）。
@@ -133,18 +145,22 @@ func (c *Client) CreateRelease(ctx context.Context, repo, tag, target, title, bo
 	if err != nil {
 		return nil, err
 	}
-	payload := map[string]any{
-		"tag_name": tag, "name": title, "body": body,
-		"draft": false, "prerelease": false, "make_latest": "true",
+	req := &gh.RepositoryRelease{
+		TagName:    gh.String(tag),
+		Name:       gh.String(title),
+		Body:       gh.String(body),
+		Draft:      gh.Bool(false),
+		Prerelease: gh.Bool(false),
+		MakeLatest: gh.String("true"),
 	}
 	if target != "" {
-		payload["target_commitish"] = target
+		req.TargetCommitish = gh.String(target)
 	}
-	var out Release
-	if err := c.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/releases", owner, name), payload, &out); err != nil {
-		return nil, err
+	rel, _, err := c.gh.Repositories.CreateRelease(ctx, owner, name, req)
+	if err != nil {
+		return nil, wrapErr(err)
 	}
-	return &out, nil
+	return toRelease(rel), nil
 }
 
 // DeleteRelease 删除 GitHub Release；不存在时视为成功。
@@ -153,11 +169,11 @@ func (c *Client) DeleteRelease(ctx context.Context, repo string, id int64) error
 	if err != nil {
 		return err
 	}
-	err = c.do(ctx, http.MethodDelete, fmt.Sprintf("/repos/%s/%s/releases/%d", owner, name, id), nil, nil)
-	if IsNotFound(err) {
+	_, err = c.gh.Repositories.DeleteRelease(ctx, owner, name, id)
+	if IsNotFound(wrapErr(err)) {
 		return nil
 	}
-	return err
+	return wrapErr(err)
 }
 
 // RemoveLabel 移除 Issue 上的标签；标签不存在时视为成功。
@@ -166,12 +182,11 @@ func (c *Client) RemoveLabel(ctx context.Context, repo string, number int, label
 	if err != nil {
 		return err
 	}
-	path := fmt.Sprintf("/repos/%s/%s/issues/%d/labels/%s", owner, name, number, url.PathEscape(label))
-	err = c.do(ctx, http.MethodDelete, path, nil, nil)
-	if IsNotFound(err) {
+	_, err = c.gh.Issues.RemoveLabelForIssue(ctx, owner, name, number, label)
+	if IsNotFound(wrapErr(err)) {
 		return nil
 	}
-	return err
+	return wrapErr(err)
 }
 
 // Asset 是 Release 附件的响应子集。
@@ -183,59 +198,28 @@ type Asset struct {
 }
 
 // UploadReleaseAsset 把制品作为 Release 附件上传（octet-stream）。
-// 用 /repos/{owner}/{repo}/releases/{id}/assets?name= 形式，api.github.com 与 GitHub Enterprise 都支持。
-
-// uploadBase 返回 Release 附件上传用的基地址：GitHub.com 是 uploads.github.com，
-// 企业版把 api.<host> 换成 uploads.<host>；本地假服务保持原地址。
-func (c *Client) uploadBase() string {
-	base := strings.TrimRight(strings.TrimSpace(c.BaseURL), "/")
-	u, err := url.Parse(base)
-	if err != nil || u.Host == "" {
-		return base
-	}
-	switch {
-	case u.Host == "api.github.com":
-		u.Host = "uploads.github.com"
-	case strings.HasPrefix(u.Host, "api."):
-		u.Host = "uploads." + strings.TrimPrefix(u.Host, "api.")
-	default:
-		return base
-	}
-	return u.String()
-}
 func (c *Client) UploadReleaseAsset(ctx context.Context, repo string, releaseID int64, name string, data []byte) (*Asset, error) {
-	owner, name0, err := SplitRepo(repo)
+	owner, repoName, err := SplitRepo(repo)
 	if err != nil {
 		return nil, err
 	}
-	q := url.Values{"name": {name}}
-	path := fmt.Sprintf("/repos/%s/%s/releases/%d/assets?%s", owner, name0, releaseID, q.Encode())
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.uploadBase()+path, bytes.NewReader(data))
+	relative := fmt.Sprintf("repos/%s/%s/releases/%d/assets?name=%s", owner, repoName, releaseID, url.QueryEscape(name))
+	req, err := c.gh.NewUploadRequest(relative, bytes.NewReader(data), int64(len(data)), "application/octet-stream")
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	req.Header.Set("Content-Type", "application/octet-stream")
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
-	}
-	client := c.HTTP
-	if client == nil {
-		client = http.DefaultClient
-	}
-	resp, err := client.Do(req)
+	var out gh.ReleaseAsset
+	resp, err := c.gh.Do(ctx, req, &out)
 	if err != nil {
-		return nil, fmt.Errorf("github: upload asset: %w", err)
+		return nil, wrapErr(err)
 	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, &APIError{Status: resp.StatusCode, Body: string(raw)}
+	if resp == nil || resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, &APIError{Status: http.StatusInternalServerError, Body: "github: upload asset failed"}
 	}
-	var out Asset
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("github: decode asset: %w", err)
-	}
-	return &out, nil
+	return &Asset{
+		ID:                 out.GetID(),
+		Name:               out.GetName(),
+		Size:               int64(out.GetSize()),
+		BrowserDownloadURL: out.GetBrowserDownloadURL(),
+	}, nil
 }

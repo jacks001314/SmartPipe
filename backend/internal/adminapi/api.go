@@ -80,6 +80,8 @@ type API struct {
 	passwordReset         bool
 	sessionTTL            time.Duration
 	cookieSecure          bool
+	oauthFlows            *githubOAuthState
+	appSetups             *githubAppSetupState
 }
 
 // New 构造 API。
@@ -120,6 +122,8 @@ func New(cfg Config) *API {
 		passwordReset:         cfg.AdminPasswordReset,
 		sessionTTL:            cfg.SessionTTL,
 		cookieSecure:          cfg.CookieSecure,
+		oauthFlows:            newGitHubOAuthState(),
+		appSetups:             newGitHubAppSetupState(),
 	}
 }
 
@@ -165,6 +169,8 @@ func (a *API) Register(app *iris.Application) {
 	a.registerIdentities(party)
 	a.registerModels(party)
 	a.registerLanxin(party)
+	a.registerGitHubOAuth(party)
+	a.registerGitHubApp(party)
 	a.registerLanxinInternal(app)
 }
 

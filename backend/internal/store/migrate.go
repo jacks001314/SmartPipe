@@ -14,6 +14,34 @@ type migration struct {
 
 var migrations = []migration{
 	{
+		version: 21,
+		name:    "lanxin_messages",
+		sql: `
+CREATE TABLE IF NOT EXISTS lanxin_messages (
+    id                  BIGSERIAL PRIMARY KEY,
+    platform_message_id TEXT NOT NULL UNIQUE,
+    chat_type           TEXT NOT NULL DEFAULT '',
+    chat_id             TEXT NOT NULL DEFAULT '',
+    user_id             TEXT NOT NULL DEFAULT '',
+    sender_name         TEXT NOT NULL DEFAULT '',
+    group_name          TEXT NOT NULL DEFAULT '',
+    msg_type            TEXT NOT NULL DEFAULT '',
+    text                TEXT NOT NULL DEFAULT '',
+    is_at_me            BOOLEAN NOT NULL DEFAULT false,
+    project_id          TEXT,
+    status              TEXT NOT NULL DEFAULT 'received',
+    reason              TEXT NOT NULL DEFAULT '',
+    issue_number        INTEGER NOT NULL DEFAULT 0,
+    issue_url           TEXT NOT NULL DEFAULT '',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS lanxin_messages_at_idx ON lanxin_messages (created_at DESC);
+CREATE INDEX IF NOT EXISTS lanxin_messages_chat_idx ON lanxin_messages (chat_id, created_at DESC);
+`,
+	},
+	{
 		version: 20,
 		name:    "admin_users",
 		sql: `

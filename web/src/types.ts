@@ -22,6 +22,46 @@ export type Project = {
   updated_at: string;
 };
 
+export type GitHubAppSetup = {
+  setup_id: string;
+  launch_url: string;
+  expires_in: number;
+  poll_interval: number;
+};
+
+export type GitHubAppSetupStatus = {
+  status: "pending" | "created" | "installed" | "expired" | "error";
+  app_slug?: string;
+  owner?: string;
+  installation_id?: string;
+  credential_id?: string;
+  message?: string;
+};
+
+export type GitHubOAuthView = {
+  configured: boolean;
+  client_id: string;
+  scope: string;
+  authorized: boolean;
+  login: string;
+  credential_id: string;
+};
+
+export type GitHubDeviceFlow = {
+  flow_id: string;
+  user_code: string;
+  verification_uri: string;
+  expires_in: number;
+  interval: number;
+};
+
+export type GitHubOAuthPoll = {
+  status: "pending" | "authorized" | "expired" | "denied" | "error";
+  login?: string;
+  message?: string;
+  credential_id?: string;
+};
+
 export type Credential = {
   id: string;
   project_id: string | null;
@@ -197,6 +237,26 @@ export type BridgeLink = {
   receipt_status: string;
   receipt_error: string;
   created_at: string;
+};
+
+export type LanxinMessage = {
+  id: number;
+  platform_message_id: string;
+  chat_type: string;
+  chat_id: string;
+  user_id: string;
+  sender_name: string;
+  group_name: string;
+  msg_type: string;
+  text: string;
+  is_at_me: boolean;
+  project_id: string | null;
+  status: string;
+  reason: string;
+  issue_number: number;
+  issue_url: string;
+  created_at: string;
+  updated_at: string;
 };
 
 export type ProjectBinding = {

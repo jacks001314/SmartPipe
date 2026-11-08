@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"smartpipe/backend/internal/github"
@@ -14,13 +15,16 @@ import (
 
 // Message 是桥接服务接收的归一化入站消息。
 type Message struct {
-	Channel   string `json:"channel"`
-	ChatID    string `json:"chat_id"`
-	UserID    string `json:"user_id"`
-	MessageID string `json:"message_id"`
-	Title     string `json:"title"`
-	Body      string `json:"body"`
-	ProjectID string `json:"project_id"`
+	Channel    string `json:"channel"`
+	ChatType   string `json:"chat_type"`
+	ChatID     string `json:"chat_id"`
+	UserID     string `json:"user_id"`
+	SenderName string `json:"sender_name"`
+	GroupName  string `json:"group_name"`
+	MessageID  string `json:"message_id"`
+	Title      string `json:"title"`
+	Body       string `json:"body"`
+	ProjectID  string `json:"project_id"`
 }
 
 // ErrInvalidMessage 表示消息缺少必要字段。
@@ -197,9 +201,9 @@ func (s *Service) resolveTarget(ctx context.Context, projectID *string) (*store.
 	if !project.Enabled {
 		return nil, "", nil, fmt.Errorf("bridge: project %s is disabled", project.ID)
 	}
-	repo := strings.TrimSpace(project.GitHubIssueRepo)
+	repo := normalizeRepoRef(project.GitHubIssueRepo)
 	if repo == "" {
-		repo = strings.TrimSpace(project.GitHubRepoURL)
+		repo = normalizeRepoRef(project.GitHubRepoURL)
 	}
 	if repo == "" {
 		return nil, "", nil, fmt.Errorf("bridge: project %s has no GitHub repository", project.ID)
@@ -209,6 +213,22 @@ func (s *Service) resolveTarget(ctx context.Context, projectID *string) (*store.
 		prefix = "smartpipe"
 	}
 	return project, repo, []string{"source:bluex", prefix}, nil
+}
+
+// normalizeRepoRef 把完整仓库地址归一成 owner/repo：
+// https://github.com/owner/repo.git、git@github.com:owner/repo.git、owner/repo 都接受。
+func normalizeRepoRef(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	if u, err := url.Parse(s); err == nil && u.Host != "" {
+		s = u.Path
+	} else if i := strings.Index(s, ":"); i > 0 && strings.Contains(s[:i], "@") {
+		s = s[i+1:]
+	}
+	s = strings.Trim(strings.TrimSuffix(strings.Trim(s, "/"), ".git"), "/")
+	return s
 }
 
 // ClientFromCredentials 从凭据库解析可用的 GitHub 客户端：

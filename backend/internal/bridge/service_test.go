@@ -424,3 +424,19 @@ func TestHandleMessageWithoutIdentityKeepsBody(t *testing.T) {
 		t.Fatalf("body = %v", env.bodies)
 	}
 }
+
+func TestNormalizeRepoRef(t *testing.T) {
+	cases := map[string]string{
+		"https://github.com/jacks001314/SmartPipe.git": "jacks001314/SmartPipe",
+		"https://github.com/jacks001314/SmartPipe":     "jacks001314/SmartPipe",
+		"git@github.com:jacks001314/SmartPipe.git":     "jacks001314/SmartPipe",
+		"jacks001314/SmartPipe":                        "jacks001314/SmartPipe",
+		"  jacks001314/SmartPipe/  ":                   "jacks001314/SmartPipe",
+		"":                                             "",
+	}
+	for in, want := range cases {
+		if got := normalizeRepoRef(in); got != want {
+			t.Errorf("normalizeRepoRef(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
