@@ -87,10 +87,11 @@ export function ModelsPage({ notify }: { notify: Notify }) {
     setLoading(true);
     try {
       const [items, def] = await Promise.all([api.listModelProviders(), api.getModelDefault()]);
-      setProviders(items);
-      setDefaults(def);
+      const normalized = (items ?? []).map((item) => ({ ...item, models: item.models ?? [] }));
+      setProviders(normalized);
+      setDefaults(def ?? { provider_id: "", model: "", reasoning_effort: "" });
       setDraft(EMPTY_DRAFT);
-      setSelectedId((prev) => (prev && items.some((item) => item.id === prev) ? prev : items[0]?.id ?? ""));
+      setSelectedId((prev) => (prev && normalized.some((item) => item.id === prev) ? prev : normalized[0]?.id ?? ""));
       setError("");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "加载模型配置失败");
@@ -114,7 +115,7 @@ export function ModelsPage({ notify }: { notify: Notify }) {
   const enabledOf = (provider: ModelProvider) => draft.providerEnabled[provider.id] ?? provider.enabled;
 
   const modelsOf = (provider: ModelProvider): { id: string; enabled: boolean; added: boolean }[] => {
-    const rows = provider.models.map((model) => ({
+    const rows = (provider.models ?? []).map((model) => ({
       id: model.model_id,
       enabled: draft.modelEnabled[modelKey(provider.id, model.model_id)] ?? model.enabled,
       added: false,
@@ -175,7 +176,7 @@ export function ModelsPage({ notify }: { notify: Notify }) {
         if (edit.api_key.trim() !== "") count += 1;
       }
       if (draft.providerEnabled[provider.id] !== undefined && draft.providerEnabled[provider.id] !== provider.enabled) count += 1;
-      for (const model of provider.models) {
+      for (const model of provider.models ?? []) {
         const next = draft.modelEnabled[modelKey(provider.id, model.model_id)];
         if (next !== undefined && next !== model.enabled) count += 1;
       }

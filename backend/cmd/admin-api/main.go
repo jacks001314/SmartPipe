@@ -123,6 +123,19 @@ func main() {
 
 	if dist := strings.TrimSpace(os.Getenv("SMARTPIPE_WEB_DIST")); dist != "" {
 		if info, statErr := os.Stat(dist); statErr == nil && info.IsDir() {
+			// HTML 必须每次回源，避免升级后浏览器继续引用已经不存在的旧 bundle；
+			// 带哈希的资源可以长期缓存。
+			app.Use(func(c iris.Context) {
+				path := c.Path()
+				switch {
+				case strings.HasPrefix(path, "/assets/"):
+					c.Header("Cache-Control", "public, max-age=31536000, immutable")
+				case path == "/" || strings.HasSuffix(path, ".html"):
+					c.Header("Cache-Control", "no-store, must-revalidate")
+					c.Header("Pragma", "no-cache")
+				}
+				c.Next()
+			})
 			app.HandleDir("/", dist, iris.DirOptions{IndexName: "/index.html", ShowList: false, Compress: true})
 			log.Printf("静态站点目录: %s", dist)
 		} else {

@@ -162,15 +162,17 @@ export function ModelConfigImportModal({
     if (!busy) onClose();
   };
 
+  const previewProfiles = preview?.profiles ?? [];
+  const previewProviders = preview?.providers ?? [];
   const requiredProviders = new Set<string>();
-  for (const profile of preview?.profiles ?? []) {
+  for (const profile of previewProfiles) {
     if (selectedProfiles.has(profile.key) && !profile.provider_missing) {
       requiredProviders.add(profile.provider_key);
     }
   }
 
-  const selectedProfileCount = (preview?.profiles ?? []).filter((p) => selectedProfiles.has(p.key)).length;
-  const selectedProviderCount = (preview?.providers ?? []).filter((p) => selectedProviders.has(p.key)).length;
+  const selectedProfileCount = previewProfiles.filter((p) => selectedProfiles.has(p.key)).length;
+  const selectedProviderCount = previewProviders.filter((p) => selectedProviders.has(p.key)).length;
 
   const toggleProfile = (key: string, checked: boolean) => {
     if (!preview) return;
@@ -178,7 +180,7 @@ export function ModelConfigImportModal({
     const nextProviders = new Set(selectedProviders);
     if (checked) nextProfiles.add(key);
     else nextProfiles.delete(key);
-    const profile = preview.profiles.find((item) => item.key === key);
+    const profile = previewProfiles.find((item) => item.key === key);
     if (checked && profile && !profile.provider_missing) nextProviders.add(profile.provider_key);
     setSelectedProfiles(nextProfiles);
     setSelectedProviders(nextProviders);
@@ -191,7 +193,7 @@ export function ModelConfigImportModal({
     if (checked) nextProviders.add(key);
     else {
       nextProviders.delete(key);
-      for (const profile of preview.profiles) {
+      for (const profile of previewProfiles) {
         if (profile.provider_key === key) nextProfiles.delete(profile.key);
       }
     }
@@ -207,7 +209,7 @@ export function ModelConfigImportModal({
     }
     const nextProfiles = new Set(selectedProfiles);
     const nextProviders = new Set(selectedProviders);
-    for (const profile of preview.profiles) {
+    for (const profile of previewProfiles) {
       if (profile.provider_missing) continue;
       nextProfiles.add(profile.key);
       nextProviders.add(profile.provider_key);
@@ -223,7 +225,7 @@ export function ModelConfigImportModal({
       setSelectedProfiles(new Set());
       return;
     }
-    setSelectedProviders(new Set(preview.providers.map((provider) => provider.key)));
+    setSelectedProviders(new Set(previewProviders.map((provider) => provider.key)));
   };
 
   const executeImport = async () => {
@@ -251,10 +253,10 @@ export function ModelConfigImportModal({
 
   const allProfilesChecked =
     !!preview &&
-    preview.profiles.filter((p) => !p.provider_missing).length > 0 &&
-    preview.profiles.filter((p) => !p.provider_missing).every((p) => selectedProfiles.has(p.key));
+    previewProfiles.filter((p) => !p.provider_missing).length > 0 &&
+    previewProfiles.filter((p) => !p.provider_missing).every((p) => selectedProfiles.has(p.key));
   const allProvidersChecked =
-    !!preview && preview.providers.length > 0 && preview.providers.every((p) => selectedProviders.has(p.key));
+    !!preview && previewProviders.length > 0 && previewProviders.every((p) => selectedProviders.has(p.key));
 
   return (
     <div className={"modal-backdrop" + (open ? " open" : "")}>
@@ -360,10 +362,10 @@ export function ModelConfigImportModal({
                     <span>选择</span>
                   </label>
                 </div>
-                {preview.profiles.length === 0 ? (
+                {previewProfiles.length === 0 ? (
                   <div className="empty-row" role="row"><span>配置中没有 Profile</span></div>
                 ) : (
-                  preview.profiles.map((profile) => (
+                  previewProfiles.map((profile) => (
                     <div key={profile.key} role="row">
                       <span className="codex-import-name">
                         <strong>{profile.key}</strong>
@@ -405,7 +407,7 @@ export function ModelConfigImportModal({
                     <span>选择</span>
                   </label>
                 </div>
-                {preview.providers.map((provider) => {
+                {previewProviders.map((provider) => {
                   const required = requiredProviders.has(provider.key);
                   return (
                     <div key={provider.key} role="row">
