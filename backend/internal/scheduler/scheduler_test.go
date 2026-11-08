@@ -697,6 +697,20 @@ func TestReconcileClosesWorkerWhenIssueClosed(t *testing.T) {
 	}
 }
 
+func TestReferencedIssueParsing(t *testing.T) {
+	cases := map[string]int{
+		"看下 #42 这个问题":                                 42,
+		"https://github.com/acme/core/issues/77 还是复现": 77,
+		"#12，再加一条":                                    12,
+		"没有引用":                                        0,
+	}
+	for text, want := range cases {
+		if got := referencedIssue(text); got != want {
+			t.Fatalf("%q: got %d want %d", text, got, want)
+		}
+	}
+}
+
 func TestChatIssueUpdateEnqueuesWorker(t *testing.T) {
 	h := newHarness(t, Config{})
 	h.runner.chatReply = `{"action":"issue_update","issue":33,"reply":"补充一个复现步骤"}`

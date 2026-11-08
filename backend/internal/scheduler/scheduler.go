@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -733,10 +734,16 @@ func botComment(body string) string {
 
 func referencedIssue(text string) int {
 	for _, token := range strings.Fields(text) {
-		token = strings.TrimSpace(strings.Trim(token, "，。,.()（）"))
+		token = strings.TrimSpace(strings.Trim(token, "，。,.()（）<>"))
 		if strings.HasPrefix(token, "#") {
 			var n int
 			if _, err := fmt.Sscanf(token, "#%d", &n); err == nil && n > 0 {
+				return n
+			}
+		}
+		// 群里经常直接贴 Issue 链接：https://github.com/owner/repo/issues/42
+		if i := strings.LastIndex(token, "/issues/"); i >= 0 {
+			if n, err := strconv.Atoi(strings.TrimRight(token[i+len("/issues/"):], "/")); err == nil && n > 0 {
 				return n
 			}
 		}
