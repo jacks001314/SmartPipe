@@ -32,7 +32,7 @@ const META: Record<PageKey, { crumb: string; title: string; sub: string }> = {
   verify: { crumb: "配置中心 / 补丁验证", title: "补丁验证", sub: "无 Actions 的合并门禁：干净副本应用补丁并执行 smartpipe.yaml。" },
   release: { crumb: "配置中心 / 发版", title: "发版", sub: "从干净提交构建制品，生成带校验和与签名的 manifest。" },
   crash: { crumb: "配置中心 / 崩溃上报", title: "崩溃上报", sub: "客户端 crash_bundle 脱敏、指纹去重、限流与自动建单。" },
-  audit: { crumb: "配置中心 / 审计日志", title: "审计日志", sub: "记录项目、凭据和运行时的管理操作，不保存明文秘密。" },
+  audit: { crumb: "配置中心 / 审计日志", title: "审计日志", sub: "记录项目、凭据与流水线的管理操作，不保存明文秘密。" },
 };
 
 export type Notify = (message: string, kind?: "ok" | "error") => void;
