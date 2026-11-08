@@ -1,56 +1,94 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api";
-import type { ModelDefault, ModelProfile, ModelProvider } from "../types";
+import type { ModelDefault, ModelProvider } from "../types";
 import type { Notify } from "../App";
-import { ModelConfigImportModal } from "./ModelConfigImportModal";
+import { ModelConfigImportModal, type PickedConfig } from "./ModelConfigImportModal";
 
 const WIRE_OPTIONS = [
-  { value: "chat", label: "Chat Completions（/chat/completions）" },
   { value: "responses", label: "Responses（/responses）" },
+  { value: "chat", label: "Chat Completions（/chat/completions）" },
 ];
 
-type ProviderForm = {
+const EFFORT_OPTIONS = ["minimal", "low", "medium", "high", "xhigh"];
+
+type ProviderEdit = { name: string; base_url: string; wire_api: string; api_key: string };
+
+type ProviderTemplate = {
+  id: string;
   name: string;
+  note: string;
   base_url: string;
   wire_api: string;
-  api_key: string;
+  models: string[];
 };
 
-const EMPTY_PROVIDER: ProviderForm = { name: "", base_url: "", wire_api: "chat", api_key: "" };
+const TEMPLATES: ProviderTemplate[] = [
+  { id: "deepseek", name: "DeepSeek", note: "官方 Chat Completions 端点", base_url: "https://api.deepseek.com/v1", wire_api: "chat", models: ["deepseek-chat", "deepseek-reasoner"] },
+  { id: "zhipu", name: "智谱 GLM", note: "bigmodel 兼容端点", base_url: "https://open.bigmodel.cn/api/paas/v4", wire_api: "chat", models: ["glm-4.6", "glm-4.5"] },
+  { id: "qwen", name: "通义千问", note: "DashScope 兼容模式", base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", wire_api: "chat", models: ["qwen3-max"] },
+  { id: "kimi", name: "Kimi", note: "Moonshot 兼容端点", base_url: "https://api.moonshot.cn/v1", wire_api: "chat", models: ["kimi-k2"] },
+  { id: "ollama", name: "Ollama 本机", note: "本机 11434 端口，无需凭据", base_url: "http://127.0.0.1:11434/v1", wire_api: "chat", models: ["qwen3:8b"] },
+  { id: "custom", name: "自定义供应商", note: "手填 Base URL 与模型", base_url: "", wire_api: "responses", models: [] },
+];
+
+type Draft = {
+  edits: Record<string, ProviderEdit>;
+  providerEnabled: Record<string, boolean>;
+  modelEnabled: Record<string, boolean>;
+  addedModels: Record<string, string[]>;
+  def: ModelDefault | null;
+};
+
+const EMPTY_DRAFT: Draft = { edits: {}, providerEnabled: {}, modelEnabled: {}, addedModels: {}, def: null };
+
+const modelKey = (providerId: string, model: string) => providerId + "\u0000" + model;
+
+const shortHost = (value: string) => {
+  try {
+    return new URL(value).host;
+  } catch {
+    return value;
+  }
+};
+
+const EMPTY_PROVIDER: ProviderEdit = { name: "", base_url: "", wire_api: "responses", api_key: "" };
 
 export function ModelsPage({ notify }: { notify: Notify }) {
-  const [items, setItems] = useState<ModelProvider[]>([]);
-  const [profiles, setProfiles] = useState<ModelProfile[]>([]);
-  const [selectedId, setSelectedId] = useState("");
+  const [providers, setProviders] = useState<ModelProvider[]>([]);
+  const [defaults, setDefaults] = useState<ModelDefault>({ provider_id: "", model: "", reasoning_effort: "" });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [query, setQuery] = useState("");
-  const [form, setForm] = useState<ProviderForm>(EMPTY_PROVIDER);
+  const [selectedId, setSelectedId] = useState("");
+  const [providerQuery, setProviderQuery] = useState("");
+  const [modelQuery, setModelQuery] = useState("");
+  const [newModel, setNewModel] = useState("");
+  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState("");
-  const [addModel, setAddModel] = useState("");
-  const [createOpen, setCreateOpen] = useState(false);
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [importOpen, setImportOpen] = useState(false);
-  const [createForm, setCreateForm] = useState<ProviderForm>(EMPTY_PROVIDER);
+  const [importFile, setImportFile] = useState<PickedConfig | null>(null);
+  const [directoryFiles, setDirectoryFiles] = useState<PickedConfig[]>([]);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createTemplate, setCreateTemplate] = useState<ProviderTemplate>(TEMPLATES[0]);
+  const [createForm, setCreateForm] = useState<ProviderEdit>(EMPTY_PROVIDER);
   const [createModels, setCreateModels] = useState("");
-  const [defaults, setDefaults] = useState<ModelDefault>({ provider_id: "", model: "", reasoning_effort: "" });
 
-  const selected = useMemo(() => items.find((p) => p.id === selectedId) ?? null, [items, selectedId]);
+  const importInput = useRef<HTMLInputElement | null>(null);
+  const importDirectoryInput = useRef<HTMLInputElement | null>(null);
 
-  const load = useCallback(async (keepId?: string) => {
+  useEffect(() => {
+    importDirectoryInput.current?.setAttribute("webkitdirectory", "");
+  }, []);
+
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [providers, def, profileItems] = await Promise.all([
-        api.listModelProviders(), api.getModelDefault(), api.listModelProfiles(),
-      ]);
-      setItems(providers);
+      const [items, def] = await Promise.all([api.listModelProviders(), api.getModelDefault()]);
+      setProviders(items);
       setDefaults(def);
-      setProfiles(profileItems);
-      setSelectedId((prev) => {
-        const want = keepId ?? prev;
-        if (want && providers.some((p) => p.id === want)) return want;
-        return providers[0]?.id ?? "";
-      });
+      setDraft(EMPTY_DRAFT);
+      setSelectedId((prev) => (prev && items.some((item) => item.id === prev) ? prev : items[0]?.id ?? ""));
       setError("");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "加载模型配置失败");
@@ -59,78 +97,187 @@ export function ModelsPage({ notify }: { notify: Notify }) {
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
-
   useEffect(() => {
-    if (!selected) {
-      setForm(EMPTY_PROVIDER);
-      return;
-    }
-    setForm({
-      name: selected.name,
-      base_url: selected.base_url,
-      wire_api: selected.wire_api || "chat",
+    void load();
+  }, [load]);
+
+  const editOf = (provider: ModelProvider): ProviderEdit =>
+    draft.edits[provider.id] ?? {
+      name: provider.name,
+      base_url: provider.base_url,
+      wire_api: provider.wire_api || "responses",
       api_key: "",
+    };
+
+  const enabledOf = (provider: ModelProvider) => draft.providerEnabled[provider.id] ?? provider.enabled;
+
+  const modelsOf = (provider: ModelProvider): { id: string; enabled: boolean; added: boolean }[] => {
+    const rows = provider.models.map((model) => ({
+      id: model.model_id,
+      enabled: draft.modelEnabled[modelKey(provider.id, model.model_id)] ?? model.enabled,
+      added: false,
+    }));
+    for (const id of draft.addedModels[provider.id] ?? []) {
+      if (!rows.some((row) => row.id === id)) rows.push({ id, enabled: true, added: true });
+    }
+    return rows;
+  };
+
+  const updateEdit = (provider: ModelProvider, patch: Partial<ProviderEdit>) => {
+    setDraft((current) => ({
+      ...current,
+      edits: { ...current.edits, [provider.id]: { ...editOf(provider), ...patch } },
+    }));
+  };
+
+  const setModelEnabled = (provider: ModelProvider, model: string, enabled: boolean) => {
+    setDraft((current) => {
+      const effective = current.def ?? defaults;
+      const next: Draft = {
+        ...current,
+        modelEnabled: { ...current.modelEnabled, [modelKey(provider.id, model)]: enabled },
+      };
+      if (!enabled && effective.provider_id === provider.id && effective.model === model) {
+        const fallback = provider.models
+          .filter((row) => row.model_id !== model)
+          .map((row) => ({ id: row.model_id, enabled: current.modelEnabled[modelKey(provider.id, row.model_id)] ?? row.enabled }))
+          .find((row) => row.enabled);
+        next.def = { provider_id: provider.id, model: fallback?.id ?? "", reasoning_effort: effective.reasoning_effort };
+      }
+      return next;
     });
-    setAddModel("");
-  }, [selected]);
+  };
 
-  const filtered = items.filter((p) => {
-    const q = query.trim().toLowerCase();
-    if (!q) return true;
-    return p.name.toLowerCase().includes(q) || p.base_url.toLowerCase().includes(q);
-  });
-
-  const enabledModels = (p: ModelProvider | null) => p?.models.filter((m) => m.enabled) ?? [];
-
-  const createProvider = async () => {
-    if (createForm.name.trim() === "" || createForm.base_url.trim() === "") {
-      notify("名称和 Base URL 都不能为空", "error");
+  const addModel = (provider: ModelProvider, model: string) => {
+    const id = model.trim();
+    if (!id) return;
+    if (modelsOf(provider).some((row) => row.id === id)) {
+      notify("模型已在列表中");
       return;
     }
+    setDraft((current) => ({
+      ...current,
+      addedModels: { ...current.addedModels, [provider.id]: [...(current.addedModels[provider.id] ?? []), id] },
+    }));
+    setNewModel("");
+  };
+
+  const dirtyCount = useMemo(() => {
+    let count = 0;
+    for (const provider of providers) {
+      const edit = draft.edits[provider.id];
+      if (edit) {
+        if (edit.name !== provider.name) count += 1;
+        if (edit.base_url !== provider.base_url) count += 1;
+        if ((edit.wire_api || "responses") !== (provider.wire_api || "responses")) count += 1;
+        if (edit.api_key.trim() !== "") count += 1;
+      }
+      if (draft.providerEnabled[provider.id] !== undefined && draft.providerEnabled[provider.id] !== provider.enabled) count += 1;
+      for (const model of provider.models) {
+        const next = draft.modelEnabled[modelKey(provider.id, model.model_id)];
+        if (next !== undefined && next !== model.enabled) count += 1;
+      }
+      count += (draft.addedModels[provider.id] ?? []).length;
+    }
+    if (draft.def && (draft.def.provider_id !== defaults.provider_id || draft.def.model !== defaults.model || draft.def.reasoning_effort !== defaults.reasoning_effort)) {
+      count += 1;
+    }
+    return count;
+  }, [defaults, draft, providers]);
+
+  const discard = () => {
+    setDraft(EMPTY_DRAFT);
+    notify("已放弃未保存的模型修改");
+  };
+
+  const saveAll = async () => {
+    if (dirtyCount === 0) return;
     setSaving(true);
     try {
-      const models = createModels.split(",").map((m) => m.trim()).filter(Boolean);
-      const created = await api.createModelProvider({ ...createForm, models });
-      notify("供应商已创建");
-      setCreateOpen(false);
-      setCreateForm(EMPTY_PROVIDER);
-      setCreateModels("");
-      await load(created.id);
+      for (const provider of providers) {
+        const edit = draft.edits[provider.id];
+        const changes: { name?: string; base_url?: string; wire_api?: string; api_key?: string } = {};
+        if (edit) {
+          if (edit.name !== provider.name) changes.name = edit.name;
+          if (edit.base_url !== provider.base_url) changes.base_url = edit.base_url;
+          if ((edit.wire_api || "responses") !== (provider.wire_api || "responses")) changes.wire_api = edit.wire_api;
+          if (edit.api_key.trim() !== "") changes.api_key = edit.api_key.trim();
+        }
+        if (Object.keys(changes).length > 0) {
+          await api.updateModelProvider(provider.id, changes);
+        }
+        const enabled = draft.providerEnabled[provider.id];
+        if (enabled !== undefined && enabled !== provider.enabled) {
+          await api.setModelProviderEnabled(provider.id, enabled);
+        }
+        for (const model of provider.models) {
+          const next = draft.modelEnabled[modelKey(provider.id, model.model_id)];
+          if (next !== undefined && next !== model.enabled) {
+            await api.setProviderModelEnabled(provider.id, model.model_id, next);
+          }
+        }
+        for (const id of draft.addedModels[provider.id] ?? []) {
+          await api.addProviderModel(provider.id, id);
+        }
+      }
+      if (draft.def) {
+        await api.putModelDefault(draft.def);
+      }
+      notify("模型配置已保存");
+      await load();
     } catch (err) {
-      notify(err instanceof ApiError ? err.message : "创建失败", "error");
+      notify(err instanceof ApiError ? err.message : "保存模型配置失败", "error");
     } finally {
       setSaving(false);
     }
   };
 
-  const saveProvider = async () => {
-    if (!selected) return;
-    setSaving(true);
-    try {
-      const updated = await api.updateModelProvider(selected.id, {
-        name: form.name,
-        base_url: form.base_url,
-        wire_api: form.wire_api,
-        api_key: form.api_key || undefined,
-      });
-      notify("连接配置已保存");
-      setForm((prev) => ({ ...prev, api_key: "" }));
-      await load(updated.id);
-    } catch (err) {
-      notify(err instanceof ApiError ? err.message : "保存失败", "error");
-    } finally {
-      setSaving(false);
-    }
+  const pickImportFile = () => {
+    setImportOpen(true);
+    importInput.current?.click();
   };
 
-  const test = async () => {
-    if (!selected) return;
-    setBusy("test");
+  const pickImportDirectory = () => {
+    setImportOpen(true);
+    importDirectoryInput.current?.click();
+  };
+
+  const onImportFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    setImportOpen(true);
+    setImportFile({ path: file.name, file });
+  };
+
+  const onImportDirectoryChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const picked = Array.from(input.files ?? [])
+      .filter((file) => file.name.toLowerCase() === "config.toml")
+      .map((file) => ({ path: file.webkitRelativePath || file.name, file }))
+      .sort((a, b) => a.path.length - b.path.length || a.path.localeCompare(b.path));
+    input.value = "";
+    setImportOpen(true);
+    setDirectoryFiles(picked);
+    if (picked.length === 0) {
+      notify("所选目录中没有找到 config.toml", "error");
+      return;
+    }
+    setImportFile(picked[0]);
+  };
+
+  const testProvider = async (provider: ModelProvider) => {
+    if (Object.keys(draft.edits[provider.id] ?? {}).length > 0) {
+      notify("请先保存连接修改，再测试模型", "error");
+      return;
+    }
+    setBusy("test:" + provider.id);
     try {
-      const res = await api.testModelProvider(selected.id);
-      notify((res.ok ? "测试通过：" : "测试失败：") + res.message + "（" + res.latency_ms + "ms）", res.ok ? "ok" : "error");
-      await load(selected.id);
+      const first = modelsOf(provider).find((model) => model.enabled)?.id ?? "";
+      const res = await api.testModelProvider(provider.id, first);
+      notify((res.ok ? "测试通过：" : "测试失败：") + res.message + `（${res.latency_ms}ms）`, res.ok ? "ok" : "error");
+      await load();
     } catch (err) {
       notify(err instanceof ApiError ? err.message : "测试失败", "error");
     } finally {
@@ -138,22 +285,41 @@ export function ModelsPage({ notify }: { notify: Notify }) {
     }
   };
 
-  const toggleProvider = async () => {
-    if (!selected) return;
+  const refreshCatalog = async (provider: ModelProvider) => {
+    setBusy("refresh:" + provider.id);
     try {
-      await api.setModelProviderEnabled(selected.id, !selected.enabled);
-      notify(selected.enabled ? "供应商已停用" : "供应商已启用");
-      await load(selected.id);
+      const res = await api.refreshProviderModels(provider.id);
+      notify(`目录已刷新，发现 ${res.count} 个模型（新模型默认停用）`);
+      await load();
     } catch (err) {
-      notify(err instanceof ApiError ? err.message : "操作失败", "error");
+      notify(err instanceof ApiError ? err.message : "刷新目录失败", "error");
+    } finally {
+      setBusy("");
     }
   };
 
-  const removeProvider = async () => {
-    if (!selected) return;
-    if (!window.confirm("删除供应商 " + selected.name + "？它的模型目录会一起删除，绑定它的项目会回到默认模型。")) return;
+  const removeModel = async (provider: ModelProvider, model: string) => {
+    if (!window.confirm(`从 ${provider.name} 的模型目录删除 ${model}？`)) return;
     try {
-      await api.deleteModelProvider(selected.id);
+      await api.deleteProviderModel(provider.id, model);
+      if (defaults.provider_id === provider.id && defaults.model === model) {
+        const fallback = modelsOf(provider).filter((row) => row.enabled && row.id !== model)[0]?.id ?? "";
+        await api.putModelDefault({ provider_id: fallback ? provider.id : "", model: fallback, reasoning_effort: fallback ? defaults.reasoning_effort : "" });
+      }
+      notify("模型已删除");
+      await load();
+    } catch (err) {
+      notify(err instanceof ApiError ? err.message : "删除失败", "error");
+    }
+  };
+
+  const removeProvider = async (provider: ModelProvider) => {
+    if (!window.confirm(`删除供应商 ${provider.name}？它的模型目录会一起删除，引用它的项目会回到默认模型。`)) return;
+    try {
+      await api.deleteModelProvider(provider.id);
+      if (defaults.provider_id === provider.id) {
+        await api.putModelDefault({ provider_id: "", model: "", reasoning_effort: "" });
+      }
       notify("供应商已删除");
       setSelectedId("");
       await load();
@@ -162,149 +328,127 @@ export function ModelsPage({ notify }: { notify: Notify }) {
     }
   };
 
-  const addOneModel = async () => {
-    if (!selected || addModel.trim() === "") return;
-    setBusy("add");
+  const setDefaultModel = (providerId: string, model: string) => {
+    const provider = providers.find((item) => item.id === providerId);
+    const available = provider ? modelsOf(provider).filter((row) => row.enabled) : [];
+    const nextModel = model || available[0]?.id || "";
+    setDraft((current) => ({
+      ...current,
+      def: {
+        provider_id: providerId,
+        model: nextModel,
+        reasoning_effort:
+          current.def?.provider_id === providerId ? current.def.reasoning_effort : defaults.reasoning_effort,
+      },
+    }));
+  };
+
+  const effectiveDefault = draft.def ?? defaults;
+
+  const openCreate = () => {
+    setCreateTemplate(TEMPLATES[0]);
+    setCreateForm({ ...EMPTY_PROVIDER, name: TEMPLATES[0].name, base_url: TEMPLATES[0].base_url, wire_api: TEMPLATES[0].wire_api });
+    setCreateModels(TEMPLATES[0].models.join(", "));
+    setCreateOpen(true);
+  };
+
+  const chooseTemplate = (template: ProviderTemplate) => {
+    setCreateTemplate(template);
+    setCreateForm({ ...EMPTY_PROVIDER, name: template.name, base_url: template.base_url, wire_api: template.wire_api });
+    setCreateModels(template.models.join(", "));
+  };
+
+  const createProvider = async () => {
+    if (createForm.name.trim() === "" || createForm.base_url.trim() === "") {
+      notify("名称和 Base URL 都不能为空", "error");
+      return;
+    }
+    setSaving(true);
     try {
-      await api.addProviderModel(selected.id, addModel.trim());
-      notify("模型已添加");
-      setAddModel("");
-      await load(selected.id);
+      const models = createModels.split(",").map((item) => item.trim()).filter(Boolean);
+      const created = await api.createModelProvider({ ...createForm, models });
+      notify("供应商已创建");
+      setCreateOpen(false);
+      await load();
+      setSelectedId(created.id);
     } catch (err) {
-      notify(err instanceof ApiError ? err.message : "添加失败", "error");
+      notify(err instanceof ApiError ? err.message : "创建失败", "error");
     } finally {
-      setBusy("");
+      setSaving(false);
     }
   };
 
-  const toggleModel = async (modelId: string, enabled: boolean) => {
-    if (!selected) return;
-    try {
-      await api.setProviderModelEnabled(selected.id, modelId, enabled);
-      await load(selected.id);
-    } catch (err) {
-      notify(err instanceof ApiError ? err.message : "操作失败", "error");
-    }
+  const exportJSON = () => {
+    const payload = {
+      default: effectiveDefault,
+      providers: providers.map((provider) => {
+        const edit = editOf(provider);
+        return {
+          id: provider.id,
+          name: edit.name,
+          base_url: edit.base_url,
+          wire_api: edit.wire_api,
+          enabled: enabledOf(provider),
+          models: modelsOf(provider).filter((row) => row.enabled).map((row) => row.id),
+        };
+      }),
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "smartpipe-models.json";
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
-  const removeModel = async (modelId: string) => {
-    if (!selected) return;
-    if (!window.confirm("从目录删除模型 " + modelId + "？")) return;
-    try {
-      await api.deleteProviderModel(selected.id, modelId);
-      await load(selected.id);
-    } catch (err) {
-      notify(err instanceof ApiError ? err.message : "删除失败", "error");
-    }
-  };
+  const filteredProviders = providers.filter((provider) => {
+    const query = providerQuery.trim().toLowerCase();
+    if (!query) return true;
+    const edit = editOf(provider);
+    return [provider.name, provider.base_url, edit.name, edit.base_url].join(" ").toLowerCase().includes(query);
+  });
 
-  const refreshCatalog = async () => {
-    if (!selected) return;
-    setBusy("refresh");
-    try {
-      const res = await api.refreshProviderModels(selected.id);
-      notify("目录已刷新，发现 " + res.count + " 个模型（新模型默认停用）");
-      await load(selected.id);
-    } catch (err) {
-      notify(err instanceof ApiError ? err.message : "刷新目录失败", "error");
-    } finally {
-      setBusy("");
-    }
-  };
-
-  const toggleProfile = async (profile: ModelProfile) => {
-    try {
-      await api.setModelProfileEnabled(profile.id, !profile.enabled);
-      notify(profile.enabled ? "Profile 已停用" : "Profile 已启用");
-      await load();
-    } catch (err) {
-      notify(err instanceof ApiError ? err.message : "操作失败", "error");
-    }
-  };
-
-  const makeProfileDefault = async (profile: ModelProfile) => {
-    try {
-      await api.setModelProfileDefault(profile.id);
-      notify("默认模型已切换到 " + profile.name);
-      await load();
-    } catch (err) {
-      notify(err instanceof ApiError ? err.message : "设置默认 Profile 失败", "error");
-    }
-  };
-
-  const removeProfile = async (profile: ModelProfile) => {
-    if (!window.confirm("删除 Profile " + profile.name + "？已有供应商和模型目录会保留。")) return;
-    try {
-      await api.deleteModelProfile(profile.id);
-      notify("Profile 已删除");
-      await load();
-    } catch (err) {
-      notify(err instanceof ApiError ? err.message : "删除失败", "error");
-    }
-  };
-
-  const saveDefault = async (next: ModelDefault) => {
-    setDefaults(next);
-    try {
-      await api.putModelDefault(next);
-      notify("默认模型已更新");
-    } catch (err) {
-      notify(err instanceof ApiError ? err.message : "保存默认模型失败", "error");
-    }
-  };
-
-  const defaultProvider = items.find((p) => p.id === defaults.provider_id) ?? null;
+  const selected = providers.find((provider) => provider.id === selectedId) ?? null;
+  const selectedEdit = selected ? editOf(selected) : null;
+  const selectedModels = selected ? modelsOf(selected) : [];
+  const visibleModels = selectedModels.filter((row) =>
+    modelQuery.trim() === "" ? true : row.id.toLowerCase().includes(modelQuery.trim().toLowerCase()),
+  );
+  const defaultProvider = providers.find((provider) => provider.id === effectiveDefault.provider_id) ?? null;
+  const defaultProviderModels = defaultProvider ? modelsOf(defaultProvider).filter((row) => row.enabled) : [];
+  const selectedDirty = selected ? Boolean(draft.edits[selected.id] && Object.keys(draft.edits[selected.id]).length > 0) : false;
 
   return (
     <>
-      <div className="notice">
-        <span>i</span>
-        <div>
-          <strong>统一管理模型供应商、模型目录与默认推理强度。</strong>
-          可以从本机 Codex 配置导入，也可以手动添加；项目绑定后自动生效，未绑定项目使用这里的默认模型。
-        </div>
-      </div>
+      <input
+        ref={importInput}
+        type="file"
+        accept=".toml,text/plain,application/toml"
+        style={{ display: "none" }}
+        onChange={onImportFileChange}
+      />
+      <input
+        ref={importDirectoryInput}
+        type="file"
+        multiple
+        style={{ display: "none" }}
+        onChange={onImportDirectoryChange}
+      />
 
-      <div className="card">
-        <div className="card-head">
-          <div>
-            <div className="card-title">模型 Profile</div>
-            <div className="card-sub">{profiles.length} 个可复用配置 · 名称、模型、供应商与推理强度成组保存</div>
-          </div>
-          <button className="btn" onClick={() => setImportOpen(true)}>从 Codex 导入</button>
+      <div className="model-toolbar">
+        <div className="model-toolbar-status">
+          {loading ? "正在加载模型配置…" : error ? error : `已同步 ${providers.length} 个供应商`}
         </div>
-        <div className="card-body" style={{ padding: 0 }}>
-          {profiles.length === 0 ? (
-            <div className="empty" style={{ padding: "18px 16px" }}>
-              <div className="tiny">还没有 Profile。导入本机 Codex 配置后，可在这里启停或设为默认模型。</div>
-            </div>
-          ) : (
-            <table className="table">
-              <thead><tr><th>Profile</th><th>模型</th><th>供应商</th><th>推理强度</th><th>状态</th><th></th></tr></thead>
-              <tbody>
-                {profiles.map((profile) => {
-                  const isDefault = defaults.provider_id === profile.provider_id && defaults.model === profile.model && defaults.reasoning_effort === profile.reasoning_effort;
-                  return (
-                    <tr key={profile.id}>
-                      <td><div className="strong">{profile.name}</div><div className="tiny">{profile.source === "codex" ? "Codex 导入" : profile.source || "手动"}</div></td>
-                      <td className="mono">{profile.model}</td>
-                      <td>{profile.provider_name || profile.provider_id}</td>
-                      <td className="tiny">{profile.reasoning_effort || "默认"}</td>
-                      <td>
-                        <span className={"chip " + (profile.enabled ? "ok" : "warn")}><span className="dot" />{profile.enabled ? "启用" : "停用"}</span>
-                        {isDefault && <span className="chip ok" style={{ marginLeft: 6 }}>默认</span>}
-                      </td>
-                      <td><div className="row-actions">
-                        {!isDefault && profile.enabled && <button className="btn small" onClick={() => void makeProfileDefault(profile)}>设为默认</button>}
-                        <button className="btn small" onClick={() => void toggleProfile(profile)}>{profile.enabled ? "停用" : "启用"}</button>
-                        <button className="btn small danger" onClick={() => void removeProfile(profile)}>删除</button>
-                      </div></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
+        <div className="model-toolbar-actions">
+          <button className="btn" onClick={() => void load()} disabled={saving || loading}>刷新</button>
+          <button className="btn primary" onClick={pickImportFile} disabled={saving}>导入本机模型配置</button>
+          <button className="btn" title="选择其他 TOML 模型配置" onClick={pickImportDirectory} disabled={saving}>目录</button>
+          <button className="btn" onClick={exportJSON} disabled={providers.length === 0}>导出</button>
+          <button className="btn" onClick={discard} disabled={saving || dirtyCount === 0}>放弃</button>
+          <button className="btn primary" onClick={() => void saveAll()} disabled={saving || dirtyCount === 0}>
+            {saving ? "保存中…" : dirtyCount > 0 ? `保存 ${dirtyCount} 项` : "已保存"}
+          </button>
         </div>
       </div>
 
@@ -312,54 +456,61 @@ export function ModelsPage({ notify }: { notify: Notify }) {
         <div className="card-head">
           <div>
             <div className="card-title">模型供应商</div>
-            <div className="card-sub">{items.length} 个供应商 · 密钥密文保存 · 支持目录刷新与真实测试</div>
+            <div className="card-sub">{providers.length} 个供应商 · 密钥密文保存 · 支持目录刷新与真实测试</div>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn" onClick={() => void load()}>刷新</button>
-            <button className="btn" onClick={() => setImportOpen(true)}>导入 Codex 配置</button>
-            <button className="btn primary" onClick={() => { setCreateForm(EMPTY_PROVIDER); setCreateModels(""); setCreateOpen(true); }}>＋ 手动添加</button>
-          </div>
+          <button className="btn primary" onClick={openCreate}>＋ 新建供应商</button>
         </div>
         <div className="card-body">
-          <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#f8fafc", border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px" }}>
-            <span style={{ fontSize: 12, fontWeight: 600 }}>默认模型</span>
-            <select
-              value={defaults.provider_id}
-              onChange={(e) => {
-                const p = items.find((x) => x.id === e.target.value);
-                const model = p?.models.find((m) => m.enabled)?.model_id ?? "";
-                void saveDefault({ ...defaults, provider_id: e.target.value, model });
-              }}
-              style={{ minWidth: 160 }}
-            >
-              <option value="">未设置</option>
-              {items.filter((p) => enabledModels(p).length > 0).map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-            <select
-              value={defaults.model}
-              disabled={!defaultProvider}
-              onChange={(e) => void saveDefault({ ...defaults, model: e.target.value })}
-              style={{ minWidth: 200 }}
-            >
-              <option value="">未设置</option>
-              {enabledModels(defaultProvider).map((m) => (
-                <option key={m.model_id} value={m.model_id}>{m.model_id}</option>
-              ))}
-            </select>
-            <select
-              value={defaults.reasoning_effort}
-              onChange={(e) => void saveDefault({ ...defaults, reasoning_effort: e.target.value })}
-              style={{ minWidth: 130 }}
-            >
-              <option value="">默认强度</option>
-              <option value="minimal">minimal</option>
-              <option value="low">low</option>
-              <option value="medium">medium</option>
-              <option value="high">high</option>
-              <option value="xhigh">xhigh</option>
-            </select>
+          <div className="model-default-bar">
+            <span className="model-default-title">默认模型</span>
+            <label>
+              <span>供应商</span>
+              <select
+                aria-label="默认模型供应商"
+                value={effectiveDefault.provider_id}
+                onChange={(event) => setDefaultModel(event.target.value, "")}
+              >
+                <option value="">未设置</option>
+                {providers
+                  .filter((provider) => modelsOf(provider).some((row) => row.enabled))
+                  .map((provider) => (
+                    <option key={provider.id} value={provider.id}>{editOf(provider).name || provider.name}</option>
+                  ))}
+              </select>
+            </label>
+            <label>
+              <span>模型</span>
+              <select
+                aria-label="默认模型名称"
+                disabled={!defaultProvider}
+                value={effectiveDefault.model}
+                onChange={(event) => setDefaultModel(effectiveDefault.provider_id, event.target.value)}
+              >
+                <option value="">未设置</option>
+                {defaultProviderModels.map((row) => (
+                  <option key={row.id} value={row.id}>{row.id}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>推理强度</span>
+              <select
+                aria-label="默认推理强度"
+                value={effectiveDefault.reasoning_effort}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    def: { ...effectiveDefault, reasoning_effort: event.target.value },
+                  }))
+                }
+              >
+                <option value="">默认</option>
+                {EFFORT_OPTIONS.map((effort) => (
+                  <option key={effort} value={effort}>{effort}</option>
+                ))}
+              </select>
+            </label>
+            {dirtyCount > 0 && <span className="model-default-hint">有 {dirtyCount} 项未保存</span>}
           </div>
 
           {loading ? (
@@ -370,161 +521,253 @@ export function ModelsPage({ notify }: { notify: Notify }) {
               <div className="tiny">{error}</div>
               <button className="btn" style={{ marginTop: 12 }} onClick={() => void load()}>重试</button>
             </div>
-          ) : items.length === 0 ? (
+          ) : providers.length === 0 ? (
             <div className="empty">
               <h3>还没有模型供应商</h3>
-              <div className="tiny">可从 ~/.codex/config.toml 导入，也可以手动填写 Base URL、API Key 和模型。</div>
+              <div className="tiny">从本机 Codex 配置导入，或选择模板新建供应商。</div>
               <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 14 }}>
-                <button className="btn primary" onClick={() => setImportOpen(true)}>导入 Codex 配置</button>
-                <button className="btn" onClick={() => setCreateOpen(true)}>手动添加</button>
+                <button className="btn primary" onClick={pickImportFile}>导入本机模型配置</button>
+                <button className="btn" onClick={openCreate}>新建供应商</button>
               </div>
             </div>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "240px 1fr", gap: 16, marginTop: 14, minHeight: 420 }}>
-              <aside style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 10, background: "#fbfcfe" }}>
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="搜索供应商"
-                  style={{ width: "100%", padding: "7px 9px", borderRadius: 8, border: "1px solid var(--line)", marginBottom: 10, fontSize: 12 }}
-                />
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {filtered.map((p) => {
-                    const enabled = enabledModels(p).length;
+            <div className="model-provider-panel">
+              <aside className="model-provider-nav" aria-label="供应商列表">
+                <div className="model-provider-search">
+                  <input
+                    aria-label="搜索供应商"
+                    value={providerQuery}
+                    onChange={(event) => setProviderQuery(event.target.value)}
+                    placeholder="搜索供应商"
+                  />
+                </div>
+                <div className="model-provider-items">
+                  {filteredProviders.map((provider) => {
+                    const models = modelsOf(provider);
+                    const enabledCount = models.filter((row) => row.enabled).length;
+                    const enabled = enabledOf(provider);
+                    const tone = !enabled ? "warn" : enabledCount === 0 ? "muted" : "ok";
                     return (
                       <button
-                        key={p.id}
-                        onClick={() => setSelectedId(p.id)}
-                        style={{
-                          display: "flex", alignItems: "center", gap: 9, textAlign: "left",
-                          border: "1px solid " + (p.id === selectedId ? "#bfd6fb" : "transparent"),
-                          background: p.id === selectedId ? "#eef4ff" : "transparent",
-                          borderRadius: 9, padding: "8px 9px", cursor: "pointer",
-                        }}
+                        key={provider.id}
+                        type="button"
+                        className="model-provider-item"
+                        data-active={provider.id === selectedId}
+                        onClick={() => setSelectedId(provider.id)}
                       >
-                        <span style={{
-                          width: 26, height: 26, borderRadius: 7, display: "grid", placeItems: "center",
-                          background: "#e7efff", color: "#2563eb", fontWeight: 700, fontSize: 12,
-                        }}>{p.name.slice(0, 1).toUpperCase()}</span>
-                        <span style={{ flex: 1, minWidth: 0 }}>
-                          <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</span>
-                          <span style={{ display: "block", fontSize: 11, color: "var(--muted)" }}>{enabled}/{p.models.length} 个模型已启用</span>
+                        <span className="model-provider-badge">{(editOf(provider).name || provider.name).slice(0, 1).toUpperCase()}</span>
+                        <span className="model-provider-name">
+                          {editOf(provider).name || provider.name}
+                          <small>{enabledCount} / {models.length} 个模型已启用</small>
                         </span>
-                        <span style={{ width: 7, height: 7, borderRadius: 99, background: p.enabled && enabled > 0 ? "var(--ok)" : p.enabled ? "#cbd5e1" : "var(--warn)" }} />
+                        <span className="model-provider-dot" data-tone={tone} />
                       </button>
                     );
                   })}
-                  {filtered.length === 0 && <div className="tiny" style={{ padding: 8 }}>没有匹配的供应商</div>}
+                  {filteredProviders.length === 0 && <p className="model-provider-empty">没有匹配的供应商</p>}
                 </div>
               </aside>
 
-              <div>
-                {selected ? (
+              <div className="model-provider-detail">
+                {selected && selectedEdit ? (
                   <>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 15, fontWeight: 650 }}>{selected.name}</div>
-                        <div className="tiny">
-                          {selected.base_url || "未填 Base URL"} · {selected.wire_api} · {enabledModels(selected).length} 个模型已启用
-                        </div>
+                    <header className="model-provider-head">
+                      <span className="model-provider-badge" data-large="true">
+                        {(selectedEdit.name || selected.name).slice(0, 1).toUpperCase()}
+                      </span>
+                      <div className="model-provider-head-main">
+                        <h3>{selectedEdit.name || selected.name}</h3>
+                        <p>
+                          {shortHost(selectedEdit.base_url) || "未设置 Base URL"} · {selectedEdit.wire_api} ·{" "}
+                          {selectedModels.filter((row) => row.enabled).length} 个模型已启用
+                        </p>
                       </div>
-                      <button className="btn small" disabled={busy === "test"} onClick={() => void test()}>{busy === "test" ? "测试中…" : "测试模型"}</button>
-                      <button className="btn small" onClick={() => void toggleProvider()}>{selected.enabled ? "停用供应商" : "启用供应商"}</button>
-                      <button className="btn small danger" onClick={() => void removeProvider()}>删除</button>
-                    </div>
-
-                    {selected.last_tested_at && (
-                      <div className="tiny" style={{ marginBottom: 10 }}>
-                        <span className={"chip " + (selected.last_test_ok ? "ok" : "bad")} style={{ marginRight: 6 }}>
-                          <span className="dot" />{selected.last_test_ok ? "最近测试通过" : "最近测试失败"}
-                        </span>
-                        {selected.last_test_message}
-                      </div>
-                    )}
-
-                    <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 14, marginBottom: 12 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>连接</div>
-                      <div className="form-grid">
-                        <div className="field">
-                          <label>名称</label>
-                          <input value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} />
-                        </div>
-                        <div className="field">
-                          <label>API 格式</label>
-                          <select value={form.wire_api} onChange={(e) => setForm((p) => ({ ...p, wire_api: e.target.value }))}>
-                            {WIRE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                          </select>
-                        </div>
-                        <div className="field full">
-                          <label>Base URL</label>
-                          <input value={form.base_url} onChange={(e) => setForm((p) => ({ ...p, base_url: e.target.value }))} placeholder="https://gateway.example.com/v1" />
-                        </div>
-                        <div className="field full">
-                          <label>API Key</label>
-                          <input
-                            type="password"
-                            value={form.api_key}
-                            onChange={(e) => setForm((p) => ({ ...p, api_key: e.target.value }))}
-                            placeholder={selected.credential_id ? "已保存，留空表示不修改" : "粘贴 API Key"}
-                          />
-                        </div>
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
-                        <button className="btn primary" disabled={saving} onClick={() => void saveProvider()}>{saving ? "保存中…" : "保存连接"}</button>
-                      </div>
-                    </div>
-
-                    <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 14 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>模型列表</div>
-                        <button className="btn small" disabled={busy === "refresh"} onClick={() => void refreshCatalog()}>
-                          {busy === "refresh" ? "刷新中…" : "刷新目录"}
+                      <div className="model-provider-head-actions">
+                        <button className="btn small" onClick={() => void testProvider(selected)} disabled={busy === "test:" + selected.id}>
+                          {busy === "test:" + selected.id ? "测试中…" : "测试模型"}
                         </button>
+                        <button
+                          className="btn small"
+                          onClick={() =>
+                            setDraft((current) => ({
+                              ...current,
+                              providerEnabled: { ...current.providerEnabled, [selected.id]: !enabledOf(selected) },
+                            }))
+                          }
+                        >
+                          {enabledOf(selected) ? "停用供应商" : "启用供应商"}
+                        </button>
+                        <button className="btn small danger" onClick={() => void removeProvider(selected)}>删除</button>
                       </div>
-                      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-                        <input
-                          value={addModel}
-                          onChange={(e) => setAddModel(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") void addOneModel(); }}
-                          placeholder="输入模型 ID，例如 deepseek-v4-flash"
-                          style={{ flex: 1, padding: "7px 9px", borderRadius: 8, border: "1px solid var(--line)", fontSize: 12 }}
-                        />
-                        <button className="btn small" disabled={busy === "add"} onClick={() => void addOneModel()}>＋ 添加模型</button>
-                      </div>
-                      {selected.models.length === 0 ? (
-                        <div className="tiny" style={{ padding: "12px 4px" }}>还没有模型。点「刷新目录」从网关拉取，或手工添加模型 ID。</div>
-                      ) : (
-                        <table className="table">
-                          <thead>
-                            <tr>
-                              <th>模型 ID</th>
-                              <th>来源</th>
-                              <th>启用</th>
-                              <th></th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {selected.models.map((m) => (
-                              <tr key={m.model_id}>
-                                <td className="mono">{m.model_id}</td>
-                                <td><span className="chip">目录</span></td>
-                                <td>
-                                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                                    <input type="checkbox" checked={m.enabled} onChange={(e) => void toggleModel(m.model_id, e.target.checked)} />
-                                    <span className="tiny">{m.enabled ? "已启用" : "未启用"}</span>
-                                  </label>
-                                </td>
-                                <td>
-                                  <div className="row-actions">
-                                    <button className="btn small danger" onClick={() => void removeModel(m.model_id)}>删除</button>
-                                  </div>
-                                </td>
-                              </tr>
+                    </header>
+
+                    <section className="model-card">
+                      <header className="model-card-head">
+                        <div>
+                          <h4>连接</h4>
+                          <small>决定请求打到哪个端点、用哪把 Key</small>
+                        </div>
+                        <span className={"chip " + (enabledOf(selected) ? "ok" : "warn")}>
+                          {enabledOf(selected) ? "启用" : "停用"}
+                        </span>
+                      </header>
+                      <div className="model-form-grid">
+                        <label>
+                          <span>名称</span>
+                          <input
+                            aria-label="供应商名称"
+                            value={selectedEdit.name}
+                            onChange={(event) => updateEdit(selected, { name: event.target.value })}
+                          />
+                        </label>
+                        <label>
+                          <span>API 格式</span>
+                          <select
+                            aria-label="API 格式"
+                            value={selectedEdit.wire_api}
+                            onChange={(event) => updateEdit(selected, { wire_api: event.target.value })}
+                          >
+                            {WIRE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
                             ))}
-                          </tbody>
-                        </table>
+                          </select>
+                        </label>
+                        <label>
+                          <span>Base URL</span>
+                          <input
+                            aria-label="Base URL"
+                            value={selectedEdit.base_url}
+                            onChange={(event) => updateEdit(selected, { base_url: event.target.value })}
+                            placeholder="https://api.example.com/v1"
+                          />
+                        </label>
+                        <label>
+                          <span>API Key</span>
+                          <span className="model-secret">
+                            <input
+                              aria-label="API Key"
+                              type={revealed[selected.id] ? "text" : "password"}
+                              value={selectedEdit.api_key}
+                              onChange={(event) => updateEdit(selected, { api_key: event.target.value })}
+                              placeholder={selected.credential_id ? "已保存，留空表示不修改" : "sk-..."}
+                            />
+                            <button
+                              type="button"
+                              className="btn small"
+                              onClick={() =>
+                                setRevealed((current) => ({ ...current, [selected.id]: !current[selected.id] }))
+                              }
+                            >
+                              {revealed[selected.id] ? "隐藏" : "显示"}
+                            </button>
+                          </span>
+                        </label>
+                      </div>
+                      {selected.last_tested_at && (
+                        <div className="model-test-note">
+                          <span className={"chip " + (selected.last_test_ok ? "ok" : "bad")}>
+                            {selected.last_test_ok ? "最近测试通过" : "最近测试失败"}
+                          </span>
+                          <span>{selected.last_test_message}</span>
+                        </div>
                       )}
-                    </div>
+                      {selectedDirty && <div className="model-dirty-note">连接有未保存的修改，保存后测试使用的是新配置。</div>}
+                    </section>
+
+                    <section className="model-card">
+                      <header className="model-card-head">
+                        <div>
+                          <h4>模型列表</h4>
+                          <small>勾选后才能被项目和会话选用</small>
+                        </div>
+                        <button
+                          className="btn small"
+                          disabled={busy === "refresh:" + selected.id}
+                          onClick={() => void refreshCatalog(selected)}
+                        >
+                          {busy === "refresh:" + selected.id ? "刷新中…" : "刷新目录"}
+                        </button>
+                      </header>
+                      <div className="model-tools">
+                        <input
+                          aria-label="添加模型"
+                          value={newModel}
+                          onChange={(event) => setNewModel(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") addModel(selected, newModel);
+                          }}
+                          placeholder="输入模型 ID 后添加"
+                        />
+                        <button className="btn small" onClick={() => addModel(selected, newModel)} disabled={!newModel.trim()}>
+                          ＋ 添加模型
+                        </button>
+                        <input
+                          aria-label="搜索模型"
+                          className="model-search"
+                          value={modelQuery}
+                          onChange={(event) => setModelQuery(event.target.value)}
+                          placeholder="搜索模型 ID"
+                        />
+                      </div>
+                      {visibleModels.length === 0 ? (
+                        <p className="model-provider-empty">当前没有模型。刷新目录或手工添加模型 ID。</p>
+                      ) : (
+                        <div className="model-table" role="table">
+                          <div className="model-table-head" role="row">
+                            <span role="columnheader">模型 ID</span>
+                            <span role="columnheader">来源</span>
+                            <span role="columnheader">启用</span>
+                            <span role="columnheader">默认</span>
+                            <span role="columnheader">操作</span>
+                          </div>
+                          {visibleModels.map((row) => {
+                            const isDefault =
+                              effectiveDefault.provider_id === selected.id && effectiveDefault.model === row.id;
+                            return (
+                              <div className="model-table-row" role="row" key={row.id} data-enabled={row.enabled}>
+                                <span className="model-table-name" role="cell">
+                                  <code>{row.id}</code>
+                                  {row.added && <small>待保存</small>}
+                                </span>
+                                <span role="cell">
+                                  <span className="chip">{row.added ? "手工" : "目录"}</span>
+                                </span>
+                                <span role="cell">
+                                  <label className="model-switch">
+                                    <input
+                                      type="checkbox"
+                                      checked={row.enabled}
+                                      onChange={(event) => setModelEnabled(selected, row.id, event.target.checked)}
+                                    />
+                                    <span>{row.enabled ? "已启用" : "未启用"}</span>
+                                  </label>
+                                </span>
+                                <span role="cell">
+                                  {isDefault ? (
+                                    <span className="chip ok">默认</span>
+                                  ) : (
+                                    <button
+                                      className="btn small"
+                                      disabled={!row.enabled}
+                                      onClick={() => setDefaultModel(selected.id, row.id)}
+                                    >
+                                      设为默认
+                                    </button>
+                                  )}
+                                </span>
+                                <span role="cell">
+                                  {!row.added && (
+                                    <button className="btn small danger" onClick={() => void removeModel(selected, row.id)}>
+                                      删除
+                                    </button>
+                                  )}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </section>
                   </>
                 ) : (
                   <div className="empty">选择左侧的供应商查看连接与模型</div>
@@ -537,51 +780,81 @@ export function ModelsPage({ notify }: { notify: Notify }) {
 
       <ModelConfigImportModal
         open={importOpen}
+        initialFile={importFile}
+        directoryFiles={directoryFiles}
         notify={notify}
-        onClose={() => setImportOpen(false)}
+        onClose={() => {
+          setImportOpen(false);
+          setImportFile(null);
+          setDirectoryFiles([]);
+        }}
         onImported={() => void load()}
+        onPickFile={() => importInput.current?.click()}
+        onPickDirectory={() => importDirectoryInput.current?.click()}
+        onSelectDirectoryFile={(path) => {
+          const picked = directoryFiles.find((item) => item.path === path);
+          if (picked) setImportFile(picked);
+        }}
       />
 
       <div className={"modal-backdrop" + (createOpen ? " open" : "")}>
-        <div className="modal">
+        <div className="modal model-create-modal">
           <div className="modal-head">
             <div>
-              <div className="modal-title">手动添加供应商</div>
-              <div className="modal-sub">填写连接信息与 API Key；模型可以在创建后刷新目录或手工添加。</div>
+              <div className="modal-title">新建供应商</div>
+              <div className="modal-sub">选择模板后连接地址和推荐模型会自动填入，也可以直接创建自定义供应商。</div>
             </div>
             <button className="icon-btn" onClick={() => setCreateOpen(false)}>✕</button>
           </div>
           <div className="modal-body">
-            <div className="form-grid">
-              <div className="field">
-                <label>名称</label>
-                <input value={createForm.name} onChange={(e) => setCreateForm((p) => ({ ...p, name: e.target.value }))} placeholder="litellm" />
-              </div>
-              <div className="field">
-                <label>API 格式</label>
-                <select value={createForm.wire_api} onChange={(e) => setCreateForm((p) => ({ ...p, wire_api: e.target.value }))}>
-                  {WIRE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            <div className="model-template-list">
+              {TEMPLATES.map((template) => (
+                <button
+                  key={template.id}
+                  type="button"
+                  className="model-template"
+                  data-active={template.id === createTemplate.id}
+                  onClick={() => chooseTemplate(template)}
+                >
+                  <strong>{template.name}</strong>
+                  <small>{template.note}</small>
+                </button>
+              ))}
+            </div>
+            <div className="model-form-grid" style={{ marginTop: 14 }}>
+              <label>
+                <span>名称</span>
+                <input value={createForm.name} onChange={(event) => setCreateForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="DeepSeek" />
+              </label>
+              <label>
+                <span>API 格式</span>
+                <select value={createForm.wire_api} onChange={(event) => setCreateForm((prev) => ({ ...prev, wire_api: event.target.value }))}>
+                  {WIRE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
                 </select>
-              </div>
-              <div className="field full">
-                <label>Base URL</label>
-                <input value={createForm.base_url} onChange={(e) => setCreateForm((p) => ({ ...p, base_url: e.target.value }))} placeholder="https://gateway.example.com/v1" />
-              </div>
-              <div className="field full">
-                <label>API Key</label>
-                <input type="password" value={createForm.api_key} onChange={(e) => setCreateForm((p) => ({ ...p, api_key: e.target.value }))} placeholder="sk-..." />
-              </div>
-              <div className="field full">
-                <label>初始模型（可选，逗号分隔）</label>
-                <input value={createModels} onChange={(e) => setCreateModels(e.target.value)} placeholder="deepseek-v4-flash, deepseek-v4-pro" />
-              </div>
+              </label>
+              <label>
+                <span>Base URL</span>
+                <input value={createForm.base_url} onChange={(event) => setCreateForm((prev) => ({ ...prev, base_url: event.target.value }))} placeholder="https://api.example.com/v1" />
+              </label>
+              <label>
+                <span>API Key</span>
+                <input type="password" value={createForm.api_key} onChange={(event) => setCreateForm((prev) => ({ ...prev, api_key: event.target.value }))} placeholder="sk-..." />
+              </label>
+              <label className="full">
+                <span>初始模型（逗号分隔）</span>
+                <input value={createModels} onChange={(event) => setCreateModels(event.target.value)} placeholder="deepseek-chat, deepseek-reasoner" />
+              </label>
             </div>
           </div>
           <div className="modal-foot">
-            <div className="tiny">凭据保存后只显示掩码，测试与刷新都在服务端发起。</div>
+            <div className="tiny">凭据保存后只显示掩码，测试与目录刷新都由服务端发起。</div>
             <div>
               <button className="btn" onClick={() => setCreateOpen(false)}>取消</button>{" "}
-              <button className="btn primary" disabled={saving} onClick={() => void createProvider()}>{saving ? "创建中…" : "创建"}</button>
+              <button className="btn primary" disabled={saving} onClick={() => void createProvider()}>
+                {saving ? "创建中…" : "创建供应商"}
+              </button>
             </div>
           </div>
         </div>
