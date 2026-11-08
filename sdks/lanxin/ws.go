@@ -23,9 +23,9 @@ type eventEnvelope struct {
 
 // 事件类型。
 const (
-	EventP2PMessage     = "bot_message"           // 私聊（仅创建者）
-	EventGroupMessage   = "bot_group_message"     // 群聊（全部消息，自行判断 isAtMe）
-	EventApproveCardCB  = "approve_card_callback" // 审批卡片按钮回调
+	EventP2PMessage    = "bot_message"           // 私聊（仅创建者）
+	EventGroupMessage  = "bot_group_message"     // 群聊（全部消息，自行判断 isAtMe）
+	EventApproveCardCB = "approve_card_callback" // 审批卡片按钮回调
 )
 
 // ReminderInfo 入站 reminder；box 等消息可能为 null。
@@ -123,6 +123,9 @@ type ApproveCardCallback struct {
 // EventHandler 事件回调。同步调用保证同一连接内事件顺序；阻塞会拖慢后续事件。
 type EventHandler func(ctx context.Context, ev Event) error
 
+// StatusHandler 上报 WebSocket 生命周期；message 只包含脱敏后的错误文本。
+type StatusHandler func(ctx context.Context, status, message string)
+
 // DefaultBackoff 官方建议的指数退避序列。
 var DefaultBackoff = []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second, 30 * time.Second, 60 * time.Second}
 
@@ -136,33 +139,55 @@ const (
 type WSClient struct {
 	client  *Client
 	handler EventHandler
+	status  StatusHandler
 	backoff []time.Duration
 }
 
-func NewWSClient(c *Client, handler EventHandler) *WSClient {
-	return &WSClient{client: c, handler: handler, backoff: DefaultBackoff}
+func NewWSClient(c *Client, handler EventHandler, opts ...WSClientOption) *WSClient {
+	w := &WSClient{client: c, handler: handler, backoff: DefaultBackoff}
+	for _, opt := range opts {
+		opt(w)
+	}
+	return w
+}
+
+type WSClientOption func(*WSClient)
+
+func WithStatusHandler(h StatusHandler) WSClientOption {
+	return func(w *WSClient) { w.status = h }
+}
+
+func (w *WSClient) report(ctx context.Context, status, message string) {
+	if w.status != nil {
+		w.status(ctx, status, message)
+	}
 }
 
 // Run 阻塞运行：直到 ctx 取消。每次重连都会重新获取 WS 地址（地址可能变化）。
 func (w *WSClient) Run(ctx context.Context) error {
 	i := 0
 	for {
+		w.report(ctx, "connecting", "")
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		ep, err := w.client.WSEndpoint(ctx)
 		if err != nil {
 			log.Printf("[lanxin-ws] get endpoint: %v", err)
+			w.report(ctx, "error", err.Error())
 		} else {
 			conn, _, err := websocket.DefaultDialer.DialContext(ctx, ep, nil)
 			if err == nil {
 				i = 0
 				log.Printf("[lanxin-ws] connected: %s", ep)
+				w.report(ctx, "connected", "")
 				w.serve(ctx, conn)
 				conn.Close()
 				log.Printf("[lanxin-ws] connection closed")
+				w.report(ctx, "disconnected", "")
 			} else {
 				log.Printf("[lanxin-ws] dial: %v", err)
+				w.report(ctx, "error", err.Error())
 			}
 		}
 		if err := ctx.Err(); err != nil {

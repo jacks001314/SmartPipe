@@ -20,6 +20,8 @@ const (
 type LanxinMessage struct {
 	ID                int64     `json:"id"`
 	PlatformMessageID string    `json:"platform_message_id"`
+	BotID             string    `json:"bot_id"`
+	BotName           string    `json:"bot_name"`
 	ChatType          string    `json:"chat_type"`
 	ChatID            string    `json:"chat_id"`
 	UserID            string    `json:"user_id"`
@@ -37,7 +39,7 @@ type LanxinMessage struct {
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
-const lanxinMessageColumns = `id, platform_message_id, chat_type, chat_id, user_id, sender_name,
+const lanxinMessageColumns = `id, platform_message_id, bot_id, bot_name, chat_type, chat_id, user_id, sender_name,
     group_name, msg_type, text, is_at_me, project_id, status, reason, issue_number, issue_url,
     created_at, updated_at`
 
@@ -46,7 +48,7 @@ func scanLanxinMessage(row interface{ Scan(...any) error }) (*LanxinMessage, err
 		m       LanxinMessage
 		project sql.NullString
 	)
-	err := row.Scan(&m.ID, &m.PlatformMessageID, &m.ChatType, &m.ChatID, &m.UserID, &m.SenderName,
+	err := row.Scan(&m.ID, &m.PlatformMessageID, &m.BotID, &m.BotName, &m.ChatType, &m.ChatID, &m.UserID, &m.SenderName,
 		&m.GroupName, &m.MsgType, &m.Text, &m.IsAtMe, &project, &m.Status, &m.Reason,
 		&m.IssueNumber, &m.IssueURL, &m.CreatedAt, &m.UpdatedAt)
 	if err != nil {
@@ -70,9 +72,11 @@ func (s *Store) RecordLanxinInbound(ctx context.Context, m LanxinMessage) (*Lanx
 	}
 	row := s.db.QueryRowContext(ctx, `
 INSERT INTO lanxin_messages
-    (platform_message_id, chat_type, chat_id, user_id, sender_name, group_name, msg_type, text, is_at_me, project_id, status, reason)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+    (platform_message_id, bot_id, bot_name, chat_type, chat_id, user_id, sender_name, group_name, msg_type, text, is_at_me, project_id, status, reason)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 ON CONFLICT (platform_message_id) DO UPDATE SET
+    bot_id      = COALESCE(NULLIF(EXCLUDED.bot_id, ''), lanxin_messages.bot_id),
+    bot_name    = COALESCE(NULLIF(EXCLUDED.bot_name, ''), lanxin_messages.bot_name),
     chat_type   = EXCLUDED.chat_type,
     chat_id     = EXCLUDED.chat_id,
     user_id     = EXCLUDED.user_id,
@@ -84,8 +88,8 @@ ON CONFLICT (platform_message_id) DO UPDATE SET
     project_id  = COALESCE(EXCLUDED.project_id, lanxin_messages.project_id),
     updated_at  = now()
 RETURNING `+lanxinMessageColumns,
-		m.PlatformMessageID, m.ChatType, m.ChatID, m.UserID, m.SenderName, m.GroupName, m.MsgType,
-		m.Text, m.IsAtMe, m.ProjectID, m.Status, m.Reason)
+		m.PlatformMessageID, m.BotID, m.BotName, m.ChatType, m.ChatID, m.UserID, m.SenderName,
+		m.GroupName, m.MsgType, m.Text, m.IsAtMe, m.ProjectID, m.Status, m.Reason)
 	out, err := scanLanxinMessage(row)
 	if err != nil {
 		return nil, fmt.Errorf("store: record lanxin message: %w", err)
@@ -126,6 +130,27 @@ ON CONFLICT (platform_message_id) DO NOTHING`,
 }
 
 // ListLanxinMessages 返回最近的收件箱消息。
+func (s *Store) ListLanxinMessagesByBot(ctx context.Context, botID string, limit int) ([]LanxinMessage, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+lanxinMessageColumns+`
+FROM lanxin_messages WHERE bot_id=$1 ORDER BY created_at DESC, id DESC LIMIT $2`, botID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: list lanxin bot messages: %w", err)
+	}
+	defer rows.Close()
+	out := make([]LanxinMessage, 0, limit)
+	for rows.Next() {
+		item, err := scanLanxinMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *item)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) ListLanxinMessages(ctx context.Context, limit int) ([]LanxinMessage, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50

@@ -35,13 +35,13 @@ import (
 
 // resolveProjectByChat 返回可用的项目 ID：优先用调用方给的 project_id，
 // 找不到时按蓝信群/会话反查（管理员在配置台维护的 bluex_group_ids）。
-func resolveProjectByChat(ctx context.Context, st *store.Store, projectID, chatID string) string {
+func resolveProjectByChat(ctx context.Context, st *store.Store, projectID, botID, chatID string) string {
 	if id := strings.TrimSpace(projectID); id != "" {
 		if _, err := st.GetProject(ctx, id); err == nil {
 			return id
 		}
 	}
-	if p, err := st.FindProjectByGroup(ctx, chatID); err == nil {
+	if p, err := st.FindProjectByGroupBot(ctx, botID, chatID); err == nil {
 		return p.ID
 	}
 	return strings.TrimSpace(projectID)
@@ -125,7 +125,7 @@ func main() {
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
-		if p := resolveProjectByChat(r.Context(), st, msg.ProjectID, msg.ChatID); p != "" {
+		if p := resolveProjectByChat(r.Context(), st, msg.ProjectID, msg.BotID, msg.ChatID); p != "" {
 			msg.ProjectID = p
 		}
 
@@ -135,23 +135,23 @@ func main() {
 			projectPtr = &msg.ProjectID
 		}
 		if _, recErr := st.RecordLanxinInbound(r.Context(), store.LanxinMessage{
-			PlatformMessageID: msg.MessageID,
-			ChatType:          msg.ChatType,
-			ChatID:            msg.ChatID,
-			UserID:            msg.UserID,
-			SenderName:        msg.SenderName,
-			GroupName:         msg.GroupName,
-			MsgType:           "text",
-			Text:              msg.Body,
-			IsAtMe:            true,
-			ProjectID:         projectPtr,
-			Status:            store.LanxinStatusReceived,
+			PlatformMessageID: msg.MessageID, BotID: msg.BotID, BotName: msg.BotName,
+			ChatType:   msg.ChatType,
+			ChatID:     msg.ChatID,
+			UserID:     msg.UserID,
+			SenderName: msg.SenderName,
+			GroupName:  msg.GroupName,
+			MsgType:    "text",
+			Text:       msg.Body,
+			IsAtMe:     true,
+			ProjectID:  projectPtr,
+			Status:     store.LanxinStatusReceived,
 		}); recErr != nil {
 			log.Printf("[bridge] record lanxin inbound: %v", recErr)
 		}
 		if msg.ProjectID == "" {
 			_ = st.MarkLanxinMessage(r.Context(), msg.MessageID, store.LanxinStatusUnbound, "群/会话未绑定项目", 0, "")
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "没有匹配到项目：请先在「蓝信配置」把群绑定到项目"})
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "没有匹配到项目：请在项目创建/编辑页选择蓝信机器人及群"})
 			return
 		}
 
@@ -180,6 +180,8 @@ func main() {
 		}
 		var in struct {
 			MessageID  string `json:"message_id"`
+			BotID      string `json:"bot_id"`
+			BotName    string `json:"bot_name"`
 			ChatType   string `json:"chat_type"`
 			ChatID     string `json:"chat_id"`
 			UserID     string `json:"user_id"`
@@ -198,7 +200,7 @@ func main() {
 			http.Error(w, "message_id is required", http.StatusBadRequest)
 			return
 		}
-		projectID := resolveProjectByChat(r.Context(), st, "", in.ChatID)
+		projectID := resolveProjectByChat(r.Context(), st, "", in.BotID, in.ChatID)
 		var projectPtr *string
 		if projectID != "" {
 			projectPtr = &projectID
@@ -208,18 +210,18 @@ func main() {
 			status = store.LanxinStatusFiltered
 		}
 		rec, err := st.RecordLanxinInbound(r.Context(), store.LanxinMessage{
-			PlatformMessageID: in.MessageID,
-			ChatType:          in.ChatType,
-			ChatID:            in.ChatID,
-			UserID:            in.UserID,
-			SenderName:        in.SenderName,
-			GroupName:         in.GroupName,
-			MsgType:           in.MsgType,
-			Text:              in.Text,
-			IsAtMe:            in.IsAtMe,
-			ProjectID:         projectPtr,
-			Status:            status,
-			Reason:            strings.TrimSpace(in.Reason),
+			PlatformMessageID: in.MessageID, BotID: in.BotID, BotName: in.BotName,
+			ChatType:   in.ChatType,
+			ChatID:     in.ChatID,
+			UserID:     in.UserID,
+			SenderName: in.SenderName,
+			GroupName:  in.GroupName,
+			MsgType:    in.MsgType,
+			Text:       in.Text,
+			IsAtMe:     in.IsAtMe,
+			ProjectID:  projectPtr,
+			Status:     status,
+			Reason:     strings.TrimSpace(in.Reason),
 		})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
@@ -272,7 +274,7 @@ func main() {
 			projectID = defaultCrashProject
 		}
 		// 配置漂移或机器人未配项目时，按蓝信群反查项目，避免整条上报链路 404。
-		if p := resolveProjectByChat(r.Context(), st, projectID, in.ChatID); p != "" {
+		if p := resolveProjectByChat(r.Context(), st, projectID, "", in.ChatID); p != "" {
 			projectID = p
 		}
 		if projectID == "" {

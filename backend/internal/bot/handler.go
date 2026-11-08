@@ -49,7 +49,8 @@ func (h *Handler) reportInbox(ctx context.Context, m *lanxin.InboundMessage, rea
 		chatID = m.From
 	}
 	err := h.inbox.Report(ctx, InboxReport{
-		MessageID: m.MsgID, ChatType: m.ChatType, ChatID: chatID, UserID: m.From,
+		MessageID: m.MsgID, BotID: h.cfg.BotID, BotName: h.cfg.BotName,
+		ChatType: m.ChatType, ChatID: chatID, UserID: m.From,
 		SenderName: m.SenderName, GroupName: m.GroupName, MsgType: m.MsgType,
 		Text: m.TextContent(), IsAtMe: m.Reminder != nil && m.Reminder.IsAtMe, Reason: reason,
 	})
@@ -189,6 +190,8 @@ func (h *Handler) handleMessage(ctx context.Context, m *lanxin.InboundMessage) e
 func (h *Handler) dispatch(ctx context.Context, m *lanxin.InboundMessage, text string, isGroup bool) error {
 	in := Inbound{
 		Platform:          "lanxin",
+		BotID:             h.cfg.BotID,
+		BotName:           h.cfg.BotName,
 		PlatformMessageID: m.MsgID,
 		ChatType:          m.ChatType,
 		SenderID:          m.From,

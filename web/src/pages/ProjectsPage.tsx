@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api";
-import type { ModelProvider, Project } from "../types";
+import type { LanxinBot, LanxinGroup, ModelProvider, Project } from "../types";
 import type { Notify } from "../App";
 
 type FormState = {
@@ -10,6 +10,7 @@ type FormState = {
   github_default_branch: string;
   github_issue_repo: string;
   bluex_group_ids: string;
+  lanxin_bot_id: string;
   verify_profile_path: string;
   codex_model_provider: string;
   codex_model: string;
@@ -24,6 +25,7 @@ const EMPTY: FormState = {
   github_default_branch: "main",
   github_issue_repo: "",
   bluex_group_ids: "",
+  lanxin_bot_id: "",
   verify_profile_path: "smartpipe.yaml",
   codex_model_provider: "",
   codex_model: "",
@@ -41,6 +43,9 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
   const [form, setForm] = useState<FormState>(EMPTY);
   const [saving, setSaving] = useState(false);
   const [providers, setProviders] = useState<ModelProvider[]>([]);
+  const [lanxinBots, setLanxinBots] = useState<LanxinBot[]>([]);
+  const [lanxinGroups, setLanxinGroups] = useState<LanxinGroup[]>([]);
+  const [groupsLoading, setGroupsLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -60,10 +65,28 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
     void api.listModelProviders().then(setProviders).catch(() => setProviders([]));
   }, []);
 
+  const loadLanxinOptions = useCallback(async (refresh = false) => {
+    setGroupsLoading(true);
+    try {
+      const bots = await api.listLanxinBots(refresh);
+      const groups = await api.listLanxinGroups(false);
+      setLanxinBots(bots.filter((b) => b.enabled));
+      setLanxinGroups(groups.filter((g) => g.active));
+    } catch {
+      setLanxinBots([]);
+      setLanxinGroups([]);
+    } finally {
+      setGroupsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void loadLanxinOptions(true); }, [loadLanxinOptions]);
+
   const startCreate = () => {
     setEditing(null);
     setForm(EMPTY);
     setOpen(true);
+    void loadLanxinOptions(false);
   };
 
   const startEdit = (p: Project) => {
@@ -75,6 +98,7 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
       github_default_branch: p.github_default_branch,
       github_issue_repo: p.github_issue_repo,
       bluex_group_ids: p.bluex_group_ids,
+      lanxin_bot_id: p.lanxin_bot_id || lanxinGroups.find((g) => g.group_id === p.bluex_group_ids.split(",")[0])?.bot_id || "",
       verify_profile_path: p.verify_profile_path,
       codex_model_provider: p.codex_model_provider,
       codex_model: p.codex_model,
@@ -82,6 +106,7 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
       codeowners_required: p.codeowners_required,
     });
     setOpen(true);
+    void loadLanxinOptions(false);
   };
 
   const submit = async () => {
@@ -130,6 +155,14 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
   };
 
   const boundProvider = providers.find((p) => p.id === form.codex_model_provider) ?? null;
+  const selectedGroup = form.bluex_group_ids.split(",")[0]?.trim() || "";
+  const availableGroups = lanxinGroups.filter((g) =>
+    g.bot_id === form.lanxin_bot_id && (!g.project_id || g.project_id === editing?.id)
+  );
+  const groupLabel = (id: string) => {
+    const g = lanxinGroups.find((item) => item.group_id === id);
+    return g ? (g.name || g.group_id) : id;
+  };
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -226,7 +259,7 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
                     <td className="mono">{p.github_default_branch}</td>
                     <td>{modelLabel(p.codex_model_provider, p.codex_model)}</td>
                     <td>
-                      {p.bluex_group_ids ? p.bluex_group_ids.split(",").map((g) => <span key={g} className="chip" style={{ marginRight: 4 }}>{g.trim()}</span>) : <span className="muted">未绑定</span>}
+                      {p.bluex_group_ids ? p.bluex_group_ids.split(",").map((g) => <span key={g} className="chip" style={{ marginRight: 4 }}>{groupLabel(g.trim())}</span>) : <span className="muted">未绑定</span>}
                     </td>
                     <td>
                       <span className={"chip " + (p.enabled ? "ok" : "bad")}>
@@ -275,8 +308,32 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
                 <input value={form.github_issue_repo} onChange={(e) => set("github_issue_repo", e.target.value)} placeholder="org/repo" />
               </div>
               <div className="field">
-                <label>蓝信群 ID（逗号分隔）</label>
-                <input value={form.bluex_group_ids} onChange={(e) => set("bluex_group_ids", e.target.value)} placeholder="grp-1,grp-2" />
+                <label>蓝信机器人</label>
+                <select
+                  value={form.lanxin_bot_id}
+                  onChange={(e) => setForm((prev) => ({ ...prev, lanxin_bot_id: e.target.value, bluex_group_ids: "" }))}
+                >
+                  <option value="">不绑定蓝信群</option>
+                  {lanxinBots.map((b) => <option key={b.id} value={b.id}>{b.name}（{b.group_count} 个群）</option>)}
+                </select>
+                {groupsLoading && <div className="tiny">正在同步机器人所在群…</div>}
+              </div>
+              <div className="field">
+                <label>蓝信群</label>
+                <select
+                  value={selectedGroup}
+                  disabled={!form.lanxin_bot_id}
+                  onChange={(e) => {
+                    const group = lanxinGroups.find((g) => g.group_id === e.target.value);
+                    setForm((prev) => ({ ...prev, bluex_group_ids: e.target.value, lanxin_bot_id: group?.bot_id || prev.lanxin_bot_id }));
+                  }}
+                >
+                  <option value="">{form.lanxin_bot_id ? "请选择群" : "请先选择机器人"}</option>
+                  {availableGroups.map((g) => (
+                    <option key={g.id} value={g.group_id}>{g.name || g.group_id}（{g.member_count} 人）</option>
+                  ))}
+                </select>
+                <div className="tiny">群列表由机器人自动同步；已被其他项目绑定的群不会出现。</div>
               </div>
               <div className="field">
                 <label>验证契约路径</label>

@@ -17,6 +17,7 @@ type Project struct {
 	VerifyProfilePath    string    `json:"verify_profile_path"`
 	ReleaseProfile       string    `json:"release_profile"`
 	BluexGroupIDs        string    `json:"bluex_group_ids"`
+	LanxinBotID          string    `json:"lanxin_bot_id"`
 	LeadAgentTemplate    string    `json:"lead_agent_template"`
 	CodexModelProvider   string    `json:"codex_model_provider"`
 	CodexModel           string    `json:"codex_model"`

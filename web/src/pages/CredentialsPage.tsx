@@ -117,6 +117,7 @@ export function CredentialsPage({ notify }: { notify: Notify }) {
     }
   };
 
+  const visibleItems = items.filter((item) => item.kind !== "lanxin");
   const githubAppCred = items.find((item) => item.kind === "github_app" && item.enabled);
   const githubAppSlug = typeof githubAppCred?.metadata.slug === "string" ? githubAppCred.metadata.slug : "";
   const githubAppOwner = typeof githubAppCred?.metadata.owner === "string" ? githubAppCred.metadata.owner : "";
@@ -282,7 +283,7 @@ export function CredentialsPage({ notify }: { notify: Notify }) {
         <div className="card-head">
           <div>
             <div className="card-title">凭据列表</div>
-            <div className="card-sub">{items.length} 条记录 · 掩码展示 · 支持轮换与停用</div>
+            <div className="card-sub">{visibleItems.length} 条记录 · 蓝信机器人凭据请在「蓝信机器人」页面管理</div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn" onClick={() => void load()}>刷新</button>
@@ -297,7 +298,7 @@ export function CredentialsPage({ notify }: { notify: Notify }) {
               <h3>无法读取凭据</h3>
               <div className="tiny">{error}</div>
             </div>
-          ) : items.length === 0 ? (
+          ) : visibleItems.length === 0 ? (
             <div className="empty">
               <h3>还没有凭据</h3>
               <div className="tiny">先登记 GitHub App、蓝信 Secret 等凭据，连接测试通过后再接入项目。</div>
@@ -317,7 +318,7 @@ export function CredentialsPage({ notify }: { notify: Notify }) {
                 </tr>
               </thead>
               <tbody>
-                {items.map((c) => (
+                {visibleItems.map((c) => (
                   <tr key={c.id}>
                     <td>
                       <div className="strong">{c.name}</div>

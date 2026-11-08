@@ -45,3 +45,21 @@ func TestFetchRemoteConfigNotConfigured(t *testing.T) {
 		t.Fatalf("expected nil,nil got %+v %v", rc, err)
 	}
 }
+func TestFetchRemoteConfigs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/internal/lanxin/bots" || r.Header.Get("X-Internal-Token") != "tok" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"bot_id":"lbot-1","bot_name":"研发","app_id":"app-1","app_secret":"sec-1","api_base":"https://example.test","require_at_me":true},{"bot_id":"lbot-2","bot_name":"产品","app_id":"app-2","app_secret":"sec-2","api_base":"https://example.test","require_at_me":false}]}`))
+	}))
+	defer srv.Close()
+	items, err := FetchRemoteConfigs(context.Background(), srv.URL, "tok")
+	if err != nil || len(items) != 2 {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+	if items[0].BotID != "lbot-1" || items[1].BotName != "产品" || items[1].RequireAtMe {
+		t.Fatalf("unexpected configs: %+v", items)
+	}
+}

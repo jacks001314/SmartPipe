@@ -17,7 +17,9 @@ import (
 
 // Inbound 是归一化后的入站消息（与平台解耦，Orchestrator 只认这个结构）。
 type Inbound struct {
-	Platform          string `json:"platform"`          // 固定 "lanxin"
+	Platform          string `json:"platform"` // 固定 "lanxin"
+	BotID             string `json:"botId,omitempty"`
+	BotName           string `json:"botName,omitempty"`
 	PlatformMessageID string `json:"platformMessageId"` // msgId，幂等键
 	ChatType          string `json:"chatType"`          // "p2p" | "group"
 	SenderID          string `json:"senderId"`          // 蓝信 staffId（用户标识）
@@ -136,6 +138,8 @@ func (d BridgeDispatcher) Dispatch(ctx context.Context, msg Inbound) error {
 	}
 	body := map[string]any{
 		"message_id":  msg.PlatformMessageID,
+		"bot_id":      msg.BotID,
+		"bot_name":    msg.BotName,
 		"chat_id":     chatID,
 		"chat_type":   msg.ChatType,
 		"user_id":     msg.SenderID,

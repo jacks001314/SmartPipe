@@ -16,6 +16,8 @@ import (
 // Message 是桥接服务接收的归一化入站消息。
 type Message struct {
 	Channel    string `json:"channel"`
+	BotID      string `json:"bot_id"`
+	BotName    string `json:"bot_name"`
 	ChatType   string `json:"chat_type"`
 	ChatID     string `json:"chat_id"`
 	UserID     string `json:"user_id"`
@@ -146,7 +148,7 @@ func (s *Service) receipt(ctx context.Context, link *store.BridgeLink, msg Messa
 	if target == "" {
 		target = msg.UserID
 	}
-	err := s.notifier.Reply(ctx, chatType, target, msg.MessageID, BuildReceipt(link.IssueNumber, link.IssueURL))
+	err := s.notifier.Reply(ctx, msg.BotID, chatType, target, msg.MessageID, BuildReceipt(link.IssueNumber, link.IssueURL))
 	status, detail := "sent", ""
 	if err != nil {
 		status, detail = "failed", err.Error()

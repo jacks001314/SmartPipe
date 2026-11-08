@@ -10,7 +10,7 @@ import (
 
 const projectColumns = `id, name, description, github_provider, github_repo_url,
     github_default_branch, github_issue_repo, labels_prefix, codeowners_required,
-    approver_teams, verify_profile_path, release_profile, bluex_group_ids,
+    approver_teams, verify_profile_path, release_profile, bluex_group_ids, lanxin_bot_id,
     lead_agent_template, tool_profile, codex_model_provider, codex_model,
     codex_reasoning_effort, enabled, created_at, updated_at`
 
@@ -18,7 +18,7 @@ func scanProject(row interface{ Scan(...any) error }) (*Project, error) {
 	var p Project
 	err := row.Scan(&p.ID, &p.Name, &p.Description, &p.GitHubProvider, &p.GitHubRepoURL,
 		&p.GitHubDefaultBranch, &p.GitHubIssueRepo, &p.LabelsPrefix, &p.CodeownersRequired,
-		&p.ApproverTeams, &p.VerifyProfilePath, &p.ReleaseProfile, &p.BluexGroupIDs,
+		&p.ApproverTeams, &p.VerifyProfilePath, &p.ReleaseProfile, &p.BluexGroupIDs, &p.LanxinBotID,
 		&p.LeadAgentTemplate, &p.ToolProfile, &p.CodexModelProvider, &p.CodexModel,
 		&p.CodexReasoningEffort, &p.Enabled, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -68,14 +68,14 @@ func (s *Store) CreateProject(ctx context.Context, p *Project) (*Project, error)
 	row := s.db.QueryRowContext(ctx, `
 INSERT INTO projects (id, name, description, github_provider, github_repo_url,
     github_default_branch, github_issue_repo, labels_prefix, codeowners_required,
-    approver_teams, verify_profile_path, release_profile, bluex_group_ids,
+    approver_teams, verify_profile_path, release_profile, bluex_group_ids, lanxin_bot_id,
     lead_agent_template, tool_profile, enabled, codex_model_provider,
     codex_model, codex_reasoning_effort)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
 RETURNING `+projectColumns,
 		p.ID, p.Name, p.Description, p.GitHubProvider, p.GitHubRepoURL,
 		p.GitHubDefaultBranch, p.GitHubIssueRepo, p.LabelsPrefix, p.CodeownersRequired,
-		p.ApproverTeams, p.VerifyProfilePath, p.ReleaseProfile, p.BluexGroupIDs,
+		p.ApproverTeams, p.VerifyProfilePath, p.ReleaseProfile, p.BluexGroupIDs, p.LanxinBotID,
 		p.LeadAgentTemplate, p.ToolProfile, p.Enabled, p.CodexModelProvider,
 		p.CodexModel, p.CodexReasoningEffort)
 	out, err := scanProject(row)
@@ -131,14 +131,14 @@ UPDATE projects SET
     name = $2, description = $3, github_provider = $4, github_repo_url = $5,
     github_default_branch = $6, github_issue_repo = $7, labels_prefix = $8,
     codeowners_required = $9, approver_teams = $10, verify_profile_path = $11,
-    release_profile = $12, bluex_group_ids = $13, lead_agent_template = $14,
-    tool_profile = $15, enabled = $16, codex_model_provider = $17,
-    codex_model = $18, codex_reasoning_effort = $19, updated_at = now()
+    release_profile = $12, bluex_group_ids = $13, lanxin_bot_id = $14,
+    lead_agent_template = $15, tool_profile = $16, enabled = $17, codex_model_provider = $18,
+    codex_model = $19, codex_reasoning_effort = $20, updated_at = now()
 WHERE id = $1
 RETURNING `+projectColumns,
 		p.ID, p.Name, p.Description, p.GitHubProvider, p.GitHubRepoURL,
 		p.GitHubDefaultBranch, p.GitHubIssueRepo, p.LabelsPrefix, p.CodeownersRequired,
-		p.ApproverTeams, p.VerifyProfilePath, p.ReleaseProfile, p.BluexGroupIDs,
+		p.ApproverTeams, p.VerifyProfilePath, p.ReleaseProfile, p.BluexGroupIDs, p.LanxinBotID,
 		p.LeadAgentTemplate, p.ToolProfile, p.Enabled, p.CodexModelProvider,
 		p.CodexModel, p.CodexReasoningEffort)
 	out, err := scanProject(row)
@@ -173,6 +173,11 @@ func isUniqueViolation(err error) bool {
 // FindProjectByGroup 按蓝信群/会话 ID 反查项目：bluex_group_ids 是逗号分隔的列表。
 // 只在配置里精确匹配；找不到时返回 ErrNotFound，调用方决定是否回落到默认项目。
 func (s *Store) FindProjectByGroup(ctx context.Context, groupID string) (*Project, error) {
+	return s.FindProjectByGroupBot(ctx, "", groupID)
+}
+
+// FindProjectByGroupBot 优先按机器人+群精确匹配；botID 为空时兼容旧项目。
+func (s *Store) FindProjectByGroupBot(ctx context.Context, botID, groupID string) (*Project, error) {
 	target := strings.TrimSpace(groupID)
 	if target == "" {
 		return nil, ErrNotFound
@@ -181,12 +186,23 @@ func (s *Store) FindProjectByGroup(ctx context.Context, groupID string) (*Projec
 	if err != nil {
 		return nil, err
 	}
+	botID = strings.TrimSpace(botID)
+	var legacy *Project
 	for i := range projects {
 		for _, raw := range strings.Split(projects[i].BluexGroupIDs, ",") {
-			if strings.EqualFold(strings.TrimSpace(raw), target) {
+			if !strings.EqualFold(strings.TrimSpace(raw), target) {
+				continue
+			}
+			if botID != "" && projects[i].LanxinBotID == botID {
 				return &projects[i], nil
 			}
+			if projects[i].LanxinBotID == "" && legacy == nil {
+				legacy = &projects[i]
+			}
 		}
+	}
+	if legacy != nil {
+		return legacy, nil
 	}
 	return nil, ErrNotFound
 }

@@ -234,19 +234,19 @@ type Staff struct {
 }
 
 type GroupInfo struct {
-	Name         string `json:"name"`
-	AvatarURL    string `json:"avatarUrl"`
-	Description  string `json:"description"`
-	Owner        Staff  `json:"owner"`
-	Creator      Staff  `json:"creator"`
-	MaxMembers   int    `json:"maxMembers"`
-	TotalMembers int    `json:"totalMembers"`
-	SendMsgStatus bool  `json:"sendMsgStatus"`
+	Name          string `json:"name"`
+	AvatarURL     string `json:"avatarUrl"`
+	Description   string `json:"description"`
+	Owner         Staff  `json:"owner"`
+	Creator       Staff  `json:"creator"`
+	MaxMembers    int    `json:"maxMembers"`
+	TotalMembers  int    `json:"totalMembers"`
+	SendMsgStatus bool   `json:"sendMsgStatus"`
 }
 
 func (c *Client) GroupInfo(ctx context.Context, groupID string) (*GroupInfo, error) {
 	var d GroupInfo
-	if err := c.call(ctx, http.MethodGet, "/v2/groups/"+groupID+"/info/fetch", nil, nil, &d); err != nil {
+	if err := c.call(ctx, http.MethodGet, "/v2/groups/"+url.PathEscape(groupID)+"/info/fetch", nil, nil, &d); err != nil {
 		return nil, err
 	}
 	return &d, nil

@@ -1,8 +1,11 @@
 package adminapi
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/kataras/iris/v12"
 
@@ -52,6 +55,10 @@ func (a *API) createProject(c iris.Context) {
 		a.badRequest(c, "项目名称不能为空")
 		return
 	}
+	if err := a.validateProjectLanxinSelection(c.Request().Context(), &in, ""); err != nil {
+		a.badRequest(c, err.Error())
+		return
+	}
 	p, err := a.store.CreateProject(c.Request().Context(), &in)
 	if err != nil {
 		a.fail(c, err)
@@ -75,6 +82,10 @@ func (a *API) updateProject(c iris.Context) {
 		return
 	}
 	applyProjectPatch(existing, patch)
+	if err := a.validateProjectLanxinSelection(c.Request().Context(), existing, existing.ID); err != nil {
+		a.badRequest(c, err.Error())
+		return
+	}
 	p, err := a.store.UpdateProject(c.Request().Context(), existing)
 	if err != nil {
 		a.fail(c, err)
@@ -102,6 +113,50 @@ func (a *API) setProjectEnabled(c iris.Context) {
 	_ = c.JSON(envelope{Data: p})
 }
 
+// validateProjectLanxinSelection 在服务端保证项目和机器人/群的绑定有效且不重复。
+func (a *API) validateProjectLanxinSelection(ctx context.Context, p *store.Project, currentProjectID string) error {
+	groups := splitGroups(p.BluexGroupIDs)
+	if len(groups) == 0 {
+		return nil
+	}
+	allGroups, err := a.store.ListLanxinGroups(ctx, p.LanxinBotID, true)
+	if err != nil {
+		return err
+	}
+	for _, groupID := range groups {
+		found := false
+		for _, g := range allGroups {
+			if strings.EqualFold(g.GroupID, groupID) && g.Active {
+				found = true
+				break
+			}
+		}
+		// 兼容迁移期尚未同步群快照的旧项目。
+		if !found && p.LanxinBotID != "" {
+			return fmt.Errorf("群 %s 不属于所选机器人，或尚未同步到群列表", groupID)
+		}
+	}
+	projects, err := a.store.ListProjects(ctx)
+	if err != nil {
+		return err
+	}
+	for _, other := range projects {
+		if other.ID == currentProjectID {
+			continue
+		}
+		sameBot := p.LanxinBotID == "" || other.LanxinBotID == "" || p.LanxinBotID == other.LanxinBotID
+		if !sameBot {
+			continue
+		}
+		for _, groupID := range groups {
+			if containsGroup(other.BluexGroupIDs, groupID) {
+				return fmt.Errorf("群 %s 已绑定项目「%s」", groupID, other.Name)
+			}
+		}
+	}
+	return nil
+}
+
 func applyProjectPatch(p *store.Project, patch map[string]any) {
 	str := func(key string, dst *string) {
 		if v, ok := patch[key].(string); ok {
@@ -124,6 +179,7 @@ func applyProjectPatch(p *store.Project, patch map[string]any) {
 	str("verify_profile_path", &p.VerifyProfilePath)
 	str("release_profile", &p.ReleaseProfile)
 	str("bluex_group_ids", &p.BluexGroupIDs)
+	str("lanxin_bot_id", &p.LanxinBotID)
 	str("lead_agent_template", &p.LeadAgentTemplate)
 	str("codex_model_provider", &p.CodexModelProvider)
 	str("codex_model", &p.CodexModel)

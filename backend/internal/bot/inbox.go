@@ -14,6 +14,8 @@ import (
 // InboxReport 是 bot 上报给 bridge 的入站消息；用于记录未进入建单流程的消息。
 type InboxReport struct {
 	MessageID  string
+	BotID      string
+	BotName    string
 	ChatType   string
 	ChatID     string
 	UserID     string
@@ -43,6 +45,8 @@ func (b BridgeInbox) Report(ctx context.Context, r InboxReport) error {
 	}
 	body, err := json.Marshal(map[string]any{
 		"message_id":  r.MessageID,
+		"bot_id":      r.BotID,
+		"bot_name":    r.BotName,
 		"chat_type":   r.ChatType,
 		"chat_id":     r.ChatID,
 		"user_id":     r.UserID,

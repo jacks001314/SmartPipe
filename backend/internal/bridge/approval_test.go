@@ -148,7 +148,7 @@ type recordingNotifier struct {
 	calls []groupCall
 }
 
-func (r *recordingNotifier) Reply(ctx context.Context, chatType, targetID, refMsgID, text string) error {
+func (r *recordingNotifier) Reply(ctx context.Context, botID, chatType, targetID, refMsgID, text string) error {
 	r.calls = append(r.calls, groupCall{ChatType: chatType, Target: targetID, Text: text})
 	return nil
 }

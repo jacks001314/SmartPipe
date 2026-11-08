@@ -313,13 +313,15 @@ func TestLeadDispatcherSendsMessageToAppServer(t *testing.T) {
 
 type fakeNotifier struct {
 	calls  int
+	botID  string
 	target string
 	text   string
 	err    error
 }
 
-func (f *fakeNotifier) Reply(ctx context.Context, chatType, targetID, refMsgID, text string) error {
+func (f *fakeNotifier) Reply(ctx context.Context, botID, chatType, targetID, refMsgID, text string) error {
 	f.calls++
+	f.botID = botID
 	f.target = targetID
 	f.text = text
 	return f.err
@@ -331,13 +333,13 @@ func TestReceiptSentToSourceGroup(t *testing.T) {
 	fake := &fakeNotifier{}
 	svc := NewService(env.store, nil).WithNotifier(fake)
 	link, created, err := svc.HandleMessage(context.Background(), Message{
-		MessageID: "msg-r1", ChatID: "grp-9", Title: "回执验证", ProjectID: project.ID,
+		MessageID: "msg-r1", BotID: "lbot-receipt", ChatID: "grp-9", Title: "回执验证", ProjectID: project.ID,
 	})
 	if err != nil || !created {
 		t.Fatalf("handle: %v created=%v", err, created)
 	}
-	if fake.calls != 1 || fake.target != "grp-9" {
-		t.Fatalf("notifier calls=%d target=%q", fake.calls, fake.target)
+	if fake.calls != 1 || fake.target != "grp-9" || fake.botID != "lbot-receipt" {
+		t.Fatalf("notifier calls=%d bot=%q target=%q", fake.calls, fake.botID, fake.target)
 	}
 	if !strings.Contains(fake.text, link.IssueURL) || !strings.Contains(fake.text, "#101") {
 		t.Fatalf("receipt text missing issue: %s", fake.text)
@@ -375,13 +377,13 @@ func TestBotNotifierHTTP(t *testing.T) {
 		_, _ = w.Write([]byte("{\"ok\":true}"))
 	}))
 	defer srv.Close()
-	if err := NewBotNotifier(srv.URL, "tok").Reply(context.Background(), "group", "grp-1", "msg-1", "已建单"); err != nil {
+	if err := NewBotNotifier(srv.URL, "tok").Reply(context.Background(), "lbot-1", "group", "grp-1", "msg-1", "已建单"); err != nil {
 		t.Fatalf("reply: %v", err)
 	}
 	if gotPath != "/internal/reply" || gotToken != "tok" {
 		t.Fatalf("path=%q token=%q", gotPath, gotToken)
 	}
-	if !strings.Contains(gotBody, "grp-1") || !strings.Contains(gotBody, "chatType") {
+	if !strings.Contains(gotBody, "grp-1") || !strings.Contains(gotBody, "chatType") || !strings.Contains(gotBody, "lbot-1") {
 		t.Fatalf("body = %s", gotBody)
 	}
 }

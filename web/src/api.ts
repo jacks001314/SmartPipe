@@ -1,4 +1,4 @@
-import type { AgentItem, AgentToken, AppServer, AuditEntry, AuthConfig, AuthSession, BridgeLink, CrashReport, CrashRetention, Credential, LanxinConfig, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelDefault, ModelProvider, ProviderModel, ProviderTestResult, Derivation, DispatchRecord, Health, IssueAttempt, IssuePlan, Project, ProjectBinding, ReleaseCandidate, ReleaseRecord, ReleaseRun, RepoOp, MCPConfig, TestResult, ToolCall, UserIdentity, VerificationRecord, WebhookDelivery, GitHubAppSetup, GitHubAppSetupStatus } from "./types";
+import type { AgentItem, AgentToken, AppServer, AuditEntry, AuthConfig, AuthSession, BridgeLink, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelDefault, ModelProvider, ProviderModel, ProviderTestResult, Derivation, DispatchRecord, Health, IssueAttempt, IssuePlan, Project, ProjectBinding, ReleaseCandidate, ReleaseRecord, ReleaseRun, RepoOp, MCPConfig, TestResult, ToolCall, UserIdentity, VerificationRecord, WebhookDelivery, GitHubAppSetup, GitHubAppSetupStatus } from "./types";
 
 const TOKEN_KEY = "smartpipe.adminToken";
 
@@ -122,16 +122,28 @@ export const api = {
     request<{ provider: ModelProvider; count: number }>("/model-providers/" + id + "/models/refresh", { method: "POST" }),
   getModelDefault: () => request<ModelDefault>("/model-default"),
   putModelDefault: (body: ModelDefault) => request<ModelDefault>("/model-default", { method: "PUT", body }),
-  getLanxinConfig: () => request<LanxinConfig>("/lanxin/config"),
-  saveLanxinConfig: (body: { app_id: string; app_secret?: string; api_base?: string; require_at_me?: boolean }) =>
-    request<LanxinConfig>("/lanxin/config", { method: "PUT", body }),
-  testLanxin: () => request<LanxinTestResult>("/lanxin/test", { method: "POST" }),
-  deleteLanxinConfig: () => request<void>("/lanxin/config", { method: "DELETE" }),
-  listLanxinGroups: () => request<LanxinGroup[]>("/lanxin/groups"),
-  bindLanxinGroup: (groupId: string, projectId: string) =>
-    request<{ group_id: string; project_id: string }>("/lanxin/groups/bind", { method: "POST", body: { group_id: groupId, project_id: projectId } }),
+  listLanxinBots: (sync = false) => request<LanxinBot[]>("/lanxin/bots" + (sync ? "?sync=1" : "")),
+  createLanxinBot: (body: { name: string; app_id: string; app_secret: string; api_base?: string; require_at_me?: boolean }) =>
+    request<LanxinBot>("/lanxin/bots", { method: "POST", body }),
+  getLanxinBot: (id: string, sync = false) =>
+    request<LanxinBotDetail>("/lanxin/bots/" + encodeURIComponent(id) + (sync ? "?sync=1" : "")),
+  updateLanxinBot: (id: string, body: { name?: string; app_id?: string; app_secret?: string; api_base?: string; require_at_me?: boolean; enabled?: boolean }) =>
+    request<LanxinBot>("/lanxin/bots/" + encodeURIComponent(id), { method: "PATCH", body }),
+  deleteLanxinBot: (id: string) => request<void>("/lanxin/bots/" + encodeURIComponent(id), { method: "DELETE" }),
+  setLanxinBotEnabled: (id: string, enabled: boolean) =>
+    request<LanxinBot>("/lanxin/bots/" + encodeURIComponent(id) + "/enabled", { method: "POST", body: { enabled } }),
+  testLanxinBot: (id: string) => request<LanxinTestResult>("/lanxin/bots/" + encodeURIComponent(id) + "/test", { method: "POST" }),
+  syncLanxinBotGroups: (id: string) =>
+    request<{ bot: LanxinBot; groups: LanxinGroup[] }>("/lanxin/bots/" + encodeURIComponent(id) + "/sync-groups", { method: "POST" }),
+  listLanxinBotMessages: (id: string, limit = 100) =>
+    request<LanxinMessage[]>("/lanxin/bots/" + encodeURIComponent(id) + "/messages?limit=" + limit),
+  listLanxinGroups: (refresh = false, botId = "") =>
+    request<LanxinGroup[]>("/lanxin/groups?" + (refresh ? "refresh=1" : "") + (botId ? "&bot_id=" + encodeURIComponent(botId) : "")),
+  bindLanxinGroup: (groupId: string, projectId: string, botId = "") =>
+    request<{ group_id: string; project_id: string }>("/lanxin/groups/bind", { method: "POST", body: { group_id: groupId, project_id: projectId, bot_id: botId } }),
   unbindLanxinGroup: (groupId: string) => request<void>("/lanxin/groups/" + encodeURIComponent(groupId), { method: "DELETE" }),
-  listLanxinMessages: (limit = 30) => request<LanxinMessage[]>("/lanxin/messages?limit=" + limit),
+  listLanxinMessages: (limit = 100, botId = "") =>
+    request<LanxinMessage[]>("/lanxin/messages?limit=" + limit + (botId ? "&bot_id=" + encodeURIComponent(botId) : "")),
   listAudit: (limit = 100, action = "") =>
     request<AuditEntry[]>("/audit?limit=" + limit + (action ? "&action=" + encodeURIComponent(action) : "")),
 

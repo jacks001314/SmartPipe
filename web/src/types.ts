@@ -12,6 +12,7 @@ export type Project = {
   verify_profile_path: string;
   release_profile: string;
   bluex_group_ids: string;
+  lanxin_bot_id: string;
   lead_agent_template: string;
   codex_model_provider: string;
   codex_model: string;
@@ -151,31 +152,59 @@ export type ModelProvider = {
   updated_at: string;
 };
 
-export type LanxinConfig = {
+export type LanxinBot = {
+  id: string;
+  name: string;
   credential_id: string;
   app_id: string;
   api_base: string;
+  require_at_me: boolean;
+  enabled: boolean;
+  status: string;
+  last_error: string;
+  last_connected_at: string | null;
+  last_group_sync_at: string | null;
+  last_sync_error: string;
+  group_count: number;
+  message_count: number;
   secret_mask: string;
   has_secret: boolean;
-  require_at_me: boolean;
   last_tested_at: string | null;
   last_test_ok: boolean | null;
   last_test_message: string;
-  updated_at: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type LanxinGroup = {
+  id: string;
+  bot_id: string;
+  bot_name: string;
   group_id: string;
-  project_id: string;
-  project_name: string;
-  enabled: boolean;
+  name: string;
+  avatar_url: string;
+  description: string;
+  owner_id: string;
+  owner_name: string;
+  member_count: number;
+  send_msg_status: boolean;
+  active: boolean;
+  synced_at: string;
+  project_id?: string | null;
+  project_name?: string;
+};
+
+export type LanxinBotDetail = {
+  bot: LanxinBot;
+  groups: LanxinGroup[];
+  messages: LanxinMessage[];
 };
 
 export type LanxinTestResult = {
   ok: boolean;
   message: string;
   latency_ms: number;
-  config: LanxinConfig;
+  bot: LanxinBot;
 };
 
 export type ModelDefault = {
@@ -242,6 +271,8 @@ export type BridgeLink = {
 export type LanxinMessage = {
   id: number;
   platform_message_id: string;
+  bot_id: string;
+  bot_name: string;
   chat_type: string;
   chat_id: string;
   user_id: string;

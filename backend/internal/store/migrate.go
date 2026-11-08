@@ -14,6 +14,80 @@ type migration struct {
 
 var migrations = []migration{
 	{
+		version: 22,
+		name:    "lanxin_multi_bots",
+		sql: `
+CREATE TABLE IF NOT EXISTS lanxin_bots (
+    id                  TEXT PRIMARY KEY,
+    name                TEXT NOT NULL,
+    credential_id       TEXT NOT NULL REFERENCES credentials(id) ON DELETE CASCADE,
+    app_id              TEXT NOT NULL DEFAULT '',
+    api_base            TEXT NOT NULL DEFAULT '',
+    require_at_me       BOOLEAN NOT NULL DEFAULT TRUE,
+    enabled             BOOLEAN NOT NULL DEFAULT TRUE,
+    status              TEXT NOT NULL DEFAULT 'disconnected',
+    last_error          TEXT NOT NULL DEFAULT '',
+    last_connected_at   TIMESTAMPTZ,
+    last_group_sync_at  TIMESTAMPTZ,
+    last_sync_error     TEXT NOT NULL DEFAULT '',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lanxin_bots_credential_uniq ON lanxin_bots (credential_id);
+
+CREATE TABLE IF NOT EXISTS lanxin_groups (
+    id               TEXT PRIMARY KEY,
+    bot_id           TEXT NOT NULL REFERENCES lanxin_bots(id) ON DELETE CASCADE,
+    group_id         TEXT NOT NULL,
+    name             TEXT NOT NULL DEFAULT '',
+    avatar_url       TEXT NOT NULL DEFAULT '',
+    description      TEXT NOT NULL DEFAULT '',
+    owner_id         TEXT NOT NULL DEFAULT '',
+    owner_name       TEXT NOT NULL DEFAULT '',
+    member_count     INTEGER NOT NULL DEFAULT 0,
+    send_msg_status  BOOLEAN NOT NULL DEFAULT TRUE,
+    active           BOOLEAN NOT NULL DEFAULT TRUE,
+    synced_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lanxin_groups_bot_group_uniq ON lanxin_groups (bot_id, group_id);
+CREATE INDEX IF NOT EXISTS lanxin_groups_active_idx ON lanxin_groups (active, created_at DESC);
+
+ALTER TABLE lanxin_messages ADD COLUMN IF NOT EXISTS bot_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE lanxin_messages ADD COLUMN IF NOT EXISTS bot_name TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS lanxin_messages_bot_idx ON lanxin_messages (bot_id, created_at DESC);
+
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS lanxin_bot_id TEXT NOT NULL DEFAULT '';
+
+INSERT INTO lanxin_bots (id, name, credential_id, app_id, api_base, require_at_me, enabled, status)
+SELECT 'lbot_legacy',
+       COALESCE(NULLIF(metadata->>'bot_name', ''), '主机器人'),
+       id,
+       COALESCE(metadata->>'app_id', ''),
+       COALESCE(metadata->>'api_base', ''),
+       COALESCE((SELECT value <> 'false' FROM runtime_settings WHERE key = 'lanxin_require_at_me'), TRUE),
+       TRUE,
+       'disconnected'
+  FROM credentials
+ WHERE kind = 'lanxin'
+ ORDER BY created_at
+ LIMIT 1
+ON CONFLICT DO NOTHING;
+
+UPDATE lanxin_messages
+   SET bot_id = 'lbot_legacy', bot_name = '主机器人'
+ WHERE bot_id = '' AND EXISTS (SELECT 1 FROM lanxin_bots WHERE id = 'lbot_legacy');
+
+UPDATE projects
+   SET lanxin_bot_id = 'lbot_legacy'
+ WHERE lanxin_bot_id = '' AND bluex_group_ids <> ''
+   AND EXISTS (SELECT 1 FROM lanxin_bots WHERE id = 'lbot_legacy');
+`,
+	},
+	{
 		version: 21,
 		name:    "lanxin_messages",
 		sql: `
@@ -105,7 +179,7 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS codex_model_provider TEXT NOT NULL
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS codex_model TEXT NOT NULL DEFAULT '';
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS codex_reasoning_effort TEXT NOT NULL DEFAULT '';
 `,
-	},	{
+	}, {
 		version: 18,
 		name:    "agent_token_expiry",
 		sql: `

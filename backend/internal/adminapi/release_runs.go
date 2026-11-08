@@ -40,7 +40,7 @@ func (n *groupNotifier) Notify(ctx context.Context, projectID, text string) erro
 		return fmt.Errorf("adminapi: project %s has no bluex group bound", projectID)
 	}
 	for _, group := range groups {
-		if err := n.Bot.Reply(ctx, "group", group, "", text); err != nil {
+		if err := n.Bot.Reply(ctx, project.LanxinBotID, "group", group, "", text); err != nil {
 			return err
 		}
 	}

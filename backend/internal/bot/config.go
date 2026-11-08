@@ -9,6 +9,10 @@ import (
 
 // Config 机器人服务配置（全部来自环境变量）。
 type Config struct {
+	// BotID / BotName 标识配置台中的一个蓝信机器人。
+	BotID   string
+	BotName string
+
 	// AppID / AppSecret 蓝信个人机器人凭证（桌面端：通讯录 -> 智能机器人 -> 个人机器人 -> ℹ️）。
 	AppID     string
 	AppSecret string

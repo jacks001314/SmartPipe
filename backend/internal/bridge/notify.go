@@ -13,7 +13,7 @@ import (
 
 // Notifier 把建单结果回执到来源会话（蓝信）。
 type Notifier interface {
-	Reply(ctx context.Context, chatType, targetID, refMsgID, text string) error
+	Reply(ctx context.Context, botID, chatType, targetID, refMsgID, text string) error
 }
 
 // BotNotifier 调用 bot 的 /internal/reply 内网接口。
@@ -33,11 +33,11 @@ func NewBotNotifier(baseURL, token string) *BotNotifier {
 }
 
 // Reply 发送一条文本回执。
-func (n *BotNotifier) Reply(ctx context.Context, chatType, targetID, refMsgID, text string) error {
+func (n *BotNotifier) Reply(ctx context.Context, botID, chatType, targetID, refMsgID, text string) error {
 	if strings.TrimSpace(targetID) == "" {
 		return fmt.Errorf("bridge: reply target is empty")
 	}
-	payload := map[string]string{"chatType": chatType, "targetId": targetID, "text": text}
+	payload := map[string]string{"botId": botID, "chatType": chatType, "targetId": targetID, "text": text}
 	if refMsgID != "" {
 		payload["refMsgId"] = refMsgID
 	}

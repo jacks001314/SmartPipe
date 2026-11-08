@@ -164,7 +164,6 @@ func (s *ApprovalService) HandleComment(ctx context.Context, ev CommentEvent) (A
 	return ApprovalOutcome{Action: "ignored"}, nil
 }
 
-
 // planRegisteredText 与 planApprovedText 是发给蓝信群的里程碑文本。
 func planRegisteredText(issue int, version int, url string) string {
 	return fmt.Sprintf("【SmartPipe】Issue #%d 已提出方案 v%d，等待维护者评论 /approve v%d。\n%s", issue, version, version, url)
@@ -184,7 +183,7 @@ func (s *ApprovalService) notifyGroups(ctx context.Context, project *store.Proje
 		if gid == "" {
 			continue
 		}
-		_ = s.GroupNotify.Reply(ctx, "group", gid, "", text)
+		_ = s.GroupNotify.Reply(ctx, project.LanxinBotID, "group", gid, "", text)
 	}
 }
 func (s *ApprovalService) clientForRepo(ctx context.Context, repo string) (*github.Client, *store.Project, error) {

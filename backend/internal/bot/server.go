@@ -8,6 +8,7 @@ import (
 
 // ReplyRequest 编排层经 bot 内网接口发蓝信消息的请求体。
 type ReplyRequest struct {
+	BotID    string `json:"botId,omitempty"`
 	ChatType string `json:"chatType"` // "p2p" | "group"
 	TargetID string `json:"targetId"` // staffId 或 groupId
 	RefMsgID string `json:"refMsgId,omitempty"`
