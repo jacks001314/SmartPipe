@@ -4,6 +4,8 @@ import type {
   Credential,
   GitHubAppSetup,
   GitHubAppSetupStatus,
+  GitHubDeviceFlow,
+  GitHubOAuthView,
   GitHubRepo,
   GitHubRepoList,
   Project,
@@ -29,16 +31,21 @@ export function GitHubPage({ notify }: { notify: Notify }) {
   const [appSetup, setAppSetup] = useState<GitHubAppSetup | null>(null);
   const [appStatus, setAppStatus] = useState<GitHubAppSetupStatus | null>(null);
   const [appBusy, setAppBusy] = useState(false);
+  const [oauth, setOauth] = useState<GitHubOAuthView | null>(null);
+  const [device, setDevice] = useState<GitHubDeviceFlow | null>(null);
+  const [deviceBusy, setDeviceBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [repoList, creds, projs] = await Promise.all([
+      const [repoList, creds, projs, oauthView] = await Promise.all([
         api.listGitHubRepos(),
         api.listCredentials(),
         api.listProjects(),
+        api.getGithubOAuth(),
       ]);
       setRepos({ ...repoList, repos: repoList.repos ?? [] });
+      setOauth(oauthView);
       setCredentials(creds ?? []);
       setProjects(projs ?? []);
       setError("");
@@ -82,6 +89,57 @@ export function GitHubPage({ notify }: { notify: Notify }) {
       window.clearInterval(timer);
     };
   }, [appSetup, load, notify]);
+
+  useEffect(() => {
+    if (!device) return;
+    let stopped = false;
+    const poll = async () => {
+      try {
+        const res = await api.pollGithubOAuth(device.flow_id);
+        if (stopped) return;
+        if (res.status === "authorized") {
+          setDevice(null);
+          notify("GitHub 账号已授权" + (res.login ? "：" + res.login : ""), "ok");
+          await load();
+        } else if (res.status === "expired" || res.status === "denied" || res.status === "error") {
+          setDevice(null);
+          notify(res.message || "GitHub 授权未完成，请重试", "error");
+        }
+      } catch {
+        /* 轮询失败继续等下一轮 */
+      }
+    };
+    const timer = window.setInterval(() => void poll(), Math.max(device.interval || 5, 3) * 1000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [device, load, notify]);
+
+  const startAccountLogin = async () => {
+    setDeviceBusy(true);
+    try {
+      const flow = await api.startGithubOAuth();
+      setDevice(flow);
+      window.open(flow.verification_uri, "_blank", "noopener,noreferrer");
+      notify("请在 GitHub 页面输入代码 " + flow.user_code, "ok");
+    } catch (err) {
+      notify(err instanceof ApiError ? err.message : "发起 GitHub 账号登录失败", "error");
+    } finally {
+      setDeviceBusy(false);
+    }
+  };
+
+  const disconnectAccount = async () => {
+    if (!window.confirm("解绑 GitHub 账号授权？解绑后将看不到被邀请参与的仓库。")) return;
+    try {
+      await api.deleteGithubOAuth();
+      notify("GitHub 账号授权已解绑");
+      await load();
+    } catch (err) {
+      notify(err instanceof ApiError ? err.message : "解绑失败", "error");
+    }
+  };
 
   const connectGithub = async () => {
     const authWindow = window.open("about:blank", "_blank");
@@ -200,6 +258,29 @@ export function GitHubPage({ notify }: { notify: Notify }) {
               </div>
             </>
           )}
+          <div className="github-account-auth">
+            <div className="tiny">
+              App 安装只能看到已安装的仓库；登录 GitHub 账号后，别人仓库里邀请你参与的项目也会一起列出来。
+            </div>
+            {device ? (
+              <div className="github-device">
+                <span>在 GitHub 输入代码</span>
+                <code className="github-device-code">{device.user_code}</code>
+                <a className="btn small" href={device.verification_uri} target="_blank" rel="noreferrer">打开 GitHub</a>
+              </div>
+            ) : oauth?.authorized ? (
+              <div className="github-device">
+                <span className="chip ok">账号已授权{oauth.login ? " · " + oauth.login : ""}</span>
+                <button className="btn small" onClick={() => void disconnectAccount()}>解绑账号</button>
+              </div>
+            ) : (
+              <div className="github-device">
+                <button className="btn small" disabled={deviceBusy} onClick={() => void startAccountLogin()}>
+                  {deviceBusy ? "正在申请…" : "登录 GitHub 账户（含被邀请仓库）"}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -265,6 +346,7 @@ export function GitHubPage({ notify }: { notify: Notify }) {
                         <div className="strong mono">{repo.full_name}</div>
                         <div className="tiny" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
                           <span className={"chip " + (repo.private ? "warn" : "")}>{repo.private ? "私有" : "公开"}</span>
+                          {repo.source === "user" && <span className="chip">账号授权</span>}
                           {repo.fork && <span className="chip">Fork</span>}
                           {repo.archived && <span className="chip bad">已归档</span>}
                           {repo.description && <span>{repo.description}</span>}

@@ -54,6 +54,7 @@ export type GitHubRepo = {
   html_url: string;
   archived: boolean;
   fork: boolean;
+  source: string;
 };
 
 export type GitHubRepoList = {
@@ -61,7 +62,10 @@ export type GitHubRepoList = {
   account: string;
   app_slug: string;
   source: string;
+  oauth_login: string;
+  oauth_authorized: boolean;
   repos: GitHubRepo[];
+  warning?: string;
   error?: string;
   fetched_at: string;
 };

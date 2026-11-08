@@ -169,7 +169,8 @@ func (a *API) oauthSettings(ctx context.Context) (clientID, scope string) {
 	}
 	scope = strings.TrimSpace(scope)
 	if scope == "" {
-		scope = "public_repo"
+		// 默认申请 repo：模拟“账号能看到的仓库”，包含别人私有仓库里的协作邀请。
+		scope = "repo"
 	}
 	return clientID, scope
 }

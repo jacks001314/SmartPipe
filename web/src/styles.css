@@ -428,3 +428,8 @@ button { font-family: inherit; }
 .github-repo-table td:nth-child(5),
 .github-repo-table td:nth-child(6) { white-space: nowrap; }
 .github-repo-table td:nth-child(7) { min-width: 90px; }
+
+.github-account-auth { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.github-account-auth .tiny { flex: 1; min-width: 260px; margin: 0; }
+.github-device { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.github-device-code { font-family: "Cascadia Code", Consolas, monospace; font-size: 14px; letter-spacing: 2px; padding: 4px 10px; border: 1px dashed var(--brand); border-radius: 8px; color: var(--brand); background: var(--brand-soft); }

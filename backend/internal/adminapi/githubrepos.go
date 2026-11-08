@@ -29,23 +29,32 @@ type githubRepoView struct {
 	HTMLURL       string `json:"html_url"`
 	Archived      bool   `json:"archived"`
 	Fork          bool   `json:"fork"`
+	// Source 标记这条仓库来自 App 安装（app）还是账号授权（user）。
+	Source string `json:"source"`
 }
 
 type githubRepoListView struct {
-	Connected bool             `json:"connected"`
-	Account   string           `json:"account"`
-	AppSlug   string           `json:"app_slug"`
-	Source    string           `json:"source"`
-	Repos     []githubRepoView `json:"repos"`
-	Error     string           `json:"error,omitempty"`
-	FetchedAt string           `json:"fetched_at"`
+	Connected       bool             `json:"connected"`
+	Account         string           `json:"account"`
+	AppSlug         string           `json:"app_slug"`
+	Source          string           `json:"source"`
+	OAuthLogin      string           `json:"oauth_login"`
+	OAuthAuthorized bool             `json:"oauth_authorized"`
+	Repos           []githubRepoView `json:"repos"`
+	Warning         string           `json:"warning,omitempty"`
+	Error           string           `json:"error,omitempty"`
+	FetchedAt       string           `json:"fetched_at"`
 }
 
 func (a *API) registerGitHubRepos(party iris.Party) {
 	party.Get("/github/repositories", a.listGitHubRepositories)
 }
 
-// listGitHubRepositories 用已保存的 GitHub App（优先）或 PAT 列出账号可见的仓库。
+// listGitHubRepositories 合并两类来源的仓库：
+//  1. GitHub App 安装授权范围（自动化、webhook 用）；
+//  2. 账号 OAuth/PAT 授权（能拿到本人、协作者和组织里被邀请的仓库）。
+//
+// 只有 App 安装授权看不到“别人仓库里邀请你参与”的项目，因此两路必须合并展示。
 func (a *API) listGitHubRepositories(c iris.Context) {
 	ctx := c.Request().Context()
 	view := githubRepoListView{Repos: []githubRepoView{}, FetchedAt: time.Now().Format(time.RFC3339)}
@@ -53,6 +62,11 @@ func (a *API) listGitHubRepositories(c iris.Context) {
 	if err != nil {
 		a.fail(c, err)
 		return
+	}
+
+	index := map[string]int{}
+	addRepos := func(list []githubRepoView, source string) {
+		view.Repos = mergeGitHubRepoViews(view.Repos, index, list, source)
 	}
 
 	var lastErr error
@@ -89,40 +103,80 @@ func (a *API) listGitHubRepositories(c iris.Context) {
 		if view.Account == "" && len(repos) > 0 {
 			view.Account = repos[0].Owner
 		}
-		view.Repos = repos
-		_ = c.JSON(envelope{Data: view})
-		return
+		addRepos(repos, "app")
+		break
 	}
 
-	for _, cred := range creds {
-		if !cred.Enabled || cred.Kind != store.CredentialGitHubPAT || cred.ProjectID != nil {
-			continue
+	// 账号授权：OAuth 设备码（存在名为 github-oauth 的 PAT 凭据里）优先，其次普通 PAT。
+	userToken := ""
+	userLogin := ""
+	if oauthCred := a.findOAuthCredential(ctx); oauthCred != nil && oauthCred.Enabled {
+		if kind, secret, _, err := a.store.GetSecret(ctx, oauthCred.ID); err == nil && kind == store.CredentialGitHubPAT {
+			userToken = secret
+			userLogin, _ = oauthCred.Metadata["login"].(string)
+			view.OAuthAuthorized = true
 		}
-		_, secret, meta, err := a.store.GetSecret(ctx, cred.ID)
+	}
+	if userToken == "" {
+		for _, cred := range creds {
+			if !cred.Enabled || cred.Kind != store.CredentialGitHubPAT || cred.ProjectID != nil {
+				continue
+			}
+			if src, _ := cred.Metadata["source"].(string); src == "oauth_device" {
+				continue
+			}
+			if kind, secret, _, err := a.store.GetSecret(ctx, cred.ID); err == nil && kind == store.CredentialGitHubPAT {
+				userToken = secret
+				break
+			}
+		}
+	}
+	if userToken != "" {
+		apiBase := github.DefaultAPIBase
+		login, repos, err := fetchGitHubUserRepos(ctx, apiBase, userToken)
 		if err != nil {
 			lastErr = err
-			continue
+		} else {
+			view.Connected = true
+			if view.Source == "" {
+				view.Source = "user"
+			}
+			if userLogin == "" {
+				userLogin = login
+			}
+			view.OAuthLogin = userLogin
+			if view.Account == "" {
+				view.Account = login
+			}
+			addRepos(repos, "user")
 		}
-		apiBase := metaStr(meta, "api_base", github.DefaultAPIBase)
-		login, repos, err := fetchGitHubUserRepos(ctx, apiBase, secret)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		view.Connected = true
-		view.Source = "pat"
-		view.Account = login
-		view.Repos = repos
-		_ = c.JSON(envelope{Data: view})
-		return
 	}
 
-	if lastErr != nil {
-		view.Error = lastErr.Error()
-	} else {
-		view.Error = "还没有可用的 GitHub 授权，请先连接 GitHub"
+	if !view.Connected {
+		if lastErr != nil {
+			view.Error = lastErr.Error()
+		} else {
+			view.Error = "还没有可用的 GitHub 授权，请先连接 GitHub"
+		}
 	}
 	_ = c.JSON(envelope{Data: view})
+}
+
+// mergeGitHubRepoViews 合并两路仓库：App 安装范围优先，账号授权补充被邀请的仓库。
+func mergeGitHubRepoViews(dst []githubRepoView, index map[string]int, list []githubRepoView, source string) []githubRepoView {
+	for _, repo := range list {
+		repo.Source = source
+		key := strings.ToLower(repo.FullName)
+		if existing, ok := index[key]; ok {
+			if dst[existing].Source != "app" && source == "app" {
+				dst[existing] = repo
+			}
+			continue
+		}
+		index[key] = len(dst)
+		dst = append(dst, repo)
+	}
+	return dst
 }
 
 // newGitHubClient 基于 go-github 构造客户端；企业版通过 api_base 覆盖默认端点。
