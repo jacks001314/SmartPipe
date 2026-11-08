@@ -5,14 +5,15 @@
 ## 架构
 
 ```
-蓝信反馈
-  → bot ingress（验签、去重、用户身份）
-  → GitHub Issue（唯一工作项与讨论事实源）
-  → codex-pipeline（读 Issue、准备干净工作区）
-      └─ codex-runner：Codex 改代码 → 生成补丁
+蓝信群消息
+  → bot ingress（验签、去重、群→项目）
+  → scheduler
+      ├─ chat worker（只读）：问答 / 判定缺陷 / 建 Issue
+      └─ fix worker（每 Issue 1 个，worktree）：改代码 → 自测
   → patch-verifier（干净副本 + smartpipe.yaml 必过命令）
-  → admin-api 门禁：repo.commit / repo.push / 发版与回滚
-  → 回写 Issue / 蓝信通知
+  → admin-api 门禁：repo.commit / repo.push / 建 PR
+  → 人工 review / 合并 → Issue 关闭 → worker 收尾
+  → 蓝信群收到进展与结果
 ```
 
 关键约束：
@@ -33,6 +34,7 @@
 | admin-api | 配置台 API、项目/凭据/GitHub/蓝信/模型管理、提交推送与发版门禁、审计 | `backend/cmd/admin-api`、`web/` |
 | bot | 蓝信 ingress：验签、去重、身份映射，转发到 bridge | `backend/cmd/bot` |
 | bridge | GitHub webhook、消息 → Issue 薄桥接、`/approve` 审批链、崩溃上报入库 | `backend/cmd/bridge` |
+| scheduler | 消息路由、建单去重、队列与并发、Issue↔蓝信双向同步、worker 生命周期 | `backend/cmd/scheduler` |
 | patch-verifier | 干净副本应用补丁、执行验证命令、构建与发版制品 | `backend/cmd/patch-verifier` |
 | codex-runner | 起 Codex app-server 跑一轮会话，产出 unified diff | `backend/cmd/codex-runner` |
 | codex-pipeline | 把一条 Issue 走完整链路：改代码 → 验证 → 提交 → 推送 → 回写 Issue | `backend/cmd/codex-pipeline` |
@@ -55,7 +57,7 @@ sudo ./scripts/deploy.sh
 sudo ./scripts/verify-deploy.sh --mode docker --install-dir /opt/smartpipe
 ```
 
-Docker 部署四个常驻服务：`admin-api`、`bridge`、`patch-verifier`、`bot`。
+Docker 部署五个常驻服务：`admin-api`、`bridge`、`patch-verifier`、`bot`、`scheduler`。
 `codex-runner` 与 `codex-pipeline` 是命令行执行器，按需在宿主机运行。
 支持 Docker Compose 与二进制 + systemd 两种部署方式；环境变量、远程 Windows 部署和排障说明见
 [部署文档](deploy/README.md)。

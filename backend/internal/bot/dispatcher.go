@@ -90,6 +90,9 @@ func (d *HTTPDispatcher) Dispatch(ctx context.Context, msg Inbound) error {
 }
 
 func NewDispatcher(cfg Config, snd Sender) Dispatcher {
+	if cfg.SchedulerURL != "" {
+		return SchedulerDispatcher{BaseURL: cfg.SchedulerURL, Token: cfg.SchedulerToken}
+	}
 	if cfg.OrchestratorURL != "" {
 		return &HTTPDispatcher{BaseURL: cfg.OrchestratorURL, Token: cfg.InternalToken}
 	}
@@ -195,4 +198,43 @@ func firstLine(text string) string {
 		}
 	}
 	return ""
+}
+
+// SchedulerDispatcher 把归一化消息交给调度器：问答、建单、Issue 补充都在调度器里完成。
+type SchedulerDispatcher struct {
+	BaseURL string
+	Token   string
+	Client  *http.Client
+}
+
+// Dispatch 实现 Dispatcher。
+func (d SchedulerDispatcher) Dispatch(ctx context.Context, msg Inbound) error {
+	raw, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	client := d.Client
+	if client == nil {
+		client = &http.Client{Timeout: 20 * time.Second}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		strings.TrimRight(d.BaseURL, "/")+"/internal/scheduler/messages", bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if d.Token != "" {
+		req.Header.Set("X-Scheduler-Token", d.Token)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("bot: scheduler http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	log.Printf("[bot] dispatched to scheduler chat=%s msgId=%s", msg.GroupID, msg.PlatformMessageID)
+	return nil
 }

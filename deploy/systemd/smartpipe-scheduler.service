@@ -1,0 +1,28 @@
+[Unit]
+Description=SmartPipe scheduler (Lanxin <-> Issue <-> Codex workers)
+After=network-online.target smartpipe-admin-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=smartpipe
+Group=smartpipe
+WorkingDirectory=@INSTALL_DIR@
+EnvironmentFile=/etc/smartpipe/smartpipe.env
+Environment=SCHEDULER_HTTP_ADDR=:8098
+Environment=SMARTPIPE_ADMIN_URL=http://127.0.0.1:8092
+Environment=BOT_ADDR=http://127.0.0.1:8093
+Environment=SCHEDULER_WORKSPACE_ROOT=@STATE_DIR@/workspaces
+ExecStart=@INSTALL_DIR@/bin/scheduler
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=@STATE_DIR@
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

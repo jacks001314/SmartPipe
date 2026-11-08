@@ -80,7 +80,10 @@ func main() {
 	}
 
 	approvals := &bridge.ApprovalService{Store: st, GroupNotify: botNotifier}
-	webhook := &bridge.WebhookHandler{Store: st, Secret: secret, Approvals: approvals}
+	webhook := &bridge.WebhookHandler{Store: st, Secret: secret, Approvals: approvals,
+		ForwardURL:   strings.TrimSpace(os.Getenv("SMARTPIPE_SCHEDULER_URL")),
+		ForwardToken: strings.TrimSpace(os.Getenv("SCHEDULER_TOKEN")),
+	}
 	bridgeToken := strings.TrimSpace(os.Getenv("SMARTPIPE_BRIDGE_TOKEN"))
 
 	mux := http.NewServeMux()

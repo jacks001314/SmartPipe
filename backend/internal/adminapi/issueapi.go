@@ -13,8 +13,12 @@ import (
 
 func (a *API) registerIssues(p iris.Party) {
 	p.Get("/issues/{number}", a.getIssue)
+	p.Post("/issues", a.createIssue)
+	p.Get("/issue-search", a.searchIssues)
+	p.Get("/issues/{number}/comments", a.listIssueComments)
 	p.Post("/issues/{number}/comments", a.commentIssue)
 	p.Post("/issues/{number}/labels", a.addIssueLabels)
+	p.Post("/issues/{number}/pulls", a.createIssuePull)
 }
 
 func (a *API) issueTarget(c iris.Context) (*store.Project, int, string, bool) {
@@ -164,4 +168,155 @@ func (a *API) issueTargetWithBody(c iris.Context, projectID string) (*store.Proj
 		return nil, 0, "", false
 	}
 	return project, number, repo, true
+}
+
+// projectRepo 返回项目用于 Issue/PR 的仓库坐标。
+func projectRepo(p *store.Project) string {
+	if repo := strings.TrimSpace(p.GitHubRepoURL); repo != "" {
+		return repo
+	}
+	return strings.TrimSpace(p.GitHubIssueRepo)
+}
+
+func (a *API) createIssue(c iris.Context) {
+	var in struct {
+		ProjectID string   `json:"project_id"`
+		Title     string   `json:"title"`
+		Body      string   `json:"body"`
+		Labels    []string `json:"labels"`
+	}
+	if err := decodeBody(c, &in); err != nil {
+		a.badRequest(c, "请求体不是合法 JSON")
+		return
+	}
+	in.Title = strings.TrimSpace(in.Title)
+	if in.ProjectID == "" || in.Title == "" {
+		a.badRequest(c, "project_id 与 title 必填")
+		return
+	}
+	project, err := a.store.GetProject(c.Request().Context(), in.ProjectID)
+	if err != nil {
+		a.fail(c, err)
+		return
+	}
+	repo := projectRepo(project)
+	if repo == "" {
+		a.badRequest(c, "项目未配置 GitHub 仓库")
+		return
+	}
+	client, err := bridge.ClientFromCredentials(c.Request().Context(), a.store, &project.ID)
+	if err != nil {
+		c.StatusCode(http.StatusServiceUnavailable)
+		_ = c.JSON(envelope{Err: &apiError{Code: "github_unavailable", Message: err.Error()}})
+		return
+	}
+	issue, err := client.CreateIssue(c.Request().Context(), repo, in.Title, in.Body, in.Labels)
+	if err != nil {
+		c.StatusCode(http.StatusBadGateway)
+		_ = c.JSON(envelope{Err: &apiError{Code: "github_error", Message: err.Error()}})
+		return
+	}
+	a.audit(c.Request().Context(), c, "issue.create", "issue", strconv.Itoa(issue.Number), &project.ID, "ok", nil)
+	_ = c.JSON(envelope{Data: iris.Map{
+		"number": issue.Number, "title": issue.Title, "url": issue.HTMLURL,
+		"state": issue.State, "body": issue.Body,
+	}})
+}
+
+func (a *API) searchIssues(c iris.Context) {
+	projectID := strings.TrimSpace(c.URLParam("project_id"))
+	q := strings.TrimSpace(c.URLParam("q"))
+	if projectID == "" || q == "" {
+		a.badRequest(c, "project_id 与 q 必填")
+		return
+	}
+	project, err := a.store.GetProject(c.Request().Context(), projectID)
+	if err != nil {
+		a.fail(c, err)
+		return
+	}
+	repo := projectRepo(project)
+	client, err := bridge.ClientFromCredentials(c.Request().Context(), a.store, &project.ID)
+	if err != nil {
+		c.StatusCode(http.StatusServiceUnavailable)
+		_ = c.JSON(envelope{Err: &apiError{Code: "github_unavailable", Message: err.Error()}})
+		return
+	}
+	issues, err := client.SearchIssues(c.Request().Context(), repo, q, 20)
+	if err != nil {
+		c.StatusCode(http.StatusBadGateway)
+		_ = c.JSON(envelope{Err: &apiError{Code: "github_error", Message: err.Error()}})
+		return
+	}
+	out := make([]iris.Map, 0, len(issues))
+	for _, it := range issues {
+		out = append(out, iris.Map{"number": it.Number, "title": it.Title, "state": it.State, "url": it.HTMLURL})
+	}
+	_ = c.JSON(envelope{Data: out})
+}
+
+func (a *API) listIssueComments(c iris.Context) {
+	project, number, repo, ok := a.issueTarget(c)
+	if !ok {
+		return
+	}
+	client, err := bridge.ClientFromCredentials(c.Request().Context(), a.store, &project.ID)
+	if err != nil {
+		c.StatusCode(http.StatusServiceUnavailable)
+		_ = c.JSON(envelope{Err: &apiError{Code: "github_unavailable", Message: err.Error()}})
+		return
+	}
+	comments, err := client.ListComments(c.Request().Context(), repo, number)
+	if err != nil {
+		c.StatusCode(http.StatusBadGateway)
+		_ = c.JSON(envelope{Err: &apiError{Code: "github_error", Message: err.Error()}})
+		return
+	}
+	out := make([]iris.Map, 0, len(comments))
+	for _, it := range comments {
+		out = append(out, iris.Map{"id": it.ID, "author": it.Author, "body": it.Body, "created_at": it.CreatedAt})
+	}
+	_ = c.JSON(envelope{Data: out})
+}
+
+func (a *API) createIssuePull(c iris.Context) {
+	var in struct {
+		ProjectID string `json:"project_id"`
+		Head      string `json:"head"`
+		Base      string `json:"base"`
+		Title     string `json:"title"`
+		Body      string `json:"body"`
+		Draft     bool   `json:"draft"`
+	}
+	if err := decodeBody(c, &in); err != nil {
+		a.badRequest(c, "请求体不是合法 JSON")
+		return
+	}
+	project, number, repo, ok := a.issueTargetWithBody(c, in.ProjectID)
+	if !ok {
+		return
+	}
+	in.Head = strings.TrimSpace(in.Head)
+	if in.Head == "" || in.Title == "" {
+		a.badRequest(c, "head 与 title 必填")
+		return
+	}
+	base := strings.TrimSpace(in.Base)
+	if base == "" {
+		base = firstNonEmpty(project.GitHubDefaultBranch, "main")
+	}
+	client, err := bridge.ClientFromCredentials(c.Request().Context(), a.store, &project.ID)
+	if err != nil {
+		c.StatusCode(http.StatusServiceUnavailable)
+		_ = c.JSON(envelope{Err: &apiError{Code: "github_unavailable", Message: err.Error()}})
+		return
+	}
+	pr, err := client.CreatePullRequest(c.Request().Context(), repo, in.Head, base, in.Title, in.Body, in.Draft)
+	if err != nil {
+		c.StatusCode(http.StatusBadGateway)
+		_ = c.JSON(envelope{Err: &apiError{Code: "github_error", Message: err.Error()}})
+		return
+	}
+	a.audit(c.Request().Context(), c, "pull.create", "pull", strconv.Itoa(pr.Number), &project.ID, "ok", nil)
+	_ = c.JSON(envelope{Data: iris.Map{"number": pr.Number, "url": pr.HTMLURL, "state": pr.State, "draft": pr.Draft, "issue": number}})
 }

@@ -63,10 +63,14 @@ func NewServer(cfg Config, h *Handler) *iris.Application {
 }
 
 func dispatcherName(cfg Config) string {
-	if cfg.OrchestratorURL != "" {
+	switch {
+	case cfg.SchedulerURL != "":
+		return "scheduler"
+	case cfg.OrchestratorURL != "":
 		return "orchestrator"
+	default:
+		return "ack"
 	}
-	return "ack"
 }
 
 func internalTokenGuard(token string) iris.Handler {

@@ -24,6 +24,9 @@ type WebhookHandler struct {
 	Now    func() time.Time
 	// Approvals 处理 issue_comment 里的 /plan 与 /approve 命令。
 	Approvals *ApprovalService
+	// ForwardURL / ForwardToken 把事件转发给调度器。
+	ForwardURL   string
+	ForwardToken string
 }
 
 type webhookPayload struct {
@@ -34,6 +37,7 @@ type webhookPayload struct {
 	Issue struct {
 		Number  int    `json:"number"`
 		Title   string `json:"title"`
+		State   string `json:"state"`
 		HTMLURL string `json:"html_url"`
 	} `json:"issue"`
 	Comment struct {
@@ -127,6 +131,16 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if approvalErr != nil {
 			resp["approval_error"] = approvalErr.Error()
 		}
+	}
+	if event == "issue_comment" || event == "issues" {
+		h.forwardEvent(schedulerEvent{
+			Event: event, Action: payload.Action,
+			ProjectID: resolveProjectID(ctx, h.Store, repo),
+			Repo:      repo, Issue: payload.Issue.Number,
+			CommentID: payload.Comment.ID, Author: payload.Comment.User.Login,
+			Association: payload.Comment.AuthorAssociation, Body: payload.Comment.Body,
+			Title: payload.Issue.Title, State: payload.Issue.State,
+		})
 	}
 	writeJSON(w, http.StatusAccepted, resp)
 }

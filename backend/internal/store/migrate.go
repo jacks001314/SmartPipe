@@ -14,6 +14,49 @@ type migration struct {
 
 var migrations = []migration{
 	{
+		version: 29,
+		name:    "scheduler_core",
+		sql: `
+CREATE TABLE IF NOT EXISTS scheduler_workers (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  issue_number INTEGER NOT NULL,
+  issue_url TEXT NOT NULL DEFAULT '',
+  chat_id TEXT NOT NULL DEFAULT '',
+  state TEXT NOT NULL DEFAULT 'queued',
+  branch TEXT NOT NULL DEFAULT '',
+  worktree TEXT NOT NULL DEFAULT '',
+  pr_number INTEGER NOT NULL DEFAULT 0,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS scheduler_workers_active_uniq
+  ON scheduler_workers (project_id, issue_number)
+  WHERE state NOT IN ('closed','failed');
+CREATE INDEX IF NOT EXISTS scheduler_workers_state_idx ON scheduler_workers (state, created_at);
+
+CREATE TABLE IF NOT EXISTS scheduler_links (
+  platform_message_id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  issue_number INTEGER NOT NULL DEFAULT 0,
+  chat_id TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS scheduler_chat (
+  id BIGSERIAL PRIMARY KEY,
+  chat_id TEXT NOT NULL,
+  project_id TEXT NOT NULL DEFAULT '',
+  role TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS scheduler_chat_chat_idx ON scheduler_chat (chat_id, id DESC);
+`,
+	},
+	{
 		version: 28,
 		name:    "github_repo_clone_bytes",
 		sql: `

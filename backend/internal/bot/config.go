@@ -27,7 +27,11 @@ type Config struct {
 	// OrchestratorURL 为空时使用 AckDispatcher（本地回执占位）；
 	// 非空时把归一化消息 POST 到 {OrchestratorURL}/internal/messages。
 	OrchestratorURL string
-	// BridgeURL 非空且未配 OrchestratorURL 时，文本消息直接交给 bridge 建 GitHub Issue。
+	// SchedulerURL 非空时，消息交给调度器（推荐）。
+	SchedulerURL   string
+	SchedulerToken string
+
+	// BridgeURL 非空且未配 OrchestratorURL/SchedulerURL 时，文本消息直接交给 bridge 建 GitHub Issue。
 	BridgeURL   string
 	BridgeToken string
 
@@ -57,6 +61,8 @@ func LoadFromEnv() (Config, error) {
 		APIBase:         getenv("LANXIN_API_BASE", "https://open.e.lanxin.cn/open/apigw"),
 		HTTPAddr:        getenv("BOT_HTTP_ADDR", ":8091"),
 		OrchestratorURL: os.Getenv("ORCHESTRATOR_URL"),
+		SchedulerURL:    strings.TrimRight(os.Getenv("SCHEDULER_URL"), "/"),
+		SchedulerToken:  os.Getenv("SCHEDULER_TOKEN"),
 		BridgeURL:       os.Getenv("BRIDGE_URL"),
 		BridgeToken:     os.Getenv("BRIDGE_TOKEN"),
 		RequireAtMe:     getenv("BOT_REQUIRE_AT_ME", "true") != "false",

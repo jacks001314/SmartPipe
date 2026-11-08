@@ -251,7 +251,7 @@ install_docker_mode() {
   docker compose version >/dev/null
 
   local env_path="$INSTALL_DIR/deploy/.env"
-  mkdir -p "$INSTALL_DIR/deploy/data/verify" \
+  mkdir -p "$INSTALL_DIR/deploy/data/verify" "$INSTALL_DIR/deploy/data/workspaces" \
     "$INSTALL_DIR/deploy/data/releases" "$INSTALL_DIR/deploy/data/go" \
     "$INSTALL_DIR/deploy/data/go-cache" "$INSTALL_DIR/deploy/data/npm"
   chown -R 10001:10001 "$INSTALL_DIR/deploy/data"
@@ -300,7 +300,7 @@ install_binary_mode() {
   if [[ -d "$bundle/configs" ]]; then cp -a "$bundle/configs/." "$INSTALL_DIR/configs/"; fi
 
   install -d -m 0750 -o smartpipe -g smartpipe \
-    /var/lib/smartpipe/verify /var/lib/smartpipe/releases \
+    /var/lib/smartpipe/verify /var/lib/smartpipe/workspaces /var/lib/smartpipe/releases \
     /var/lib/smartpipe/go /var/lib/smartpipe/go-cache /var/lib/smartpipe/npm
   install -d -m 0750 /etc/smartpipe
 
@@ -312,7 +312,7 @@ install_binary_mode() {
   fi
 
   local unit source
-  for unit in smartpipe-patch-verifier smartpipe-admin-api smartpipe-bridge smartpipe-bot; do
+  for unit in smartpipe-patch-verifier smartpipe-admin-api smartpipe-bridge smartpipe-bot smartpipe-scheduler; do
     source="$INSTALL_DIR/deploy/systemd/$unit.service"
     if [[ ! -f "$source" ]]; then
       echo "systemd unit missing: $source" >&2
@@ -324,11 +324,11 @@ install_binary_mode() {
   systemctl daemon-reload
   if [[ "$START_SERVICES" -eq 1 ]]; then
     systemctl enable --now smartpipe-patch-verifier.service smartpipe-admin-api.service \
-      smartpipe-bridge.service smartpipe-bot.service
+      smartpipe-bridge.service smartpipe-bot.service smartpipe-scheduler.service
     local i port ok
     for i in $(seq 1 60); do
       ok=1
-      for port in 8092 8090 8095 8093; do
+      for port in 8092 8090 8095 8093 8098; do
         if ! curl -fsS --max-time 3 "http://127.0.0.1:$port/healthz" >/dev/null 2>&1; then ok=0; fi
       done
       if [[ "$ok" -eq 1 ]]; then
@@ -340,7 +340,8 @@ install_binary_mode() {
     if [[ "$ok" -ne 1 ]]; then
       echo "services did not become healthy within 120 seconds" >&2
       systemctl --no-pager --full status smartpipe-patch-verifier.service \
-        smartpipe-admin-api.service smartpipe-bridge.service smartpipe-bot.service >&2 || true
+        smartpipe-admin-api.service smartpipe-bridge.service smartpipe-bot.service \
+        smartpipe-scheduler.service >&2 || true
       journalctl --no-pager -n 120 -u smartpipe-patch-verifier.service \
         -u smartpipe-admin-api.service -u smartpipe-bridge.service -u smartpipe-bot.service >&2 || true
       exit 1

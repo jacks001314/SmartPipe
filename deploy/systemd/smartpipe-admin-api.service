@@ -15,7 +15,6 @@ Environment=SMARTPIPE_WEB_DIST=@INSTALL_DIR@/web
 Environment=SMARTPIPE_VERIFY_URL=http://127.0.0.1:8095
 Environment=SMARTPIPE_RELEASE_URL=http://127.0.0.1:8095
 Environment=SMARTPIPE_BOT_ADDR=http://127.0.0.1:8093
-Environment=SMARTPIPE_MCP_URL=http://127.0.0.1:8097/mcp
 ExecStart=@INSTALL_DIR@/bin/admin-api
 Restart=on-failure
 RestartSec=3

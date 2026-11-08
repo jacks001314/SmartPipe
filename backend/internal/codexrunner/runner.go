@@ -43,8 +43,10 @@ type Spec struct {
 	Model string
 	// Effort 取 low/medium/high 等标准值，空表示不指定。
 	Effort string
-	// BaseInstructions 可覆盖模型的基础指令。
+	// BaseInstructions 可覆盖模型的基础指令（不同角色的系统提示词）。
 	BaseInstructions string
+	// Sandbox 为空时使用 workspace-write；只读角色（如问答 worker）用 "read-only"。
+	Sandbox string
 	// Timeout 是整轮执行的超时，默认 30 分钟。
 	Timeout time.Duration
 	// Env 是追加给 codex 进程的环境变量，形如 KEY=value。
@@ -152,11 +154,15 @@ func Run(ctx context.Context, spec Spec) (*Result, error) {
 	defer func() { _ = client.Close() }()
 
 	ephemeral := true
+	sandbox := codex.SandboxModeWorkspaceWrite
+	if strings.EqualFold(strings.TrimSpace(spec.Sandbox), "read-only") {
+		sandbox = codex.SandboxModeReadOnly
+	}
 	thread, err := client.StartThread(runCtx, codex.ThreadStartOptions{
 		Cwd:              spec.WorkDir,
 		Model:            strings.TrimSpace(spec.Model),
 		ApprovalPolicy:   codex.ApprovalPolicyNever,
-		SandboxPolicy:    codex.SandboxModeWorkspaceWrite,
+		SandboxPolicy:    sandbox,
 		BaseInstructions: strings.TrimSpace(spec.BaseInstructions),
 		Ephemeral:        &ephemeral,
 	})
