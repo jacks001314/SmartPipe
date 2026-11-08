@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api";
-import type { ModelDefault, ModelProvider } from "../types";
+import type { ModelDefault, ModelLocalConfigResult, ModelProvider } from "../types";
 import type { Notify } from "../App";
 import { ModelConfigImportModal, type PickedConfig } from "./ModelConfigImportModal";
 
@@ -68,6 +68,8 @@ export function ModelsPage({ notify }: { notify: Notify }) {
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [importOpen, setImportOpen] = useState(false);
   const [importFile, setImportFile] = useState<PickedConfig | null>(null);
+  const [localConfig, setLocalConfig] = useState<ModelLocalConfigResult | null>(null);
+  const [localLoading, setLocalLoading] = useState(false);
   const [directoryFiles, setDirectoryFiles] = useState<PickedConfig[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [createTemplate, setCreateTemplate] = useState<ProviderTemplate>(TEMPLATES[0]);
@@ -232,8 +234,33 @@ export function ModelsPage({ notify }: { notify: Notify }) {
     }
   };
 
+  const loadLocalConfig = async () => {
+    setLocalLoading(true);
+    try {
+      setLocalConfig(await api.previewLocalModelConfig());
+    } catch (err) {
+      setLocalConfig({
+        found: false,
+        source: "",
+        candidates: [],
+        error: err instanceof ApiError ? err.message : "读取服务端 Codex 配置失败",
+      });
+    } finally {
+      setLocalLoading(false);
+    }
+  };
+
+  const openImportLocal = () => {
+    setImportOpen(true);
+    setImportFile(null);
+    setDirectoryFiles([]);
+    setLocalConfig(null);
+    void loadLocalConfig();
+  };
+
   const pickImportFile = () => {
     setImportOpen(true);
+    setLocalConfig(null);
     importInput.current?.click();
   };
 
@@ -442,8 +469,8 @@ export function ModelsPage({ notify }: { notify: Notify }) {
         </div>
         <div className="model-toolbar-actions">
           <button className="btn" onClick={() => void load()} disabled={saving || loading}>刷新</button>
-          <button className="btn primary" onClick={pickImportFile} disabled={saving}>导入本机模型配置</button>
-          <button className="btn" title="选择其他 TOML 模型配置" onClick={pickImportDirectory} disabled={saving}>目录</button>
+          <button className="btn primary" onClick={openImportLocal} disabled={saving}>导入本机模型配置</button>
+          <button className="btn" title="选择其他 TOML 模型配置" onClick={pickImportFile} disabled={saving}>选择 TOML</button>
           <button className="btn" onClick={exportJSON} disabled={providers.length === 0}>导出</button>
           <button className="btn" onClick={discard} disabled={saving || dirtyCount === 0}>放弃</button>
           <button className="btn primary" onClick={() => void saveAll()} disabled={saving || dirtyCount === 0}>
@@ -526,7 +553,7 @@ export function ModelsPage({ notify }: { notify: Notify }) {
               <h3>还没有模型供应商</h3>
               <div className="tiny">从本机 Codex 配置导入，或选择模板新建供应商。</div>
               <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 14 }}>
-                <button className="btn primary" onClick={pickImportFile}>导入本机模型配置</button>
+                <button className="btn primary" onClick={openImportLocal}>导入本机模型配置</button>
                 <button className="btn" onClick={openCreate}>新建供应商</button>
               </div>
             </div>
@@ -782,6 +809,8 @@ export function ModelsPage({ notify }: { notify: Notify }) {
         open={importOpen}
         initialFile={importFile}
         directoryFiles={directoryFiles}
+        local={localConfig}
+        localLoading={localLoading}
         notify={notify}
         onClose={() => {
           setImportOpen(false);
@@ -791,6 +820,7 @@ export function ModelsPage({ notify }: { notify: Notify }) {
         onImported={() => void load()}
         onPickFile={() => importInput.current?.click()}
         onPickDirectory={() => importDirectoryInput.current?.click()}
+        onReloadLocal={() => void loadLocalConfig()}
         onSelectDirectoryFile={(path) => {
           const picked = directoryFiles.find((item) => item.path === path);
           if (picked) setImportFile(picked);

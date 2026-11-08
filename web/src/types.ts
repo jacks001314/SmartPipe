@@ -259,6 +259,14 @@ export type ModelConfigImportPreview = {
   warnings: string[];
 };
 
+export type ModelLocalConfigResult = {
+  found: boolean;
+  source: string;
+  candidates: string[];
+  error?: string;
+  preview?: ModelConfigImportPreview;
+};
+
 export type ModelConfigImportResult = {
   source: string;
   imported_profiles: number;

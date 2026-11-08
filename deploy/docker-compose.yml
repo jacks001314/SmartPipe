@@ -44,6 +44,8 @@ services:
     environment:
       SMARTPIPE_ADMIN_ADDR: ":8092"
       SMARTPIPE_WEB_DIST: /app/web
+      # 服务端自动读取 Codex 配置的位置；宿主目录用 SMARTPIPE_CODEX_HOME 覆盖。
+      SMARTPIPE_CODEX_CONFIG: /config/codex/config.toml
       SMARTPIPE_RUNTIME_DATA: /data/runtime
       SMARTPIPE_VERIFY_URL: http://patch-verifier:8095
       SMARTPIPE_RELEASE_URL: http://patch-verifier:8095
@@ -52,6 +54,7 @@ services:
       - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_ADMIN_PORT:-8092}:8092"
     volumes:
       - ./data/runtime:/data/runtime
+      - ${SMARTPIPE_CODEX_HOME:-/home/jacks/.codex}:/config/codex:ro
     depends_on:
       patch-verifier:
         condition: service_healthy

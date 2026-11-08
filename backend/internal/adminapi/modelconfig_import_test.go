@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 )
@@ -190,5 +191,84 @@ func TestModelConfigImportAPI(t *testing.T) {
 	}
 	if credentialCount != 2 {
 		t.Fatalf("credential count = %d, want 2 after re-import", credentialCount)
+	}
+}
+
+func TestModelConfigLocalAPI(t *testing.T) {
+	app, st := newTestAPI(t, "")
+	dir := t.TempDir()
+	path := dir + "/config.toml"
+	if err := os.WriteFile(path, []byte(sampleCodexConfig), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("SMARTPIPE_CODEX_CONFIG", path)
+	cleanupModels := func() {
+		_, _ = st.DB().Exec(`DELETE FROM model_profiles`)
+		_, _ = st.DB().Exec(`DELETE FROM provider_models`)
+		_, _ = st.DB().Exec(`DELETE FROM model_providers`)
+		_, _ = st.DB().Exec(`DELETE FROM runtime_settings WHERE key IN ('codex_default_provider','codex_default_model','codex_default_effort')`)
+		_, _ = st.DB().Exec(`DELETE FROM credentials WHERE name LIKE 'model-provider/%'`)
+	}
+	cleanupModels()
+	t.Cleanup(cleanupModels)
+
+	rec, body := do(t, app, http.MethodGet, "/admin/model-config/local/preview", "", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("local preview status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "sk-import-test-secret") {
+		t.Fatal("local preview leaked an API key")
+	}
+	data := body["data"].(map[string]any)
+	if data["found"] != true || data["source"] != path {
+		t.Fatalf("unexpected local preview: %#v", data)
+	}
+	preview := data["preview"].(map[string]any)
+	if preview["profile_count"] != float64(2) || preview["provider_count"] != float64(3) {
+		t.Fatalf("unexpected preview counts: %#v", preview)
+	}
+
+	rec, body = do(t, app, http.MethodPost, "/admin/model-config/local/import", "", map[string]any{
+		"profile_keys": []string{"qax"}, "provider_keys": []string{"deepseek"},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("local import status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "sk-import-qax-secret") {
+		t.Fatal("local import leaked an API key")
+	}
+	result := body["data"].(map[string]any)
+	if result["source"] != path || result["imported_profiles"] != float64(1) || result["imported_providers"] != float64(2) {
+		t.Fatalf("unexpected local import: %#v", result)
+	}
+}
+
+func TestModelConfigLocalPreviewReportsMissingFile(t *testing.T) {
+	app, _ := newTestAPI(t, "")
+	t.Setenv("SMARTPIPE_CODEX_CONFIG", t.TempDir()+"/missing.toml")
+	t.Setenv("CODEX_HOME", t.TempDir())
+	rec, body := do(t, app, http.MethodGet, "/admin/model-config/local/preview", "", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	data := body["data"].(map[string]any)
+	if data["found"] != false {
+		t.Fatalf("expected found=false, got %#v", data)
+	}
+}
+
+func TestReadLocalCodexConfigUsesEnvPath(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.toml"
+	if err := os.WriteFile(path, []byte(sampleCodexConfig), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("SMARTPIPE_CODEX_CONFIG", path)
+	got, content, _, err := readLocalCodexConfig()
+	if err != nil {
+		t.Fatalf("read local config: %v", err)
+	}
+	if got != path || !strings.Contains(content, "[model_providers.deepseek]") {
+		t.Fatalf("unexpected config: %s", got)
 	}
 }

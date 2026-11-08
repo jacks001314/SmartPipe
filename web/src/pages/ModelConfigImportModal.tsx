@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
-import type { ModelConfigImportPreview, ModelConfigImportResult } from "../types";
+import type { ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult } from "../types";
 import type { Notify } from "../App";
 
 export type PickedConfig = { path: string; file: File };
@@ -9,12 +9,15 @@ type Props = {
   open: boolean;
   initialFile: PickedConfig | null;
   directoryFiles: PickedConfig[];
+  local: ModelLocalConfigResult | null;
+  localLoading: boolean;
   notify: Notify;
   onClose: () => void;
   onImported: () => void;
   onPickFile: () => void;
   onPickDirectory: () => void;
   onSelectDirectoryFile: (path: string) => void;
+  onReloadLocal: () => void;
 };
 
 const MAX_CONFIG_BYTES = 1024 * 1024;
@@ -47,12 +50,15 @@ export function ModelConfigImportModal({
   open,
   initialFile,
   directoryFiles,
+  local,
+  localLoading,
   notify,
   onClose,
   onImported,
   onPickFile,
   onPickDirectory,
   onSelectDirectoryFile,
+  onReloadLocal,
 }: Props) {
   const [content, setContent] = useState("");
   const [source, setSource] = useState("");
@@ -63,6 +69,7 @@ export function ModelConfigImportModal({
   const [busy, setBusy] = useState<"" | "preview" | "import">("");
   const [pasteOpen, setPasteOpen] = useState(false);
   const [parseError, setParseError] = useState("");
+  const [origin, setOrigin] = useState<"local" | "content">("local");
   const lastRead = useRef("");
 
   const reset = useCallback(() => {
@@ -75,6 +82,7 @@ export function ModelConfigImportModal({
     setBusy("");
     setPasteOpen(false);
     setParseError("");
+    setOrigin("local");
     lastRead.current = "";
   }, []);
 
@@ -84,6 +92,7 @@ export function ModelConfigImportModal({
 
   const runPreview = useCallback(
     async (nextSource: string, nextContent: string) => {
+      setOrigin("content");
       setBusy("preview");
       setParseError("");
       try {
@@ -127,6 +136,27 @@ export function ModelConfigImportModal({
       }
     })();
   }, [open, initialFile, runPreview]);
+
+  useEffect(() => {
+    if (!open || !local || initialFile || busy || result) return;
+    if (!local.found || !local.preview) {
+      if (!content) {
+        setPreview(null);
+        setSource(local.source ?? "");
+        setParseError(local.error ?? "服务端没有找到 config.toml");
+      }
+      return;
+    }
+    setContent("");
+    setSource(local.source);
+    setPreview(local.preview);
+    setSelectedProfiles(new Set());
+    setSelectedProviders(new Set());
+    setResult(null);
+    setParseError("");
+    setPasteOpen(false);
+    setOrigin("local");
+  }, [open, local, initialFile, busy, result, content]);
 
   const close = () => {
     if (!busy) onClose();
@@ -200,12 +230,12 @@ export function ModelConfigImportModal({
     if (!preview || (selectedProfileCount === 0 && selectedProviderCount === 0)) return;
     setBusy("import");
     try {
-      const imported = await api.importModelConfig(
-        source || "手动输入",
-        content,
-        Array.from(selectedProfiles),
-        Array.from(selectedProviders),
-      );
+      const profileKeys = Array.from(selectedProfiles);
+      const providerKeys = Array.from(selectedProviders);
+      const imported =
+        origin === "local" && local?.found
+          ? await api.importLocalModelConfig(profileKeys, providerKeys)
+          : await api.importModelConfig(source || "手动输入", content, profileKeys, providerKeys);
       setResult(imported);
       onImported();
       notify(
@@ -242,8 +272,9 @@ export function ModelConfigImportModal({
         <div className="modal-body codex-import-body">
           <div className="codex-import-paths">
             <span>配置来源</span>
-            <code>{source || "尚未选择 config.toml"}</code>
+            <code>{source || (localLoading ? "正在查找 config.toml…" : "尚未找到 config.toml")}</code>
             <div className="codex-import-source-actions">
+              <button className="btn small" disabled={!!busy || localLoading} onClick={onReloadLocal}>重新读取</button>
               <button className="btn small" disabled={!!busy} onClick={onPickFile}>选择 config.toml</button>
               <button className="btn small" disabled={!!busy} onClick={onPickDirectory}>指定目录</button>
               <button className="btn small" disabled={!!busy} onClick={() => setPasteOpen((v) => !v)}>
@@ -414,9 +445,16 @@ export function ModelConfigImportModal({
             </>
           ) : (
             <div className="codex-import-empty">
-              {busy === "preview"
-                ? "正在读取本机模型配置…"
-                : "选择 ~/.codex/config.toml、指定目录或粘贴 TOML 后，这里会列出可导入的 Profile 与 Provider。"}
+              {busy === "preview" || localLoading
+                ? "正在读取服务端的 ~/.codex/config.toml…"
+                : parseError
+                  ? parseError
+                  : "选择 ~/.codex/config.toml、指定目录或粘贴 TOML 后，这里会列出可导入的 Profile 与 Provider。"}
+              {!localLoading && local && !local.found && local.candidates?.length > 0 && (
+                <div className="tiny" style={{ marginTop: 8 }}>
+                  已查找：{local.candidates.join("、")}
+                </div>
+              )}
             </div>
           )}
         </div>

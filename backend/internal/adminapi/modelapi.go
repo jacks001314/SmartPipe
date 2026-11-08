@@ -17,6 +17,8 @@ import (
 
 // registerModels 挂载模型供应商、模型目录和默认模型接口。
 func (a *API) registerModels(party iris.Party) {
+	party.Get("/model-config/local/preview", a.previewLocalModelConfig)
+	party.Post("/model-config/local/import", a.importLocalModelConfig)
 	party.Post("/model-config/import/preview", a.previewModelConfigImport)
 	party.Post("/model-config/import", a.importModelConfig)
 	party.Get("/model-profiles", a.listModelProfiles)
