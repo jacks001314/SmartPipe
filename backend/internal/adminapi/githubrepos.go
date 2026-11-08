@@ -2,13 +2,11 @@ package adminapi
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
 	"time"
 
+	gh "github.com/google/go-github/v68/github"
 	"github.com/kataras/iris/v12"
 
 	"smartpipe/backend/internal/github"
@@ -41,34 +39,6 @@ type githubRepoListView struct {
 	Repos     []githubRepoView `json:"repos"`
 	Error     string           `json:"error,omitempty"`
 	FetchedAt string           `json:"fetched_at"`
-}
-
-type githubAPIRepo struct {
-	ID       int64  `json:"id"`
-	FullName string `json:"full_name"`
-	Name     string `json:"name"`
-	Owner    struct {
-		Login string `json:"login"`
-	} `json:"owner"`
-	Private       bool   `json:"private"`
-	Description   string `json:"description"`
-	DefaultBranch string `json:"default_branch"`
-	Language      string `json:"language"`
-	Stars         int    `json:"stargazers_count"`
-	OpenIssues    int    `json:"open_issues_count"`
-	UpdatedAt     string `json:"updated_at"`
-	HTMLURL       string `json:"html_url"`
-	Archived      bool   `json:"archived"`
-	Fork          bool   `json:"fork"`
-}
-
-func (r githubAPIRepo) view() githubRepoView {
-	return githubRepoView{
-		ID: r.ID, FullName: r.FullName, Name: r.Name, Owner: r.Owner.Login,
-		Private: r.Private, Description: r.Description, DefaultBranch: r.DefaultBranch,
-		Language: r.Language, Stars: r.Stars, OpenIssues: r.OpenIssues, UpdatedAt: r.UpdatedAt,
-		HTMLURL: r.HTMLURL, Archived: r.Archived, Fork: r.Fork,
-	}
 }
 
 func (a *API) registerGitHubRepos(party iris.Party) {
@@ -134,12 +104,7 @@ func (a *API) listGitHubRepositories(c iris.Context) {
 			continue
 		}
 		apiBase := metaStr(meta, "api_base", github.DefaultAPIBase)
-		login, err := fetchGitHubLoginName(ctx, apiBase, secret)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		repos, err := fetchGitHubUserRepos(ctx, apiBase, secret)
+		login, repos, err := fetchGitHubUserRepos(ctx, apiBase, secret)
 		if err != nil {
 			lastErr = err
 			continue
@@ -160,64 +125,111 @@ func (a *API) listGitHubRepositories(c iris.Context) {
 	_ = c.JSON(envelope{Data: view})
 }
 
-func fetchGitHubJSON(ctx context.Context, apiBase, token, path string, out any) error {
+// newGitHubClient 基于 go-github 构造客户端；企业版通过 api_base 覆盖默认端点。
+func newGitHubClient(apiBase, token string) (*gh.Client, error) {
+	client := gh.NewClient(nil).WithAuthToken(token)
 	base := strings.TrimRight(strings.TrimSpace(apiBase), "/")
-	if base == "" {
-		base = github.DefaultAPIBase
+	if base == "" || base == strings.TrimRight(github.DefaultAPIBase, "/") {
+		return client, nil
+	}
+	return client.WithEnterpriseURLs(base, base)
+}
+
+func githubErr(op string, err error) error {
+	var respErr *gh.ErrorResponse
+	if ok := asGitHubError(err, &respErr); ok {
+		return fmt.Errorf("%s：GitHub 返回 %d", op, respErr.Response.StatusCode)
+	}
+	return fmt.Errorf("%s：%w", op, err)
+}
+
+func asGitHubError(err error, target **gh.ErrorResponse) bool {
+	for err != nil {
+		if typed, ok := err.(*gh.ErrorResponse); ok {
+			*target = typed
+			return true
+		}
+		unwrapper, ok := err.(interface{ Unwrap() error })
+		if !ok {
+			return false
+		}
+		err = unwrapper.Unwrap()
+	}
+	return false
+}
+
+func repoView(repo *gh.Repository) githubRepoView {
+	return githubRepoView{
+		ID:            repo.GetID(),
+		FullName:      repo.GetFullName(),
+		Name:          repo.GetName(),
+		Owner:         repo.GetOwner().GetLogin(),
+		Private:       repo.GetPrivate(),
+		Description:   repo.GetDescription(),
+		DefaultBranch: repo.GetDefaultBranch(),
+		Language:      repo.GetLanguage(),
+		Stars:         repo.GetStargazersCount(),
+		OpenIssues:    repo.GetOpenIssuesCount(),
+		UpdatedAt:     repo.GetUpdatedAt().Time.Format(time.RFC3339),
+		HTMLURL:       repo.GetHTMLURL(),
+		Archived:      repo.GetArchived(),
+		Fork:          repo.GetFork(),
+	}
+}
+
+// fetchGitHubInstallationRepos 读取 GitHub App 安装授权范围内的仓库。
+func fetchGitHubInstallationRepos(ctx context.Context, apiBase, token string) ([]githubRepoView, error) {
+	client, err := newGitHubClient(apiBase, token)
+	if err != nil {
+		return nil, fmt.Errorf("构造 GitHub 客户端失败：%w", err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("请求 GitHub 失败：%w", err)
-	}
-	defer res.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(res.Body, 8<<20))
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return fmt.Errorf("GitHub 返回 %d：%s", res.StatusCode, strings.TrimSpace(string(raw)))
-	}
-	return json.Unmarshal(raw, out)
-}
-
-func fetchGitHubInstallationRepos(ctx context.Context, apiBase, token string) ([]githubRepoView, error) {
-	var payload struct {
-		Repositories []githubAPIRepo `json:"repositories"`
-	}
-	if err := fetchGitHubJSON(ctx, apiBase, token, "/installation/repositories?per_page=100", &payload); err != nil {
-		return nil, err
-	}
-	repos := make([]githubRepoView, 0, len(payload.Repositories))
-	for _, item := range payload.Repositories {
-		repos = append(repos, item.view())
+	repos := make([]githubRepoView, 0, 100)
+	for page := 1; page <= 10; page++ {
+		result, resp, err := client.Apps.ListRepos(ctx, &gh.ListOptions{PerPage: 100, Page: page})
+		if err != nil {
+			return nil, githubErr("读取 GitHub App 仓库失败", err)
+		}
+		for _, repo := range result.Repositories {
+			repos = append(repos, repoView(repo))
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
 	}
 	return repos, nil
 }
 
-func fetchGitHubUserRepos(ctx context.Context, apiBase, token string) ([]githubRepoView, error) {
-	var payload []githubAPIRepo
-	if err := fetchGitHubJSON(ctx, apiBase, token, "/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member", &payload); err != nil {
-		return nil, err
+// fetchGitHubUserRepos 用 PAT 读取账号本人、协作者与组织内可见的仓库。
+func fetchGitHubUserRepos(ctx context.Context, apiBase, token string) (string, []githubRepoView, error) {
+	client, err := newGitHubClient(apiBase, token)
+	if err != nil {
+		return "", nil, fmt.Errorf("构造 GitHub 客户端失败：%w", err)
 	}
-	repos := make([]githubRepoView, 0, len(payload))
-	for _, item := range payload {
-		repos = append(repos, item.view())
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	user, _, err := client.Users.Get(ctx, "")
+	if err != nil {
+		return "", nil, githubErr("读取 GitHub 账号失败", err)
 	}
-	return repos, nil
-}
-
-func fetchGitHubLoginName(ctx context.Context, apiBase, token string) (string, error) {
-	var user struct {
-		Login string `json:"login"`
+	login := user.GetLogin()
+	repos := make([]githubRepoView, 0, 100)
+	for page := 1; page <= 10; page++ {
+		items, resp, err := client.Repositories.ListByAuthenticatedUser(ctx, &gh.RepositoryListByAuthenticatedUserOptions{
+			ListOptions: gh.ListOptions{PerPage: 100, Page: page},
+			Affiliation: "owner,collaborator,organization_member",
+			Sort:        "updated",
+		})
+		if err != nil {
+			return "", nil, githubErr("读取 GitHub 仓库失败", err)
+		}
+		for _, repo := range items {
+			repos = append(repos, repoView(repo))
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
 	}
-	if err := fetchGitHubJSON(ctx, apiBase, token, "/user", &user); err != nil {
-		return "", err
-	}
-	return user.Login, nil
+	return login, repos, nil
 }
