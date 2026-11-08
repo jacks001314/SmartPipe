@@ -206,3 +206,43 @@ func (s *Store) FindProjectByGroupBot(ctx context.Context, botID, groupID string
 	}
 	return nil, ErrNotFound
 }
+
+// DeleteProject 删除项目，并清理挂在它下面的运行数据；审计日志保留。
+func (s *Store) DeleteProject(ctx context.Context, id string) error {
+	if strings.TrimSpace(id) == "" {
+		return errors.New("store: project id is required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: begin delete project: %w", err)
+	}
+	// 这些表没有外键，需要显式清理，避免留下孤儿数据。
+	for _, table := range []string{
+		"agent_tokens", "bridge_links", "derivations", "issue_attempts", "patch_verifications",
+		"release_runs", "releases", "repo_ops", "runtime_resources", "tool_calls", "crash_reports",
+	} {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id = $1`, id); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("store: delete %s rows: %w", table, err)
+		}
+	}
+	// 平台用户映射保留，只解除项目归属。
+	if _, err := tx.ExecContext(ctx, `UPDATE user_identities SET project_id = '' WHERE project_id = $1`, id); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("store: detach user identities: %w", err)
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE id = $1`, id)
+	if err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("store: delete project: %w", err)
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		_ = tx.Rollback()
+		return ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: commit delete project: %w", err)
+	}
+	return nil
+}

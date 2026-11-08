@@ -169,6 +169,17 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
     }
   };
 
+  const removeProject = async (p: Project) => {
+    if (!window.confirm(`删除项目「${p.name}」？会同时清除它的凭据、蓝信群绑定和运行记录，无法恢复。`)) return;
+    try {
+      await api.deleteProject(p.id);
+      notify("项目已删除");
+      await load();
+    } catch (err) {
+      notify(err instanceof ApiError ? err.message : "删除项目失败", "error");
+    }
+  };
+
   const toggle = async (p: Project) => {
     try {
       await api.setProjectEnabled(p.id, !p.enabled);
@@ -368,6 +379,7 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
                       <div className="row-actions">
                         <button className="btn small" onClick={() => startEdit(p)}>编辑</button>
                         <button className="btn small" onClick={() => void toggle(p)}>{p.enabled ? "停用" : "启用"}</button>
+                        <button className="btn small danger" onClick={() => void removeProject(p)}>删除</button>
                       </div>
                     </td>
                   </tr>

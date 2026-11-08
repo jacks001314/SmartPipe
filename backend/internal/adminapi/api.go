@@ -152,6 +152,7 @@ func (a *API) Register(app *iris.Application) {
 	party.Post("/projects", a.createProject)
 	party.Get("/projects/{id}", a.getProject)
 	party.Patch("/projects/{id}", a.updateProject)
+	party.Delete("/projects/{id}", a.deleteProject)
 	party.Post("/projects/{id}/enabled", a.setProjectEnabled)
 
 	party.Get("/credentials", a.listCredentials)

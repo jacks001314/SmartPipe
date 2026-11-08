@@ -31,6 +31,26 @@ func (a *API) getProject(c iris.Context) {
 	_ = c.JSON(envelope{Data: p})
 }
 
+func (a *API) deleteProject(c iris.Context) {
+	ctx := c.Request().Context()
+	id := strings.TrimSpace(c.Params().Get("id"))
+	if id == "" {
+		a.badRequest(c, "项目 id 必填")
+		return
+	}
+	project, err := a.store.GetProject(ctx, id)
+	if err != nil {
+		a.fail(c, err)
+		return
+	}
+	if err := a.store.DeleteProject(ctx, id); err != nil {
+		a.fail(c, err)
+		return
+	}
+	a.audit(ctx, c, "project.delete", "project", id, &id, "ok", map[string]any{"name": project.Name})
+	c.StatusCode(http.StatusNoContent)
+}
+
 func (a *API) createProject(c iris.Context) {
 	body, err := c.GetBody()
 	if err != nil || len(body) == 0 {

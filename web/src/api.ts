@@ -80,6 +80,7 @@ export const api = {
   listProjects: () => request<Project[]>("/projects"),
   createProject: (body: Partial<Project>) => request<Project>("/projects", { method: "POST", body }),
   updateProject: (id: string, body: Partial<Project>) => request<Project>("/projects/" + id, { method: "PATCH", body }),
+  deleteProject: (id: string) => request<void>("/projects/" + id, { method: "DELETE" }),
   setProjectEnabled: (id: string, enabled: boolean) =>
     request<Project>("/projects/" + id + "/enabled", { method: "POST", body: { enabled } }),
   listCredentials: (projectId?: string) =>
