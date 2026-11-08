@@ -213,6 +213,38 @@ export type ModelDefault = {
   reasoning_effort: string;
 };
 
+export type ModelConfigImportProvider = {
+  key: string;
+  name: string;
+  base_url: string;
+  wire_api: string;
+  has_api_key: boolean;
+  has_existing_credential: boolean;
+  env_key: string;
+  requires_openai_auth: boolean;
+  models: string[];
+  action: "create" | "update";
+};
+
+export type ModelConfigImportPreview = {
+  provider_count: number;
+  create_count: number;
+  update_count: number;
+  providers: ModelConfigImportProvider[];
+  default_model: string;
+  reasoning_effort: string;
+  warnings: string[];
+};
+
+export type ModelConfigImportResult = {
+  source: string;
+  imported: number;
+  updated: number;
+  providers: ModelProvider[];
+  default: ModelDefault;
+  warnings: string[];
+};
+
 export type ProviderTestResult = {
   ok: boolean;
   message: string;

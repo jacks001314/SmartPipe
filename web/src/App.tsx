@@ -16,7 +16,7 @@ type PageKey = "projects" | "credentials" | "models" | "lanxin" | "verify" | "re
 const NAV: { key: PageKey; label: string; icon: string }[] = [
   { key: "projects", label: "项目", icon: "▤" },
   { key: "credentials", label: "凭据与连接", icon: "⚿" },
-  { key: "models", label: "模型与推理", icon: "◎" },
+  { key: "models", label: "模型配置", icon: "◎" },
   { key: "lanxin", label: "蓝信机器人", icon: "✆" },
   { key: "verify", label: "补丁验证", icon: "✓" },
   { key: "release", label: "发版", icon: "⬆" },
@@ -27,7 +27,7 @@ const NAV: { key: PageKey; label: string; icon: string }[] = [
 const META: Record<PageKey, { crumb: string; title: string; sub: string }> = {
   projects: { crumb: "配置中心 / 项目", title: "项目", sub: "管理项目、GitHub 仓库、蓝信群和 Codex 模型绑定。" },
   credentials: { crumb: "配置中心 / 凭据与连接", title: "凭据与连接", sub: "凭据密文存储，界面只显示掩码；连接测试由服务端发起。" },
-  models: { crumb: "配置中心 / 模型与推理", title: "模型与推理", sub: "Codex 流水线的模型供应商、模型名与推理强度；项目绑定后自动生效。" },
+  models: { crumb: "配置中心 / 模型配置", title: "模型配置", sub: "管理模型供应商、模型目录与推理强度，支持从本机 Codex 配置导入。" },
   lanxin: { crumb: "配置中心 / 蓝信机器人", title: "蓝信机器人", sub: "管理多个机器人、自动同步所在群，并查看每个机器人的聊天消息与连接状态。" },
   verify: { crumb: "配置中心 / 补丁验证", title: "补丁验证", sub: "无 Actions 的合并门禁：干净副本应用补丁并执行 smartpipe.yaml。" },
   release: { crumb: "配置中心 / 发版", title: "发版", sub: "从干净提交构建制品，生成带校验和与签名的 manifest。" },

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api";
 import type { ModelDefault, ModelProvider } from "../types";
 import type { Notify } from "../App";
+import { ModelConfigImportModal } from "./ModelConfigImportModal";
 
 const WIRE_OPTIONS = [
   { value: "chat", label: "Chat Completions（/chat/completions）" },
@@ -28,6 +29,7 @@ export function ModelsPage({ notify }: { notify: Notify }) {
   const [busy, setBusy] = useState("");
   const [addModel, setAddModel] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [createForm, setCreateForm] = useState<ProviderForm>(EMPTY_PROVIDER);
   const [createModels, setCreateModels] = useState("");
   const [defaults, setDefaults] = useState<ModelDefault>({ provider_id: "", model: "", reasoning_effort: "" });
@@ -223,8 +225,8 @@ export function ModelsPage({ notify }: { notify: Notify }) {
       <div className="notice">
         <span>i</span>
         <div>
-          <strong>供应商管连接，模型目录管可选模型。</strong>
-          项目绑定供应商与模型后，Codex 流水线直接使用这里的地址与密钥；未绑定项目使用下面的默认模型。
+          <strong>统一管理模型供应商、模型目录与默认推理强度。</strong>
+          可以从本机 Codex 配置导入，也可以手动添加；项目绑定后自动生效，未绑定项目使用这里的默认模型。
         </div>
       </div>
 
@@ -236,7 +238,8 @@ export function ModelsPage({ notify }: { notify: Notify }) {
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn" onClick={() => void load()}>刷新</button>
-            <button className="btn primary" onClick={() => { setCreateForm(EMPTY_PROVIDER); setCreateModels(""); setCreateOpen(true); }}>＋ 新建供应商</button>
+            <button className="btn" onClick={() => setImportOpen(true)}>导入 Codex 配置</button>
+            <button className="btn primary" onClick={() => { setCreateForm(EMPTY_PROVIDER); setCreateModels(""); setCreateOpen(true); }}>＋ 手动添加</button>
           </div>
         </div>
         <div className="card-body">
@@ -292,8 +295,11 @@ export function ModelsPage({ notify }: { notify: Notify }) {
           ) : items.length === 0 ? (
             <div className="empty">
               <h3>还没有模型供应商</h3>
-              <div className="tiny">新建供应商，填 Base URL 和 API Key，再刷新模型目录。</div>
-              <button className="btn primary" style={{ marginTop: 14 }} onClick={() => setCreateOpen(true)}>＋ 新建供应商</button>
+              <div className="tiny">可从 ~/.codex/config.toml 导入，也可以手动填写 Base URL、API Key 和模型。</div>
+              <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 14 }}>
+                <button className="btn primary" onClick={() => setImportOpen(true)}>导入 Codex 配置</button>
+                <button className="btn" onClick={() => setCreateOpen(true)}>手动添加</button>
+              </div>
             </div>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "240px 1fr", gap: 16, marginTop: 14, minHeight: 420 }}>
@@ -451,12 +457,19 @@ export function ModelsPage({ notify }: { notify: Notify }) {
         </div>
       </div>
 
+      <ModelConfigImportModal
+        open={importOpen}
+        notify={notify}
+        onClose={() => setImportOpen(false)}
+        onImported={(providerID) => { if (providerID) void load(providerID); }}
+      />
+
       <div className={"modal-backdrop" + (createOpen ? " open" : "")}>
         <div className="modal">
           <div className="modal-head">
             <div>
-              <div className="modal-title">新建供应商</div>
-              <div className="modal-sub">填连接信息即可，模型可以在创建后刷新目录。</div>
+              <div className="modal-title">手动添加供应商</div>
+              <div className="modal-sub">填写连接信息与 API Key；模型可以在创建后刷新目录或手工添加。</div>
             </div>
             <button className="icon-btn" onClick={() => setCreateOpen(false)}>✕</button>
           </div>

@@ -3,6 +3,7 @@ module smartpipe/backend
 go 1.26.10
 
 require (
+	github.com/BurntSushi/toml v1.3.2
 	github.com/google/go-github/v68 v68.0.0
 	github.com/gorilla/websocket v1.5.1
 	github.com/jackc/pgx/v5 v5.7.4
@@ -14,7 +15,6 @@ require (
 )
 
 require (
-	github.com/BurntSushi/toml v1.3.2 // indirect
 	github.com/CloudyKit/fastprinter v0.0.0-20200109182630-33d98a066a53 // indirect
 	github.com/CloudyKit/jet/v6 v6.2.0 // indirect
 	github.com/Joker/jade v1.1.3 // indirect
