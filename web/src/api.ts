@@ -1,4 +1,4 @@
-import type { AgentItem, AgentToken, AppServer, AuditEntry, AuthConfig, AuthSession, BridgeLink, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Derivation, DispatchRecord, Health, IssueAttempt, IssuePlan, Project, ProjectBinding, ReleaseCandidate, ReleaseRecord, ReleaseRun, RepoOp, MCPConfig, TestResult, ToolCall, UserIdentity, VerificationRecord, WebhookDelivery, GitHubAppSetup, GitHubAppSetupStatus } from "./types";
+import type { AgentItem, AgentToken, AppServer, AuditEntry, AuthConfig, AuthSession, BridgeLink, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Derivation, DispatchRecord, Health, IssueAttempt, IssuePlan, Project, ProjectBinding, ReleaseCandidate, ReleaseRecord, ReleaseRun, RepoOp, MCPConfig, TestResult, ToolCall, UserIdentity, VerificationRecord, WebhookDelivery, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList } from "./types";
 
 const TOKEN_KEY = "smartpipe.adminToken";
 
@@ -84,6 +84,7 @@ export const api = {
     request<Project>("/projects/" + id + "/enabled", { method: "POST", body: { enabled } }),
   listCredentials: (projectId?: string) =>
     request<Credential[]>("/credentials" + (projectId ? "?project_id=" + encodeURIComponent(projectId) : "")),
+  listGitHubRepos: () => request<GitHubRepoList>("/github/repositories"),
   startGithubApp: () => request<GitHubAppSetup>("/github/app/start", { method: "POST" }),
   getGithubAppStatus: (setup_id: string) =>
     request<GitHubAppSetupStatus>("/github/app/status/" + encodeURIComponent(setup_id)),

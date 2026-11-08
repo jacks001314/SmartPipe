@@ -412,3 +412,19 @@ button { font-family: inherit; }
   .model-provider-panel { grid-template-columns: 1fr; }
   .model-provider-nav { border-right: 0; border-bottom: 1px solid var(--line); }
 }
+
+/* GitHub 配置页 */
+.github-account { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.github-account-main { display: grid; gap: 4px; }
+.github-repo-search {
+  width: 240px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px;
+  font-size: 12px; font-family: inherit; color: var(--ink); background: #fff;
+}
+
+.github-repo-table th { white-space: nowrap; }
+.github-repo-table td:nth-child(2),
+.github-repo-table td:nth-child(3),
+.github-repo-table td:nth-child(4),
+.github-repo-table td:nth-child(5),
+.github-repo-table td:nth-child(6) { white-space: nowrap; }
+.github-repo-table td:nth-child(7) { min-width: 90px; }

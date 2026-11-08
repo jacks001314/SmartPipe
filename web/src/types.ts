@@ -39,6 +39,33 @@ export type GitHubAppSetupStatus = {
   message?: string;
 };
 
+export type GitHubRepo = {
+  id: number;
+  full_name: string;
+  name: string;
+  owner: string;
+  private: boolean;
+  description: string;
+  default_branch: string;
+  language: string;
+  stars: number;
+  open_issues: number;
+  updated_at: string;
+  html_url: string;
+  archived: boolean;
+  fork: boolean;
+};
+
+export type GitHubRepoList = {
+  connected: boolean;
+  account: string;
+  app_slug: string;
+  source: string;
+  repos: GitHubRepo[];
+  error?: string;
+  fetched_at: string;
+};
+
 export type GitHubOAuthView = {
   configured: boolean;
   client_id: string;

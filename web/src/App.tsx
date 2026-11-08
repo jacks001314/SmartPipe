@@ -3,7 +3,7 @@ import { api, ApiError, getToken, setToken, setUnauthorizedHandler } from "./api
 import type { AuthSession, Health } from "./types";
 import { LoginPage } from "./pages/LoginPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
-import { CredentialsPage } from "./pages/CredentialsPage";
+import { GitHubPage } from "./pages/GitHubPage";
 import { ModelsPage } from "./pages/ModelsPage";
 import { LanxinPage } from "./pages/LanxinPage";
 import { AuditPage } from "./pages/AuditPage";
@@ -15,7 +15,7 @@ type PageKey = "projects" | "credentials" | "models" | "lanxin" | "verify" | "re
 
 const NAV: { key: PageKey; label: string; icon: string }[] = [
   { key: "projects", label: "项目", icon: "▤" },
-  { key: "credentials", label: "凭据与连接", icon: "⚿" },
+  { key: "credentials", label: "GitHub 配置", icon: "⌥" },
   { key: "models", label: "模型配置", icon: "◎" },
   { key: "lanxin", label: "蓝信机器人", icon: "✆" },
   { key: "verify", label: "补丁验证", icon: "✓" },
@@ -26,7 +26,7 @@ const NAV: { key: PageKey; label: string; icon: string }[] = [
 
 const META: Record<PageKey, { crumb: string; title: string; sub: string }> = {
   projects: { crumb: "配置中心 / 项目", title: "项目", sub: "管理项目、GitHub 仓库、蓝信群和 Codex 模型绑定。" },
-  credentials: { crumb: "配置中心 / 凭据与连接", title: "凭据与连接", sub: "凭据密文存储，界面只显示掩码；连接测试由服务端发起。" },
+  credentials: { crumb: "配置中心 / GitHub 配置", title: "GitHub 配置", sub: "GitHub 账户授权与仓库列表；仓库绑定在项目中完成。" },
   models: { crumb: "配置中心 / 模型配置", title: "模型配置", sub: "管理模型供应商、模型目录与推理强度，支持从本机 Codex 配置导入。" },
   lanxin: { crumb: "配置中心 / 蓝信机器人", title: "蓝信机器人", sub: "管理多个机器人、自动同步所在群，并查看每个机器人的聊天消息与连接状态。" },
   verify: { crumb: "配置中心 / 补丁验证", title: "补丁验证", sub: "无 Actions 的合并门禁：干净副本应用补丁并执行 smartpipe.yaml。" },
@@ -201,7 +201,7 @@ export function App() {
 
         <div className="content">
           {page === "projects" && <ProjectsPage notify={notify} />}
-          {page === "credentials" && <CredentialsPage notify={notify} />}
+          {page === "credentials" && <GitHubPage notify={notify} />}
           {page === "models" && <ModelsPage notify={notify} />}
           {page === "lanxin" && <LanxinPage notify={notify} />}
           {page === "verify" && <VerificationPage notify={notify} />}
