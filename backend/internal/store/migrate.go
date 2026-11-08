@@ -14,6 +14,34 @@ type migration struct {
 
 var migrations = []migration{
 	{
+		version: 24,
+		name:    "github_repository_catalog",
+		sql: `
+CREATE TABLE IF NOT EXISTS github_repositories (
+    full_name       TEXT PRIMARY KEY,
+    gh_id           BIGINT NOT NULL DEFAULT 0,
+    name            TEXT NOT NULL DEFAULT '',
+    owner           TEXT NOT NULL DEFAULT '',
+    private         BOOLEAN NOT NULL DEFAULT FALSE,
+    description     TEXT NOT NULL DEFAULT '',
+    default_branch  TEXT NOT NULL DEFAULT '',
+    language        TEXT NOT NULL DEFAULT '',
+    stars           INTEGER NOT NULL DEFAULT 0,
+    open_issues     INTEGER NOT NULL DEFAULT 0,
+    updated_at      TEXT NOT NULL DEFAULT '',
+    html_url        TEXT NOT NULL DEFAULT '',
+    archived        BOOLEAN NOT NULL DEFAULT FALSE,
+    fork            BOOLEAN NOT NULL DEFAULT FALSE,
+    source          TEXT NOT NULL DEFAULT '',
+    user_visible    BOOLEAN NOT NULL DEFAULT FALSE,
+    synced_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS github_repositories_synced_idx ON github_repositories (synced_at DESC);
+CREATE INDEX IF NOT EXISTS github_repositories_owner_idx ON github_repositories (lower(owner), full_name);
+`,
+	},
+	{
 		version: 23,
 		name:    "model_profiles",
 		sql: `

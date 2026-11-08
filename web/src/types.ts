@@ -68,12 +68,21 @@ export type GitHubRepoList = {
   oauth_scope: string;
   oauth_scope_live?: string;
   token_source: string;
+  catalog_count: number;
+  catalog_synced_at: string;
   user_repo_count: number;
   user_error?: string;
   repos: GitHubRepo[];
   warning?: string;
   error?: string;
   fetched_at: string;
+};
+
+export type GitHubRepoCatalog = {
+  repos: GitHubRepo[];
+  synced_at: string;
+  count: number;
+  warning?: string;
 };
 
 export type GitHubPATView = {

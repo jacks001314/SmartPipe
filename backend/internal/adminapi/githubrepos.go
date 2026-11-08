@@ -46,6 +46,8 @@ type githubRepoListView struct {
 	OAuthScope      string           `json:"oauth_scope"`
 	OAuthScopeLive  string           `json:"oauth_scope_live,omitempty"`
 	TokenSource     string           `json:"token_source"`
+	CatalogCount    int              `json:"catalog_count"`
+	CatalogSyncedAt string           `json:"catalog_synced_at"`
 	UserRepoCount   int              `json:"user_repo_count"`
 	UserError       string           `json:"user_error,omitempty"`
 	Repos           []githubRepoView `json:"repos"`
@@ -56,20 +58,73 @@ type githubRepoListView struct {
 
 func (a *API) registerGitHubRepos(party iris.Party) {
 	party.Get("/github/repositories", a.listGitHubRepositories)
+	party.Get("/github/repositories/catalog", a.listGitHubRepoCatalog)
+	party.Post("/github/repositories/sync", a.syncGitHubRepoCatalog)
 }
 
-// listGitHubRepositories 合并两类来源的仓库：
+// listGitHubRepositories 实时读取仓库并同步到本地仓库库，供项目创建时选择。
+func (a *API) listGitHubRepositories(c iris.Context) {
+	ctx := c.Request().Context()
+	view := a.buildGitHubRepoList(ctx)
+	if len(view.Repos) > 0 {
+		view.CatalogCount = len(view.Repos)
+		if err := a.store.SyncGitHubRepositories(ctx, githubReposToStore(view.Repos)); err == nil {
+			view.CatalogSyncedAt = time.Now().Format(time.RFC3339)
+		}
+	}
+	_ = c.JSON(envelope{Data: view})
+}
+
+// syncGitHubRepoCatalog 主动刷新仓库库（项目创建页“同步仓库”按钮）。
+func (a *API) syncGitHubRepoCatalog(c iris.Context) {
+	ctx := c.Request().Context()
+	view := a.buildGitHubRepoList(ctx)
+	if len(view.Repos) == 0 {
+		msg := view.Error
+		if msg == "" {
+			msg = "没有读到任何仓库，请检查 GitHub 授权"
+		}
+		a.badRequest(c, msg)
+		return
+	}
+	if err := a.store.SyncGitHubRepositories(ctx, githubReposToStore(view.Repos)); err != nil {
+		a.fail(c, err)
+		return
+	}
+	items, syncedAt, err := a.store.ListGitHubRepositories(ctx)
+	if err != nil {
+		a.fail(c, err)
+		return
+	}
+	_ = c.JSON(envelope{Data: iris.Map{
+		"repos": items, "synced_at": syncedAt, "count": len(items), "warning": view.Warning,
+	}})
+}
+
+// listGitHubRepoCatalog 读取已入库的仓库（不访问 GitHub），项目创建/编辑时使用。
+func (a *API) listGitHubRepoCatalog(c iris.Context) {
+	ctx := c.Request().Context()
+	items, syncedAt, err := a.store.ListGitHubRepositories(ctx)
+	if err != nil {
+		a.fail(c, err)
+		return
+	}
+	_ = c.JSON(envelope{Data: iris.Map{
+		"repos": items, "synced_at": syncedAt, "count": len(items),
+	}})
+}
+
+// buildGitHubRepoList 合并两类来源的仓库：
 //  1. GitHub App 安装授权范围（自动化、webhook 用）；
 //  2. 账号 OAuth/PAT 授权（能拿到本人、协作者和组织里被邀请的仓库）。
 //
 // 只有 App 安装授权看不到“别人仓库里邀请你参与”的项目，因此两路必须合并展示。
-func (a *API) listGitHubRepositories(c iris.Context) {
-	ctx := c.Request().Context()
+func (a *API) buildGitHubRepoList(ctx context.Context) githubRepoListView {
 	view := githubRepoListView{Repos: []githubRepoView{}, FetchedAt: time.Now().Format(time.RFC3339)}
 	creds, err := a.store.ListCredentials(ctx, nil)
 	if err != nil {
-		a.fail(c, err)
-		return
+		view.Error = err.Error()
+		return view
 	}
 
 	index := map[string]int{}
@@ -217,7 +272,7 @@ func (a *API) listGitHubRepositories(c iris.Context) {
 			view.Error = "还没有可用的 GitHub 授权，请先连接 GitHub"
 		}
 	}
-	_ = c.JSON(envelope{Data: view})
+	return view
 }
 
 // mergeGitHubRepoViews 合并两路仓库：App 安装范围优先，账号授权补充被邀请的仓库。
@@ -383,4 +438,30 @@ func scopeLabel(scope string) string {
 		return "无 scope"
 	}
 	return scope
+}
+
+// githubReposToStore 把仓库列表视图转换为入库结构。
+func githubReposToStore(list []githubRepoView) []store.GitHubRepository {
+	out := make([]store.GitHubRepository, 0, len(list))
+	for _, repo := range list {
+		out = append(out, store.GitHubRepository{
+			FullName:      repo.FullName,
+			GHID:          repo.ID,
+			Name:          repo.Name,
+			Owner:         repo.Owner,
+			Private:       repo.Private,
+			Description:   repo.Description,
+			DefaultBranch: repo.DefaultBranch,
+			Language:      repo.Language,
+			Stars:         repo.Stars,
+			OpenIssues:    repo.OpenIssues,
+			UpdatedAt:     repo.UpdatedAt,
+			HTMLURL:       repo.HTMLURL,
+			Archived:      repo.Archived,
+			Fork:          repo.Fork,
+			Source:        repo.Source,
+			UserVisible:   repo.UserVisible,
+		})
+	}
+	return out
 }

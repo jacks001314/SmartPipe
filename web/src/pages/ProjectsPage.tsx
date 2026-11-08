@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api";
-import type { LanxinBot, LanxinGroup, ModelProvider, Project } from "../types";
+import type { GitHubRepo, LanxinBot, LanxinGroup, ModelProvider, Project } from "../types";
 import type { Notify } from "../App";
 
 type FormState = {
@@ -46,6 +46,9 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
   const [lanxinBots, setLanxinBots] = useState<LanxinBot[]>([]);
   const [lanxinGroups, setLanxinGroups] = useState<LanxinGroup[]>([]);
   const [groupsLoading, setGroupsLoading] = useState(false);
+  const [repoCatalog, setRepoCatalog] = useState<GitHubRepo[]>([]);
+  const [catalogSyncedAt, setCatalogSyncedAt] = useState("");
+  const [repoSyncing, setRepoSyncing] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -82,11 +85,27 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
 
   useEffect(() => { void loadLanxinOptions(true); }, [loadLanxinOptions]);
 
+  const loadRepoCatalog = useCallback(async (sync = false) => {
+    if (sync) setRepoSyncing(true);
+    try {
+      const res = sync ? await api.syncGitHubRepoCatalog() : await api.listGitHubRepoCatalog();
+      setRepoCatalog(res.repos ?? []);
+      setCatalogSyncedAt(res.synced_at ?? "");
+    } catch (err) {
+      if (sync) notify(err instanceof ApiError ? err.message : "同步仓库库失败", "error");
+    } finally {
+      if (sync) setRepoSyncing(false);
+    }
+  }, [notify]);
+
+  useEffect(() => { void loadRepoCatalog(); }, [loadRepoCatalog]);
+
   const startCreate = () => {
     setEditing(null);
     setForm(EMPTY);
     setOpen(true);
     void loadLanxinOptions(false);
+    void loadRepoCatalog();
   };
 
   const startEdit = (p: Project) => {
@@ -107,6 +126,7 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
     });
     setOpen(true);
     void loadLanxinOptions(false);
+    void loadRepoCatalog();
   };
 
   const submit = async () => {
@@ -166,6 +186,31 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
+
+  const selectedRepoInfo = repoCatalog.find((repo) => {
+    const url = form.github_repo_url.trim().toLowerCase();
+    if (!url) return false;
+    return (
+      repo.html_url.toLowerCase() === url ||
+      repo.full_name.toLowerCase() === url ||
+      url.endsWith("/" + repo.full_name.toLowerCase())
+    );
+  }) ?? null;
+
+  const pickRepo = (fullName: string) => {
+    const repo = repoCatalog.find((item) => item.full_name === fullName);
+    if (!repo) return;
+    setForm((prev) => ({
+      ...prev,
+      github_repo_url: repo.html_url,
+      github_default_branch: repo.default_branch || prev.github_default_branch,
+      github_issue_repo: repo.full_name,
+    }));
+  };
+
+  const catalogSyncedLabel = catalogSyncedAt
+    ? new Date(catalogSyncedAt).toLocaleString("zh-CN", { hour12: false })
+    : "";
 
   return (
     <>
@@ -300,8 +345,31 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
                 <input value={form.github_default_branch} onChange={(e) => set("github_default_branch", e.target.value)} />
               </div>
               <div className="field full">
-                <label>GitHub 仓库地址</label>
+                <label>GitHub 仓库</label>
+                <div className="repo-picker">
+                  <select value={selectedRepoInfo?.full_name ?? ""} onChange={(e) => pickRepo(e.target.value)}>
+                    <option value="">从仓库库选择（{repoCatalog.length} 个）</option>
+                    {repoCatalog.map((repo) => (
+                      <option key={repo.full_name} value={repo.full_name}>
+                        {repo.full_name}{repo.private ? " · 私有" : ""}{repo.fork ? " · Fork" : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <button className="btn small" disabled={repoSyncing} onClick={() => void loadRepoCatalog(true)}>
+                    {repoSyncing ? "同步中…" : "同步仓库库"}
+                  </button>
+                  {catalogSyncedLabel && <span className="tiny">更新于 {catalogSyncedLabel}</span>}
+                </div>
                 <input value={form.github_repo_url} onChange={(e) => set("github_repo_url", e.target.value)} placeholder="https://github.com/org/repo" />
+                {selectedRepoInfo && (
+                  <div className="tiny" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                    <span className={"chip " + (selectedRepoInfo.private ? "warn" : "")}>{selectedRepoInfo.private ? "私有" : "公开"}</span>
+                    {selectedRepoInfo.fork && <span className="chip">Fork</span>}
+                    <span>默认分支 {selectedRepoInfo.default_branch || "—"}</span>
+                    {selectedRepoInfo.language && <span>· {selectedRepoInfo.language}</span>}
+                    <span>· 最近更新 {selectedRepoInfo.updated_at ? new Date(selectedRepoInfo.updated_at).toLocaleDateString("zh-CN") : "—"}</span>
+                  </div>
+                )}
               </div>
               <div className="field">
                 <label>Issue 仓库</label>

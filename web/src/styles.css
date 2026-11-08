@@ -458,6 +458,8 @@ button { font-family: inherit; }
 .github-pat-body { flex-basis: 100%; display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 .github-pat-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .github-pat-row input { flex: 1; min-width: 260px; }
+.repo-picker { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.repo-picker select { flex: 1; min-width: 240px; }
 .github-warn-banner {
   display: flex; gap: 10px; align-items: center; justify-content: space-between;
   padding: 8px 18px; background: #fff8e6; border-bottom: 1px solid #f2d59b;

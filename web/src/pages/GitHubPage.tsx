@@ -493,7 +493,7 @@ export function GitHubPage({ notify }: { notify: Notify }) {
             <div className="card-sub">
               {loading
                 ? "正在读取 GitHub 仓库…"
-                : `${list.length} 个仓库 · ${counts.private} 个私有 · ${counts.invited} 个邀请协作${filtersActive ? ` · 已筛选 ${filtered.length} 个` : ""}${repos?.fetched_at ? " · 更新于 " + formatTime(repos.fetched_at) : ""}`}
+                : `${list.length} 个仓库 · ${counts.private} 个私有 · ${counts.invited} 个邀请协作${filtersActive ? ` · 已筛选 ${filtered.length} 个` : ""}${repos?.catalog_count ? ` · 已入库 ${repos.catalog_count} 个` : ""}${repos?.fetched_at ? " · 更新于 " + formatTime(repos.fetched_at) : ""}`}
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
