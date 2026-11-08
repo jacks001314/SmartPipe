@@ -34,6 +34,10 @@ type githubRepoView struct {
 	Source string `json:"source"`
 	// UserVisible 表示账号授权（本人/协作者）这条路径也能看到它。
 	UserVisible bool `json:"user_visible"`
+	// LocalPath 是已克隆的本地目录（为空表示还没克隆）。
+	LocalPath   string `json:"local_path"`
+	CloneError  string `json:"clone_error,omitempty"`
+	CloneStatus string `json:"clone_status"`
 }
 
 type githubRepoListView struct {
@@ -270,6 +274,19 @@ func (a *API) buildGitHubRepoList(ctx context.Context) githubRepoListView {
 			view.Error = lastErr.Error()
 		} else {
 			view.Error = "还没有可用的 GitHub 授权，请先连接 GitHub"
+		}
+	}
+	if items, _, err := a.store.ListGitHubRepositories(ctx); err == nil {
+		local := make(map[string]store.GitHubRepository, len(items))
+		for _, item := range items {
+			local[strings.ToLower(item.FullName)] = item
+		}
+		for i := range view.Repos {
+			if item, ok := local[strings.ToLower(view.Repos[i].FullName)]; ok {
+				view.Repos[i].LocalPath = item.LocalPath
+				view.Repos[i].CloneError = item.CloneError
+				view.Repos[i].CloneStatus = item.CloneStatus
+			}
 		}
 	}
 	return view

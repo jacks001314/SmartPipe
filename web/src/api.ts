@@ -1,4 +1,4 @@
-import type { AgentItem, AgentToken, AppServer, AuditEntry, AuthConfig, AuthSession, BridgeLink, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Derivation, DispatchRecord, Health, IssueAttempt, IssuePlan, Project, ProjectBinding, ReleaseCandidate, ReleaseRecord, ReleaseRun, RepoOp, MCPConfig, TestResult, ToolCall, UserIdentity, VerificationRecord, WebhookDelivery, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubPATView, GitHubRepoCatalog } from "./types";
+import type { AgentItem, AgentToken, AppServer, AuditEntry, AuthConfig, AuthSession, BridgeLink, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Derivation, DispatchRecord, Health, IssueAttempt, IssuePlan, Project, ProjectBinding, ReleaseCandidate, ReleaseRecord, ReleaseRun, RepoOp, MCPConfig, TestResult, ToolCall, UserIdentity, VerificationRecord, WebhookDelivery, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubPATView, GitHubRepoCatalog, GitHubRepo } from "./types";
 
 const TOKEN_KEY = "smartpipe.adminToken";
 
@@ -87,6 +87,14 @@ export const api = {
   listGitHubRepos: () => request<GitHubRepoList>("/github/repositories"),
   listGitHubRepoCatalog: () => request<GitHubRepoCatalog>("/github/repositories/catalog"),
   syncGitHubRepoCatalog: () => request<GitHubRepoCatalog>("/github/repositories/sync", { method: "POST" }),
+  getGithubCloneRoot: () => request<{ root: string; exists: boolean }>("/github/clone-root"),
+  setGithubCloneRoot: (root: string) =>
+    request<{ root: string; exists: boolean }>("/github/clone-root", { method: "PUT", body: { root } }),
+  cloneGithubRepo: (body: { full_name: string; target_dir?: string }) =>
+    request<{ full_name: string; path: string; status: string }>(
+      "/github/repositories/clone",
+      { method: "POST", body },
+    ),
   getGithubProxy: () => request<GitHubProxyView>("/github/proxy"),
   setGithubProxy: (url: string) => request<GitHubProxyView>("/github/proxy", { method: "PUT", body: { url } }),
   testGithubProxy: (url: string) => request<{ ok: boolean; message: string; latency_ms: number }>("/github/proxy/test", { method: "POST", body: { url } }),

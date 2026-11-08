@@ -174,6 +174,7 @@ func (a *API) Register(app *iris.Application) {
 	a.registerLanxin(party)
 	a.registerGitHubOAuth(party)
 	a.registerGitHubApp(party)
+	a.registerGitHubClone(party)
 	a.registerGitHubPAT(party)
 	a.registerGitHubRepos(party)
 	a.registerGitHubProxy(party)

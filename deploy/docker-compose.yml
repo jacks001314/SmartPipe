@@ -50,10 +50,13 @@ services:
       SMARTPIPE_VERIFY_URL: http://patch-verifier:8095
       SMARTPIPE_RELEASE_URL: http://patch-verifier:8095
       SMARTPIPE_BOT_ADDR: http://bot:8093
+      # 仓库 clone 根目录；项目创建时选择这里克隆出来的本地库。
+      SMARTPIPE_CLONE_ROOT: /data/repos
     ports:
       - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_ADMIN_PORT:-8092}:8092"
     volumes:
       - ./data/runtime:/data/runtime
+      - ./data/repos:/data/repos
       - ${SMARTPIPE_CODEX_HOME:-/home/jacks/.codex}:/config/codex:ro
     depends_on:
       patch-verifier:

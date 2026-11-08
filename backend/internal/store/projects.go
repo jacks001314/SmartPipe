@@ -12,7 +12,7 @@ const projectColumns = `id, name, description, github_provider, github_repo_url,
     github_default_branch, github_issue_repo, labels_prefix, codeowners_required,
     approver_teams, verify_profile_path, release_profile, bluex_group_ids, lanxin_bot_id,
     lead_agent_template, tool_profile, codex_model_provider, codex_model,
-    codex_reasoning_effort, enabled, created_at, updated_at`
+    codex_reasoning_effort, enabled, created_at, updated_at, local_repo_path`
 
 func scanProject(row interface{ Scan(...any) error }) (*Project, error) {
 	var p Project
@@ -20,7 +20,7 @@ func scanProject(row interface{ Scan(...any) error }) (*Project, error) {
 		&p.GitHubDefaultBranch, &p.GitHubIssueRepo, &p.LabelsPrefix, &p.CodeownersRequired,
 		&p.ApproverTeams, &p.VerifyProfilePath, &p.ReleaseProfile, &p.BluexGroupIDs, &p.LanxinBotID,
 		&p.LeadAgentTemplate, &p.ToolProfile, &p.CodexModelProvider, &p.CodexModel,
-		&p.CodexReasoningEffort, &p.Enabled, &p.CreatedAt, &p.UpdatedAt)
+		&p.CodexReasoningEffort, &p.Enabled, &p.CreatedAt, &p.UpdatedAt, &p.LocalRepoPath)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -70,14 +70,14 @@ INSERT INTO projects (id, name, description, github_provider, github_repo_url,
     github_default_branch, github_issue_repo, labels_prefix, codeowners_required,
     approver_teams, verify_profile_path, release_profile, bluex_group_ids, lanxin_bot_id,
     lead_agent_template, tool_profile, enabled, codex_model_provider,
-    codex_model, codex_reasoning_effort)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+    codex_model, codex_reasoning_effort, local_repo_path)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
 RETURNING `+projectColumns,
 		p.ID, p.Name, p.Description, p.GitHubProvider, p.GitHubRepoURL,
 		p.GitHubDefaultBranch, p.GitHubIssueRepo, p.LabelsPrefix, p.CodeownersRequired,
 		p.ApproverTeams, p.VerifyProfilePath, p.ReleaseProfile, p.BluexGroupIDs, p.LanxinBotID,
 		p.LeadAgentTemplate, p.ToolProfile, p.Enabled, p.CodexModelProvider,
-		p.CodexModel, p.CodexReasoningEffort)
+		p.CodexModel, p.CodexReasoningEffort, p.LocalRepoPath)
 	out, err := scanProject(row)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -133,14 +133,14 @@ UPDATE projects SET
     codeowners_required = $9, approver_teams = $10, verify_profile_path = $11,
     release_profile = $12, bluex_group_ids = $13, lanxin_bot_id = $14,
     lead_agent_template = $15, tool_profile = $16, enabled = $17, codex_model_provider = $18,
-    codex_model = $19, codex_reasoning_effort = $20, updated_at = now()
+    codex_model = $19, codex_reasoning_effort = $20, local_repo_path = $21, updated_at = now()
 WHERE id = $1
 RETURNING `+projectColumns,
 		p.ID, p.Name, p.Description, p.GitHubProvider, p.GitHubRepoURL,
 		p.GitHubDefaultBranch, p.GitHubIssueRepo, p.LabelsPrefix, p.CodeownersRequired,
 		p.ApproverTeams, p.VerifyProfilePath, p.ReleaseProfile, p.BluexGroupIDs, p.LanxinBotID,
 		p.LeadAgentTemplate, p.ToolProfile, p.Enabled, p.CodexModelProvider,
-		p.CodexModel, p.CodexReasoningEffort)
+		p.CodexModel, p.CodexReasoningEffort, p.LocalRepoPath)
 	out, err := scanProject(row)
 	if err != nil {
 		if isUniqueViolation(err) {

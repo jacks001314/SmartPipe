@@ -23,6 +23,7 @@ type Project struct {
 	CodexModel           string    `json:"codex_model"`
 	CodexReasoningEffort string    `json:"codex_reasoning_effort"`
 	ToolProfile          string    `json:"tool_profile"`
+	LocalRepoPath        string    `json:"local_repo_path"`
 	Enabled              bool      `json:"enabled"`
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`

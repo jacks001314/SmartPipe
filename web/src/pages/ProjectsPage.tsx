@@ -7,6 +7,7 @@ type FormState = {
   name: string;
   description: string;
   github_repo_url: string;
+  local_repo_path: string;
   github_default_branch: string;
   github_issue_repo: string;
   bluex_group_ids: string;
@@ -22,6 +23,7 @@ const EMPTY: FormState = {
   name: "",
   description: "",
   github_repo_url: "",
+  local_repo_path: "",
   github_default_branch: "main",
   github_issue_repo: "",
   bluex_group_ids: "",
@@ -114,6 +116,7 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
       name: p.name,
       description: p.description,
       github_repo_url: p.github_repo_url,
+      local_repo_path: p.local_repo_path || "",
       github_default_branch: p.github_default_branch,
       github_issue_repo: p.github_issue_repo,
       bluex_group_ids: p.bluex_group_ids,
@@ -187,6 +190,8 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
+  const clonedRepos = repoCatalog.filter((repo) => (repo.local_path || "").trim() !== "");
+
   const selectedRepoInfo = repoCatalog.find((repo) => {
     const url = form.github_repo_url.trim().toLowerCase();
     if (!url) return false;
@@ -203,6 +208,7 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
     setForm((prev) => ({
       ...prev,
       github_repo_url: repo.html_url,
+      local_repo_path: repo.local_path || "",
       github_default_branch: repo.default_branch || prev.github_default_branch,
       github_issue_repo: repo.full_name,
     }));
@@ -299,7 +305,10 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
                     </td>
                     <td>
                       <div className="mono">{p.github_repo_url || "—"}</div>
-                      <div className="tiny">{p.github_provider} · 契约 {p.verify_profile_path}</div>
+                      <div className="tiny">
+                        {p.github_provider} · 契约 {p.verify_profile_path}
+                        {p.local_repo_path ? " · 本地库 " + p.local_repo_path : ""}
+                      </div>
                     </td>
                     <td className="mono">{p.github_default_branch}</td>
                     <td>{modelLabel(p.codex_model_provider, p.codex_model)}</td>
@@ -348,8 +357,10 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
                 <label>GitHub 仓库</label>
                 <div className="repo-picker">
                   <select value={selectedRepoInfo?.full_name ?? ""} onChange={(e) => pickRepo(e.target.value)}>
-                    <option value="">从仓库库选择（{repoCatalog.length} 个）</option>
-                    {repoCatalog.map((repo) => (
+                    <option value="">
+                      {clonedRepos.length > 0 ? `选择已克隆的本地库（${clonedRepos.length} 个）` : "还没有已克隆的仓库"}
+                    </option>
+                    {clonedRepos.map((repo) => (
                       <option key={repo.full_name} value={repo.full_name}>
                         {repo.full_name}{repo.private ? " · 私有" : ""}{repo.fork ? " · Fork" : ""}
                       </option>
@@ -361,6 +372,10 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
                   {catalogSyncedLabel && <span className="tiny">更新于 {catalogSyncedLabel}</span>}
                 </div>
                 <input value={form.github_repo_url} onChange={(e) => set("github_repo_url", e.target.value)} placeholder="https://github.com/org/repo" />
+                <input value={form.local_repo_path} onChange={(e) => set("local_repo_path", e.target.value)} placeholder="本地仓库目录，例如 /data/repos/org/repo" spellCheck={false} />
+                {clonedRepos.length === 0 && (
+                  <div className="tiny">还没有克隆任何仓库：到「GitHub 配置」页点仓库行的 Clone，克隆完成后这里就能选本地库。</div>
+                )}
                 {selectedRepoInfo && (
                   <div className="tiny" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                     <span className={"chip " + (selectedRepoInfo.private ? "warn" : "")}>{selectedRepoInfo.private ? "私有" : "公开"}</span>

@@ -47,20 +47,29 @@ export function GitHubPage({ notify }: { notify: Notify }) {
   const [patBusy, setPatBusy] = useState(false);
   const [patNote, setPatNote] = useState("");
   const [patNoteOk, setPatNoteOk] = useState(true);
+  const [cloneRoot, setCloneRoot] = useState("");
+  const [cloneRootBusy, setCloneRootBusy] = useState(false);
+  const [cloneTarget, setCloneTarget] = useState<GitHubRepo | null>(null);
+  const [cloneDir, setCloneDir] = useState("");
+  const [cloneBusy, setCloneBusy] = useState(false);
+  const [cloneError, setCloneError] = useState("");
+  const [cloningName, setCloningName] = useState("");
   const accountScope = repos?.oauth_scope ?? "";
   const scopeHasRepo = accountScope.split(",").map((item) => item.trim()).includes("repo");
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [repoList, creds, projs, oauthView, proxyView] = await Promise.all([
+      const [repoList, creds, projs, oauthView, proxyView, cloneRootView] = await Promise.all([
         api.listGitHubRepos(),
         api.listCredentials(),
         api.listProjects(),
         api.getGithubOAuth(),
         api.getGithubProxy(),
+        api.getGithubCloneRoot(),
       ]);
       setProxyURL(proxyView.url ?? "");
+      setCloneRoot(cloneRootView.root ?? "");
       setRepos({ ...repoList, repos: repoList.repos ?? [] });
       setOauth(oauthView);
       setCredentials(creds ?? []);
@@ -165,6 +174,76 @@ export function GitHubPage({ notify }: { notify: Notify }) {
       setProxyBusy("");
     }
   };
+
+  const saveCloneRoot = async () => {
+    setCloneRootBusy(true);
+    try {
+      const view = await api.setGithubCloneRoot(cloneRoot.trim());
+      setCloneRoot(view.root);
+      notify("克隆目录已保存：" + view.root, "ok");
+    } catch (err) {
+      notify(err instanceof ApiError ? err.message : "保存克隆目录失败", "error");
+    } finally {
+      setCloneRootBusy(false);
+    }
+  };
+
+  const openClone = (repo: GitHubRepo) => {
+    setCloneTarget(repo);
+    setCloneDir((cloneRoot || "/data/repos").replace(/\/+$/, "") + "/" + repo.full_name);
+    setCloneError("");
+  };
+
+  const submitClone = async () => {
+    if (!cloneTarget) return;
+    setCloneBusy(true);
+    setCloneError("");
+    try {
+      const res = await api.cloneGithubRepo({ full_name: cloneTarget.full_name, target_dir: cloneDir.trim() });
+      notify("开始克隆到 " + res.path, "ok");
+      setCloningName(res.full_name);
+      setCloneTarget(null);
+    } catch (err) {
+      setCloneError(err instanceof ApiError ? err.message : "克隆失败");
+    } finally {
+      setCloneBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!cloningName) return;
+    const tick = async () => {
+      try {
+        const cat = await api.listGitHubRepoCatalog();
+        const repo = (cat.repos ?? []).find((item) => item.full_name === cloningName);
+        if (repo) {
+          setRepos((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  repos: prev.repos.map((item) =>
+                    item.full_name === cloningName
+                      ? { ...item, local_path: repo.local_path, clone_status: repo.clone_status, clone_error: repo.clone_error }
+                      : item,
+                  ),
+                }
+              : prev,
+          );
+        }
+        if (!repo || repo.clone_status !== "cloning") {
+          if (repo?.clone_status === "cloned") notify("克隆完成：" + cloningName, "ok");
+          else if (repo?.clone_status === "failed") notify("克隆失败：" + cloningName + (repo.clone_error ? "：" + repo.clone_error : ""), "error");
+          setCloningName("");
+          void load();
+        }
+      } catch {
+        /* 下一轮再查 */
+      }
+    };
+    void tick();
+    const timer = window.setInterval(() => void tick(), 3000);
+    return () => window.clearInterval(timer);
+  }, [cloningName, load, notify]);
 
   const startAccountLogin = async () => {
     setDeviceBusy(true);
@@ -408,6 +487,19 @@ export function GitHubPage({ notify }: { notify: Notify }) {
               支持 http / https / socks5；容器部署请填宿主机代理地址，登录和仓库请求都会走这里。
             </span>
           </div>
+          <div className="github-proxy">
+            <span className="github-proxy-label">克隆目录</span>
+            <input
+              value={cloneRoot}
+              onChange={(event) => setCloneRoot(event.target.value)}
+              placeholder="/data/repos"
+              spellCheck={false}
+            />
+            <button className="btn small" disabled={cloneRootBusy} onClick={() => void saveCloneRoot()}>
+              {cloneRootBusy ? "保存中…" : "保存"}
+            </button>
+            <span className="tiny github-proxy-hint">仓库会 clone 到该目录下的 owner/repo，项目创建时选择本地库。</span>
+          </div>
           <div className="github-account-auth">
             <div className="tiny">
               App 安装与 GitHub 账号登录只能看到授权范围内的仓库；别人仓库里邀请你参与的项目，用底部「访问令牌（PAT）」读取才完整。
@@ -595,6 +687,9 @@ export function GitHubPage({ notify }: { notify: Notify }) {
                           <span className={"chip " + (repo.private ? "warn" : "")}>{repo.private ? "私有" : "公开"}</span>
                           {isInvited(repo) && <span className="chip ok">邀请协作 · {repo.owner}</span>}
                           {!isInvited(repo) && repo.user_visible && <span className="chip">账号可见</span>}
+                          {repo.clone_status === "cloning" && <span className="chip warn">克隆中…</span>}
+                          {repo.clone_status === "failed" && <span className="chip bad" title={repo.clone_error}>克隆失败</span>}
+                          {repo.local_path && repo.clone_status !== "cloning" && <span className="chip ok" title={repo.local_path}>已克隆</span>}
                           {repo.fork && <span className="chip">Fork</span>}
                           {repo.archived && <span className="chip bad">已归档</span>}
                           {repo.description && <span>{repo.description}</span>}
@@ -610,6 +705,7 @@ export function GitHubPage({ notify }: { notify: Notify }) {
                       </td>
                       <td>
                         <div className="row-actions">
+                          <button className="btn small" onClick={() => openClone(repo)}>Clone</button>
                           <a className="btn small" href={repo.html_url} target="_blank" rel="noreferrer">打开</a>
                         </div>
                       </td>
@@ -619,6 +715,32 @@ export function GitHubPage({ notify }: { notify: Notify }) {
               </tbody>
             </table>
           )}
+        </div>
+      </div>
+
+      <div className={"modal-backdrop" + (cloneTarget ? " open" : "")}>
+        <div className="modal" style={{ maxWidth: 640 }}>
+          <div className="modal-head">
+            <div>
+              <div className="modal-title">Clone 仓库</div>
+              <div className="modal-sub mono">{cloneTarget?.full_name}</div>
+            </div>
+            <button className="icon-btn" onClick={() => setCloneTarget(null)}>✕</button>
+          </div>
+          <div className="modal-body">
+            <div className="field">
+              <label>目标目录</label>
+              <input value={cloneDir} onChange={(event) => setCloneDir(event.target.value)} spellCheck={false} />
+              <div className="tiny">目录已存在且非空时会拒绝克隆；克隆成功后项目创建页即可选到它。</div>
+            </div>
+            {cloneError && <div className="tiny bad-note">{cloneError}</div>}
+            <div className="row-actions" style={{ marginTop: 12, justifyContent: "flex-end" }}>
+              <button className="btn" disabled={cloneBusy} onClick={() => setCloneTarget(null)}>取消</button>
+              <button className="btn primary" disabled={cloneBusy} onClick={() => void submitClone()}>
+                {cloneBusy ? "正在提交…" : "开始克隆"}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </>

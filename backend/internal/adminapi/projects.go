@@ -172,6 +172,7 @@ func applyProjectPatch(p *store.Project, patch map[string]any) {
 	str("description", &p.Description)
 	str("github_provider", &p.GitHubProvider)
 	str("github_repo_url", &p.GitHubRepoURL)
+	str("local_repo_path", &p.LocalRepoPath)
 	str("github_default_branch", &p.GitHubDefaultBranch)
 	str("github_issue_repo", &p.GitHubIssueRepo)
 	str("labels_prefix", &p.LabelsPrefix)

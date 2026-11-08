@@ -4,6 +4,7 @@ export type Project = {
   description: string;
   github_provider: string;
   github_repo_url: string;
+  local_repo_path: string;
   github_default_branch: string;
   github_issue_repo: string;
   labels_prefix: string;
@@ -56,6 +57,10 @@ export type GitHubRepo = {
   fork: boolean;
   source: string;
   user_visible: boolean;
+  local_path: string;
+  cloned_at?: string;
+  clone_error?: string;
+  clone_status?: string;
 };
 
 export type GitHubRepoList = {

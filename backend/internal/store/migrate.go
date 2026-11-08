@@ -14,6 +14,23 @@ type migration struct {
 
 var migrations = []migration{
 	{
+		version: 26,
+		name:    "github_repo_clone_status",
+		sql: `
+ALTER TABLE github_repositories ADD COLUMN IF NOT EXISTS clone_status TEXT NOT NULL DEFAULT '';
+`,
+	},
+	{
+		version: 25,
+		name:    "github_repo_clone",
+		sql: `
+ALTER TABLE github_repositories ADD COLUMN IF NOT EXISTS local_path TEXT NOT NULL DEFAULT '';
+ALTER TABLE github_repositories ADD COLUMN IF NOT EXISTS cloned_at TIMESTAMPTZ;
+ALTER TABLE github_repositories ADD COLUMN IF NOT EXISTS clone_error TEXT NOT NULL DEFAULT '';
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS local_repo_path TEXT NOT NULL DEFAULT '';
+`,
+	},
+	{
 		version: 24,
 		name:    "github_repository_catalog",
 		sql: `
