@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api";
-import type { GitHubRepo, LanxinBot, LanxinGroup, ModelProvider, Project } from "../types";
+import type { GitHubRepo, LanxinBot, LanxinGroup, ModelProfile, ModelProvider, Project } from "../types";
 import type { Notify } from "../App";
 
 type FormState = {
@@ -51,6 +51,10 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
   const [repoCatalog, setRepoCatalog] = useState<GitHubRepo[]>([]);
   const [catalogSyncedAt, setCatalogSyncedAt] = useState("");
   const [repoSyncing, setRepoSyncing] = useState(false);
+  const [repoSearch, setRepoSearch] = useState("");
+  const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
+  const [modelProfileId, setModelProfileId] = useState("");
+  const [nameTouched, setNameTouched] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,6 +72,7 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
 
   useEffect(() => {
     void api.listModelProviders().then(setProviders).catch(() => setProviders([]));
+    void api.listModelProfiles().then(setModelProfiles).catch(() => setModelProfiles([]));
   }, []);
 
   const loadLanxinOptions = useCallback(async (refresh = false) => {
@@ -105,6 +110,9 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
   const startCreate = () => {
     setEditing(null);
     setForm(EMPTY);
+    setNameTouched(false);
+    setModelProfileId("");
+    setRepoSearch("");
     setOpen(true);
     void loadLanxinOptions(false);
     void loadRepoCatalog();
@@ -127,6 +135,12 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
       codex_reasoning_effort: p.codex_reasoning_effort,
       codeowners_required: p.codeowners_required,
     });
+    setNameTouched(true);
+    const matched = modelProfiles.find(
+      (profile) => profile.provider_id === p.codex_model_provider && profile.model === p.codex_model,
+    );
+    setModelProfileId(matched?.id ?? "");
+    setRepoSearch("");
     setOpen(true);
     void loadLanxinOptions(false);
     void loadRepoCatalog();
@@ -177,11 +191,6 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
     return p ? (model ? p.name + " · " + model : p.name) : providerId;
   };
 
-  const boundProvider = providers.find((p) => p.id === form.codex_model_provider) ?? null;
-  const selectedGroup = form.bluex_group_ids.split(",")[0]?.trim() || "";
-  const availableGroups = lanxinGroups.filter((g) =>
-    g.bot_id === form.lanxin_bot_id && (!g.project_id || g.project_id === editing?.id)
-  );
   const groupLabel = (id: string) => {
     const g = lanxinGroups.find((item) => item.group_id === id);
     return g ? (g.name || g.group_id) : id;
@@ -191,6 +200,20 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
     setForm((prev) => ({ ...prev, [key]: value }));
 
   const clonedRepos = repoCatalog.filter((repo) => (repo.local_path || "").trim() !== "");
+
+  const filteredCloned = clonedRepos.filter((repo) => {
+    const q = repoSearch.trim().toLowerCase();
+    if (!q) return true;
+    return repo.full_name.toLowerCase().includes(q) || (repo.local_path || "").toLowerCase().includes(q);
+  });
+  const selectedGroupName = lanxinGroups.find((g) => g.group_id === form.bluex_group_ids)?.name || "";
+  const selectedProfile = modelProfiles.find((p) => p.id === modelProfileId) ?? null;
+  const providerName = providers.find((p) => p.id === form.codex_model_provider)?.name || form.codex_model_provider;
+  const legacyModelLabel =
+    !modelProfileId && form.codex_model_provider
+      ? `${providerName}${form.codex_model ? " · " + form.codex_model : ""}`
+      : "";
+
 
   const selectedRepoInfo = repoCatalog.find((repo) => {
     const url = form.github_repo_url.trim().toLowerCase();
@@ -207,11 +230,32 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
     if (!repo) return;
     setForm((prev) => ({
       ...prev,
+      name: !nameTouched || prev.name.trim() === "" ? repo.name : prev.name,
       github_repo_url: repo.html_url,
       local_repo_path: repo.local_path || "",
       github_default_branch: repo.default_branch || prev.github_default_branch,
       github_issue_repo: repo.full_name,
     }));
+  };
+
+  const pickModelProfile = (profileId: string) => {
+    setModelProfileId(profileId);
+    const profile = modelProfiles.find((item) => item.id === profileId);
+    if (!profile) {
+      setForm((prev) => ({ ...prev, codex_model_provider: "", codex_model: "", codex_reasoning_effort: "" }));
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      codex_model_provider: profile.provider_id,
+      codex_model: profile.model,
+      codex_reasoning_effort: profile.reasoning_effort,
+    }));
+  };
+
+  const pickGroup = (groupId: string) => {
+    const group = lanxinGroups.find((item) => item.group_id === groupId);
+    setForm((prev) => ({ ...prev, bluex_group_ids: groupId, lanxin_bot_id: group?.bot_id || prev.lanxin_bot_id }));
   };
 
   const catalogSyncedLabel = catalogSyncedAt
@@ -335,151 +379,159 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
       </div>
 
       <div className={"modal-backdrop" + (open ? " open" : "")}>
-        <div className="modal">
+        <div className="modal" style={{ maxWidth: 820 }}>
           <div className="modal-head">
             <div>
               <div className="modal-title">{editing ? "编辑项目" : "新增项目"}</div>
-              <div className="modal-sub">仓库地址与分支用于工作区检出；蓝信群用于入站路由。</div>
+              <div className="modal-sub">选一个已克隆的仓库，再绑定蓝信群和模型就能创建。</div>
             </div>
             <button className="icon-btn" onClick={() => setOpen(false)}>✕</button>
           </div>
           <div className="modal-body">
-            <div className="form-grid">
-              <div className="field">
-                <label>项目名称</label>
-                <input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="SmartPipe Core" />
+            <div className="field full">
+              <label>
+                代码仓库
+                <span className="proj-req">*</span>
+                <span className="tiny" style={{ marginLeft: 8 }}>只列出已 clone 到本地的仓库（{clonedRepos.length}）</span>
+              </label>
+              <div className="proj-repo-tools">
+                <input
+                  value={repoSearch}
+                  onChange={(e) => setRepoSearch(e.target.value)}
+                  placeholder="搜索仓库名或路径，例如 syntropy"
+                />
+                <button className="btn small" disabled={repoSyncing} onClick={() => void loadRepoCatalog(true)}>
+                  {repoSyncing ? "同步中…" : "同步仓库库"}
+                </button>
+                {catalogSyncedLabel && <span className="tiny">更新于 {catalogSyncedLabel}</span>}
               </div>
-              <div className="field">
-                <label>默认分支</label>
-                <input value={form.github_default_branch} onChange={(e) => set("github_default_branch", e.target.value)} />
-              </div>
-              <div className="field full">
-                <label>GitHub 仓库</label>
-                <div className="repo-picker">
-                  <select value={selectedRepoInfo?.full_name ?? ""} onChange={(e) => pickRepo(e.target.value)}>
-                    <option value="">
-                      {clonedRepos.length > 0 ? `选择已克隆的本地库（${clonedRepos.length} 个）` : "还没有已克隆的仓库"}
-                    </option>
-                    {clonedRepos.map((repo) => (
-                      <option key={repo.full_name} value={repo.full_name}>
-                        {repo.full_name}{repo.private ? " · 私有" : ""}{repo.fork ? " · Fork" : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <button className="btn small" disabled={repoSyncing} onClick={() => void loadRepoCatalog(true)}>
-                    {repoSyncing ? "同步中…" : "同步仓库库"}
-                  </button>
-                  {catalogSyncedLabel && <span className="tiny">更新于 {catalogSyncedLabel}</span>}
-                </div>
-                <input value={form.github_repo_url} onChange={(e) => set("github_repo_url", e.target.value)} placeholder="https://github.com/org/repo" />
-                <input value={form.local_repo_path} onChange={(e) => set("local_repo_path", e.target.value)} placeholder="本地仓库目录，例如 /data/repos/org/repo" spellCheck={false} />
-                {clonedRepos.length === 0 && (
-                  <div className="tiny">还没有克隆任何仓库：到「GitHub 配置」页点仓库行的 Clone，克隆完成后这里就能选本地库。</div>
-                )}
-                {selectedRepoInfo && (
-                  <div className="tiny" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                    <span className={"chip " + (selectedRepoInfo.private ? "warn" : "")}>{selectedRepoInfo.private ? "私有" : "公开"}</span>
-                    {selectedRepoInfo.fork && <span className="chip">Fork</span>}
-                    <span>默认分支 {selectedRepoInfo.default_branch || "—"}</span>
-                    {selectedRepoInfo.language && <span>· {selectedRepoInfo.language}</span>}
-                    <span>· 最近更新 {selectedRepoInfo.updated_at ? new Date(selectedRepoInfo.updated_at).toLocaleDateString("zh-CN") : "—"}</span>
+              <div className="proj-repo-list">
+                {filteredCloned.map((repo) => (
+                  <div
+                    key={repo.full_name}
+                    className={"proj-repo" + (form.local_repo_path === repo.local_path ? " active" : "")}
+                    onClick={() => pickRepo(repo.full_name)}
+                  >
+                    <span className="proj-radio" />
+                    <div className="proj-repo-main">
+                      <div className="proj-repo-name">{repo.full_name}</div>
+                      <div className="proj-repo-meta">
+                        <span className={"chip " + (repo.private ? "warn" : "")}>{repo.private ? "私有" : "公开"}</span>
+                        {repo.fork && <span className="chip">Fork</span>}
+                        {repo.language && <span className="chip">{repo.language}</span>}
+                        <span className="chip">分支 {repo.default_branch || "main"}</span>
+                        <span className="chip ok">已克隆</span>
+                      </div>
+                      <div className="proj-repo-path">{repo.local_path}</div>
+                    </div>
+                  </div>
+                ))}
+                {filteredCloned.length === 0 && (
+                  <div className="tiny" style={{ padding: "14px 4px" }}>
+                    {clonedRepos.length === 0
+                      ? "还没有已克隆的仓库：到「GitHub 配置」页点仓库行的 Clone，克隆完成后这里就能选。"
+                      : "没有匹配的仓库，换个关键词试试。"}
                   </div>
                 )}
               </div>
+            </div>
+
+            <div className="form-grid">
               <div className="field">
-                <label>Issue 仓库</label>
-                <input value={form.github_issue_repo} onChange={(e) => set("github_issue_repo", e.target.value)} placeholder="org/repo" />
-              </div>
-              <div className="field">
-                <label>蓝信机器人</label>
-                <select
-                  value={form.lanxin_bot_id}
-                  onChange={(e) => setForm((prev) => ({ ...prev, lanxin_bot_id: e.target.value, bluex_group_ids: "" }))}
-                >
-                  <option value="">不绑定蓝信群</option>
-                  {lanxinBots.map((b) => <option key={b.id} value={b.id}>{b.name}（{b.group_count} 个群）</option>)}
-                </select>
-                {groupsLoading && <div className="tiny">正在同步机器人所在群…</div>}
+                <label>项目名称</label>
+                <input
+                  value={form.name}
+                  onChange={(e) => {
+                    setNameTouched(e.target.value.trim() !== "");
+                    set("name", e.target.value);
+                  }}
+                  placeholder="选择仓库后自动填写"
+                />
               </div>
               <div className="field">
                 <label>蓝信群</label>
+                <select value={form.bluex_group_ids} onChange={(e) => pickGroup(e.target.value)}>
+                  <option value="">暂不绑定（可稍后配置）</option>
+                  {lanxinBots.map((bot) => {
+                    const groups = lanxinGroups.filter((g) => g.bot_id === bot.id && g.active);
+                    if (groups.length === 0) return null;
+                    return (
+                      <optgroup key={bot.id} label={"蓝信机器人 · " + bot.name}>
+                        {groups.map((g) => {
+                          const occupied = Boolean(g.project_id) && g.project_id !== editing?.id;
+                          return (
+                            <option key={g.id} value={g.group_id} disabled={occupied}>
+                              {(g.name || g.group_id) + "（" + g.member_count + " 人）" + (occupied ? " — 已被其他项目绑定" : "")}
+                            </option>
+                          );
+                        })}
+                      </optgroup>
+                    );
+                  })}
+                </select>
+                <div className="tiny">按群名选择；已被其他项目占用的群会置灰。</div>
+              </div>
+              <div className="field">
+                <label>模型</label>
                 <select
-                  value={selectedGroup}
-                  disabled={!form.lanxin_bot_id}
+                  value={modelProfileId}
                   onChange={(e) => {
-                    const group = lanxinGroups.find((g) => g.group_id === e.target.value);
-                    setForm((prev) => ({ ...prev, bluex_group_ids: e.target.value, lanxin_bot_id: group?.bot_id || prev.lanxin_bot_id }));
+                    if (e.target.value === "__current") return;
+                    pickModelProfile(e.target.value);
                   }}
                 >
-                  <option value="">{form.lanxin_bot_id ? "请选择群" : "请先选择机器人"}</option>
-                  {availableGroups.map((g) => (
-                    <option key={g.id} value={g.group_id}>{g.name || g.group_id}（{g.member_count} 人）</option>
+                  <option value="">跟随系统默认</option>
+                  {legacyModelLabel && <option value="__current">当前：{legacyModelLabel}</option>}
+                  {modelProfiles.filter((p) => p.enabled).map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.name + " · " + profile.model + (profile.reasoning_effort ? " · 推理 " + profile.reasoning_effort : "")}
+                    </option>
                   ))}
                 </select>
-                <div className="tiny">群列表由机器人自动同步；已被其他项目绑定的群不会出现。</div>
+                <div className="tiny">只保留一个模型入口，不再分别选供应商、模型名和推理强度。</div>
               </div>
               <div className="field">
-                <label>验证契约路径</label>
-                <input value={form.verify_profile_path} onChange={(e) => set("verify_profile_path", e.target.value)} />
-              </div>
-              <div className="field">
-                <label>Codex 供应商</label>
-                <select
-                  value={form.codex_model_provider}
-                  onChange={(e) => setForm((prev) => ({ ...prev, codex_model_provider: e.target.value, codex_model: "" }))}
-                >
-                  <option value="">未绑定（用默认模型）</option>
-                  {providers.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label>Codex 模型</label>
-                <select
-                  value={form.codex_model}
-                  disabled={!boundProvider}
-                  onChange={(e) => set("codex_model", e.target.value)}
-                >
-                  <option value="">未选择</option>
-                  {(boundProvider?.models ?? []).filter((m) => m.enabled).map((m) => (
-                    <option key={m.model_id} value={m.model_id}>{m.model_id}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label>推理强度</label>
-                <select value={form.codex_reasoning_effort} onChange={(e) => set("codex_reasoning_effort", e.target.value)}>
-                  <option value="">跟随模型默认</option>
-                  <option value="minimal">minimal</option>
-                  <option value="low">low</option>
-                  <option value="medium">medium</option>
-                  <option value="high">high</option>
-                  <option value="xhigh">xhigh</option>
-                </select>
-              </div>
-              <div className="field full">
                 <label>描述</label>
                 <input value={form.description} onChange={(e) => set("description", e.target.value)} placeholder="可选" />
               </div>
-              <div className="field">
-                <label>审批要求</label>
-                <select
-                  value={form.codeowners_required ? "yes" : "no"}
-                  onChange={(e) => set("codeowners_required", e.target.value === "yes")}
-                >
-                  <option value="no">维护者批准即可</option>
-                  <option value="yes">必须满足 CODEOWNERS</option>
-                </select>
-              </div>
             </div>
+
+            <div className={"proj-summary" + (selectedRepoInfo || selectedGroupName || selectedProfile ? " show" : "")}>
+              将创建项目 <b>{form.name || selectedRepoInfo?.name || "—"}</b>
+              {selectedRepoInfo ? (
+                <>
+                  ：仓库 <b>{selectedRepoInfo.full_name}</b>（{selectedRepoInfo.default_branch || "main"}）
+                </>
+              ) : null}
+              ，蓝信群 <b>{selectedGroupName || "未绑定"}</b>，模型 <b>{selectedProfile ? selectedProfile.name : legacyModelLabel || "系统默认"}</b>。
+            </div>
+
+            <details className="proj-adv">
+              <summary>高级设置</summary>
+              <div className="form-grid" style={{ marginTop: 12 }}>
+                <div className="field">
+                  <label>验证契约路径</label>
+                  <input value={form.verify_profile_path} onChange={(e) => set("verify_profile_path", e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>审批要求</label>
+                  <select
+                    value={form.codeowners_required ? "yes" : "no"}
+                    onChange={(e) => set("codeowners_required", e.target.value === "yes")}
+                  >
+                    <option value="no">维护者批准即可</option>
+                    <option value="yes">必须满足 CODEOWNERS</option>
+                  </select>
+                </div>
+              </div>
+            </details>
           </div>
           <div className="modal-foot">
-            <div className="tiny">保存会写入审计日志，不涉及凭据明文。</div>
+            <div className="tiny">仓库路径、分支和 Issue 仓库都从本地克隆自动带出；保存会写入审计日志。</div>
             <div>
               <button className="btn" onClick={() => setOpen(false)}>取消</button>{" "}
-              <button className="btn primary" disabled={saving} onClick={() => void submit()}>
-                {saving ? "保存中…" : "保存"}
+              <button className="btn primary" disabled={saving || !form.local_repo_path} onClick={() => void submit()}>
+                {saving ? "保存中…" : editing ? "保存" : "创建项目"}
               </button>
             </div>
           </div>
