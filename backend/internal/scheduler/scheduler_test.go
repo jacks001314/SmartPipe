@@ -63,6 +63,7 @@ func (f *fakeRunner) last() codexrunner.Spec {
 
 type fakeTracker struct {
 	mu       sync.Mutex
+	states   map[int]string
 	issues   []Issue
 	comments map[int][]Comment
 	searches []Issue
@@ -90,10 +91,26 @@ func (f *fakeTracker) GetIssue(ctx context.Context, projectID string, number int
 	defer f.mu.Unlock()
 	for _, it := range f.issues {
 		if it.Number == number {
+			if st, ok := f.states[number]; ok {
+				it.State = st
+			}
 			return it, nil
 		}
 	}
-	return Issue{Number: number, Title: "issue", State: "open"}, nil
+	state := "open"
+	if st, ok := f.states[number]; ok {
+		state = st
+	}
+	return Issue{Number: number, Title: "issue", State: state}, nil
+}
+
+func (f *fakeTracker) setState(number int, state string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.states == nil {
+		f.states = map[int]string{}
+	}
+	f.states[number] = state
 }
 
 func (f *fakeTracker) Comment(ctx context.Context, projectID string, number int, body string) error {
@@ -124,6 +141,24 @@ func (f *fakeTracker) CreatePR(ctx context.Context, projectID string, issue int,
 	return pr, nil
 }
 
+func (f *fakeTracker) issueCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.issues)
+}
+
+func (f *fakeTracker) issueAt(i int) Issue {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.issues[i]
+}
+
+func (f *fakeTracker) prCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.prCalls
+}
+
 func (f *fakeTracker) commentsFor(n int) []Comment {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -149,20 +184,37 @@ func (f *fakeNotifier) all() []string {
 }
 
 type fakeWorkspace struct {
+	mu        sync.Mutex
 	prepared  int
 	cleaned   int
 	lastIssue int
 }
 
 func (f *fakeWorkspace) Prepare(ctx context.Context, p *Project, issue int) (string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.prepared++
 	f.lastIssue = issue
 	return "/tmp/ws/" + p.ID + "/issue-" + itoa(issue), "agent/issue-" + itoa(issue), nil
 }
 
 func (f *fakeWorkspace) Cleanup(ctx context.Context, p *Project, issue int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.cleaned++
 	return nil
+}
+
+func (f *fakeWorkspace) cleanedCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.cleaned
+}
+
+func (f *fakeWorkspace) issueSeen() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastIssue
 }
 
 type fakeVerifier struct {
@@ -264,7 +316,7 @@ func TestChatAnswerRepliesToGroup(t *testing.T) {
 	if err := h.s.HandleMessage(context.Background(), msg("m1", "怎么开启自动同步？")); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
-	if len(h.tracker.issues) != 0 {
+	if h.tracker.issueCount() != 0 {
 		t.Fatalf("should not create issue, got %d", len(h.tracker.issues))
 	}
 	sent := h.notifier.all()
@@ -285,7 +337,7 @@ func TestChatCreatesIssueAndFixWorkerProducesPR(t *testing.T) {
 	if err := h.s.HandleMessage(context.Background(), msg("m2", "导出点了没反应")); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
-	if len(h.tracker.issues) != 1 {
+	if h.tracker.issueCount() != 1 {
 		t.Fatalf("issue not created: %d", len(h.tracker.issues))
 	}
 	if !strings.Contains(h.notifier.all()[0], "Issue #1") {
@@ -306,14 +358,14 @@ func TestChatCreatesIssueAndFixWorkerProducesPR(t *testing.T) {
 	if w.State != StateAwaitingReview {
 		t.Fatalf("want awaiting_review, got %s (%s)", w.State, w.LastError)
 	}
-	if h.tracker.prCalls != 1 || h.vcs.commits != 1 {
-		t.Fatalf("pr=%d commits=%d", h.tracker.prCalls, h.vcs.commits)
+	if h.tracker.prCount() != 1 || h.vcs.commits != 1 {
+		t.Fatalf("pr=%d commits=%d", h.tracker.prCount(), h.vcs.commits)
 	}
 	if h.runner.last().BaseInstructions != FixSystemPrompt {
 		t.Fatal("fix worker must use FixSystemPrompt")
 	}
-	if h.ws.lastIssue != 1 {
-		t.Fatalf("worktree issue=%d", h.ws.lastIssue)
+	if h.ws.issueSeen() != 1 {
+		t.Fatalf("worktree issue=%d", h.ws.issueSeen())
 	}
 	if len(h.tracker.commentsFor(1)) == 0 {
 		t.Fatal("issue should get a comment")
@@ -353,7 +405,7 @@ func TestDuplicateIssueReusesExisting(t *testing.T) {
 	if err := h.s.HandleMessage(context.Background(), msg("m3", "导出又没反应")); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
-	if len(h.tracker.issues) != 0 {
+	if h.tracker.issueCount() != 0 {
 		t.Fatalf("should not create duplicate issue")
 	}
 	if len(h.tracker.commentsFor(7)) != 1 {
@@ -401,7 +453,7 @@ func TestVerificationFailuresBlock(t *testing.T) {
 	if w.State != StateBlocked {
 		t.Fatalf("want blocked, got %s", w.State)
 	}
-	if h.tracker.prCalls != 0 || h.vcs.commits != 0 {
+	if h.tracker.prCount() != 0 || h.vcs.commits != 0 {
 		t.Fatal("must not push when verification fails")
 	}
 }
@@ -425,7 +477,7 @@ func TestIssueCommentResumesSameWorker(t *testing.T) {
 	if !strings.Contains(spec.Prompt, "兼容旧版本") {
 		t.Fatalf("trigger not injected: %s", spec.Prompt)
 	}
-	if h.tracker.prCalls != 0 {
+	if h.tracker.prCount() != 0 {
 		t.Fatal("should reuse existing PR")
 	}
 	w, _ = h.repo.ActiveWorker(context.Background(), "prj-1", 5)
@@ -447,8 +499,8 @@ func TestIssueClosedStopsWorker(t *testing.T) {
 	if w.State != StateClosed {
 		t.Fatalf("want closed, got %s", w.State)
 	}
-	if h.ws.cleaned != 1 {
-		t.Fatalf("workspace not cleaned: %d", h.ws.cleaned)
+	if h.ws.cleanedCount() != 1 {
+		t.Fatalf("workspace not cleaned: %d", h.ws.cleanedCount())
 	}
 }
 
@@ -605,5 +657,57 @@ func TestWorkerFailureRetriesThenBlocks(t *testing.T) {
 	}
 	if w.Attempts < 2 {
 		t.Fatalf("attempts=%d", w.Attempts)
+	}
+}
+
+func TestHumanIssueCommentMirroredToGroup(t *testing.T) {
+	h := newHarness(t, Config{})
+	w := &Worker{ProjectID: "prj-1", Issue: 21, State: StateAwaitingReview, ChatID: "group-1"}
+	_, _ = h.repo.CreateWorker(context.Background(), w)
+	_ = h.s.HandleIssueEvent(context.Background(), IssueEvent{
+		Event: "issue_comment", Action: "created", ProjectID: "prj-1", Repo: "acme/core",
+		Issue: 21, Author: "lisi", Body: "这个方案可以，但请补一条测试",
+	})
+	h.s.Wait()
+	var found bool
+	for _, s := range h.notifier.all() {
+		if strings.Contains(s, "lisi") && strings.Contains(s, "补一条测试") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("issue comment not mirrored to group: %#v", h.notifier.all())
+	}
+}
+
+func TestReconcileClosesWorkerWhenIssueClosed(t *testing.T) {
+	h := newHarness(t, Config{})
+	w := &Worker{ProjectID: "prj-1", Issue: 22, State: StateAwaitingReview, ChatID: "group-1", PRNumber: 7}
+	_, _ = h.repo.CreateWorker(context.Background(), w)
+	h.tracker.setState(22, "closed")
+	if err := h.s.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	w, _ = h.repo.GetWorker(context.Background(), w.ID)
+	if w.State != StateClosed {
+		t.Fatalf("reconcile should close worker, got %s", w.State)
+	}
+	if h.ws.cleanedCount() != 1 {
+		t.Fatalf("worktree not cleaned")
+	}
+}
+
+func TestChatIssueUpdateEnqueuesWorker(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.runner.chatReply = `{"action":"issue_update","issue":33,"reply":"补充一个复现步骤"}`
+	if err := h.s.HandleMessage(context.Background(), msg("m-update", "#33 还会在某些机器上闪退")); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.tracker.commentsFor(33)) != 1 {
+		t.Fatalf("comment not posted: %#v", h.tracker.commentsFor(33))
+	}
+	w, _ := h.repo.ActiveWorker(context.Background(), "prj-1", 33)
+	if w == nil || w.State != StateQueued {
+		t.Fatalf("worker not enqueued: %+v", w)
 	}
 }

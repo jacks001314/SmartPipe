@@ -90,6 +90,8 @@ type Config struct {
 	Effort          string
 	CodexPath       string
 	ChatHistorySize int
+	// ReconcileInterval 定期核对 Issue 是否已关闭（默认 5 分钟）。
+	ReconcileInterval time.Duration
 }
 
 // Deps 是全部外部依赖，便于替换与测试。
@@ -155,6 +157,9 @@ func New(cfg Config, deps Deps) (*Scheduler, error) {
 	if cfg.ChatHistorySize <= 0 {
 		cfg.ChatHistorySize = 12
 	}
+	if cfg.ReconcileInterval <= 0 {
+		cfg.ReconcileInterval = 5 * time.Minute
+	}
 	return &Scheduler{
 		cfg:       cfg,
 		repo:      deps.Repo,
@@ -187,6 +192,8 @@ func (s *Scheduler) Wake() {
 func (s *Scheduler) Run(ctx context.Context) error {
 	ticker := time.NewTicker(s.cfg.PollInterval)
 	defer ticker.Stop()
+	reconcile := time.NewTicker(s.cfg.ReconcileInterval)
+	defer reconcile.Stop()
 	for {
 		if err := s.DispatchOnce(ctx); err != nil {
 			log.Printf("[scheduler] dispatch: %v", err)
@@ -196,9 +203,44 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			s.running.Wait()
 			return ctx.Err()
 		case <-ticker.C:
+		case <-reconcile.C:
+			if err := s.Reconcile(ctx); err != nil {
+				log.Printf("[scheduler] reconcile: %v", err)
+			}
 		case <-s.wake:
 		}
 	}
+}
+
+// Reconcile 补齐漏掉的 GitHub 事件：Issue 已关闭但 worker 还挂着时直接收尾。
+// webhook 可能因为网络或部署重启丢失，这一步保证 worker 不会永远占着名额。
+func (s *Scheduler) Reconcile(ctx context.Context) error {
+	workers, err := s.repo.ListWorkers(ctx)
+	if err != nil {
+		return err
+	}
+	for _, w := range workers {
+		switch w.State {
+		case StateAwaitingReview, StateAwaitingInput, StateBlocked, StateFailed:
+		default:
+			continue
+		}
+		issue, err := s.tracker.GetIssue(ctx, w.ProjectID, w.Issue)
+		if err != nil {
+			continue
+		}
+		if strings.EqualFold(issue.State, "closed") {
+			s.closeWorker(ctx, w, closeReason(w))
+		}
+	}
+	return nil
+}
+
+func closeReason(w *Worker) string {
+	if w.PRNumber > 0 {
+		return fmt.Sprintf("PR #%d 已合并", w.PRNumber)
+	}
+	return "Issue 已关闭"
 }
 
 // DispatchOnce 在名额允许时领取并启动排队任务（同步等待本轮启动完成）。
@@ -303,6 +345,14 @@ func (s *Scheduler) applyChatDecision(ctx context.Context, p *Project, msg Inbou
 		}
 		if w, _ := s.repo.ActiveWorker(ctx, p.ID, issue); w != nil {
 			s.resume(w, msg.Text)
+		} else {
+			created, err := s.repo.CreateWorker(ctx, &Worker{ProjectID: p.ID, Issue: issue, ChatID: msg.ChatID(), State: StateQueued})
+			if err != nil {
+				return err
+			}
+			if created {
+				s.Wake()
+			}
 		}
 		return s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, fmt.Sprintf("已补充到 Issue #%d。", issue))
 	case "issue":
@@ -372,7 +422,7 @@ func (s *Scheduler) HandleIssueEvent(ctx context.Context, ev IssueEvent) error {
 		case "closed":
 			w, _ := s.repo.ActiveWorker(ctx, p.ID, ev.Issue)
 			if w != nil {
-				s.closeWorker(ctx, w, "Issue 已关闭")
+				s.closeWorker(ctx, w, closeReason(w))
 			}
 			return nil
 		case "reopened":
@@ -393,6 +443,9 @@ func (s *Scheduler) HandleIssueEvent(ctx context.Context, ev IssueEvent) error {
 	w, err := s.repo.ActiveWorker(ctx, p.ID, ev.Issue)
 	if err != nil {
 		return err
+	}
+	if w != nil {
+		s.mirrorComment(ctx, w, ev)
 	}
 	if cmd := parseCommand(ev.Body); cmd != "" {
 		return s.handleCommand(ctx, p, ev, w, cmd)
@@ -578,6 +631,7 @@ func (s *Scheduler) execute(ctx context.Context, w *Worker, trigger string) erro
 	} else {
 		_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment(fmt.Sprintf(
 			"已追加提交 `%s` 到 PR #%d。", shortSHA(commit), w.PRNumber)))
+		s.notifyIssue(ctx, p, w, fmt.Sprintf("已按你的意见更新 PR #%d。", w.PRNumber))
 	}
 	w.State = StateAwaitingReview
 	w.LastError = ""
@@ -622,6 +676,20 @@ func (s *Scheduler) failWorker(ctx context.Context, w *Worker, cause error) {
 	}
 }
 
+// mirrorComment 把 Issue 上的人工评论同步回发起它的蓝信群，保证用户始终在群里看到进展。
+func (s *Scheduler) mirrorComment(ctx context.Context, w *Worker, ev IssueEvent) {
+	if strings.TrimSpace(w.ChatID) == "" {
+		return
+	}
+	author := firstNonEmpty(ev.Author, "有人")
+	body := clamp(strings.TrimSpace(ev.Body), 300)
+	text := fmt.Sprintf("%s 在 Issue #%d 评论：%s", author, ev.Issue, body)
+	if url := ev.IssueURL(); url != "" {
+		text += "\n" + url
+	}
+	_ = s.notify(ctx, "", w.ChatID, "", text)
+}
+
 func (s *Scheduler) closeWorker(ctx context.Context, w *Worker, reason string) {
 	w.State = StateClosed
 	_ = s.repo.UpdateWorker(ctx, w)
@@ -631,7 +699,11 @@ func (s *Scheduler) closeWorker(ctx context.Context, w *Worker, reason string) {
 		}
 	}
 	if w.ChatID != "" {
-		_ = s.notify(ctx, "", w.ChatID, "", fmt.Sprintf("Issue #%d 已结束（%s）。", w.Issue, reason))
+		text := fmt.Sprintf("Issue #%d 已结束（%s）。", w.Issue, reason)
+		if w.IssueURL != "" {
+			text += "\n" + w.IssueURL
+		}
+		_ = s.notify(ctx, "", w.ChatID, "", text)
 	}
 }
 

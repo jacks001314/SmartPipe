@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 )
+
 func TestBridgeDispatcherPostsMessage(t *testing.T) {
 	var got map[string]any
 	hits := 0
@@ -48,5 +49,42 @@ func TestBridgeDispatcherPostsMessage(t *testing.T) {
 	}
 	if got["body"] != "启动后闪退\n更多细节" {
 		t.Fatalf("body = %v", got["body"])
+	}
+}
+func TestSchedulerDispatcherPostsNormalizedMessage(t *testing.T) {
+	var (
+		gotPath string
+		gotTok  string
+		got     Inbound
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotTok = r.Header.Get("X-Scheduler-Token")
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	d := SchedulerDispatcher{BaseURL: srv.URL, Token: "tok"}
+	msg := Inbound{Platform: "lanxin", PlatformMessageID: "m1", ChatType: "group",
+		GroupID: "g1", GroupName: "研发群", SenderID: "u1", SenderName: "张三",
+		Text: "导出按钮没反应", BotID: "bot1", IsAtMe: true}
+	if err := d.Dispatch(context.Background(), msg); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if gotPath != "/internal/scheduler/messages" || gotTok != "tok" {
+		t.Fatalf("path=%s token=%s", gotPath, gotTok)
+	}
+	if got.Text != msg.Text || got.GroupID != "g1" || got.PlatformMessageID != "m1" || !got.IsAtMe {
+		t.Fatalf("payload=%+v", got)
+	}
+
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv2.Close()
+	if err := (SchedulerDispatcher{BaseURL: srv2.URL}).Dispatch(context.Background(), msg); err == nil {
+		t.Fatal("want error on 500")
 	}
 }
