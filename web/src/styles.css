@@ -445,3 +445,35 @@ button { font-family: inherit; }
 
 .github-device-warn { width: 100%; }
 .github-device-warn .tiny { margin: 0; }
+
+.github-pat {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line);
+}
+.github-pat-toggle {
+  border: 0; background: transparent; padding: 0; cursor: pointer;
+  font-size: 12.5px; font-weight: 650; color: var(--brand);
+}
+.github-pat-hint { color: var(--muted); }
+.github-pat-body { flex-basis: 100%; display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.github-pat-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.github-pat-row input { flex: 1; min-width: 260px; }
+.github-warn-banner {
+  display: flex; gap: 10px; align-items: center; justify-content: space-between;
+  padding: 8px 18px; background: #fff8e6; border-bottom: 1px solid #f2d59b;
+  color: #8a5a00; font-size: 12px;
+}
+.github-warn-text { flex: 1; line-height: 1.55; }
+.github-filters {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 10px 18px; border-bottom: 1px solid var(--line); background: #fbfcfe;
+}
+.github-filter-label { font-size: 11px; color: var(--muted); font-weight: 650; margin-right: 2px; }
+.github-filter-sep { width: 1px; height: 16px; background: var(--line); margin: 0 6px; }
+.github-filter-chip {
+  padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); background: #fff;
+  color: #475569; font-size: 11.5px; cursor: pointer;
+}
+.github-filter-chip:hover { border-color: #bfd6fb; color: var(--brand); }
+.github-filter-chip[data-active="true"] { background: var(--brand); border-color: var(--brand); color: #fff; }
+.github-filter-clear { margin-left: auto; border: 0; background: transparent; color: var(--brand); font-size: 11.5px; cursor: pointer; }

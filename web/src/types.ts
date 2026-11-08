@@ -55,6 +55,7 @@ export type GitHubRepo = {
   archived: boolean;
   fork: boolean;
   source: string;
+  user_visible: boolean;
 };
 
 export type GitHubRepoList = {
@@ -65,10 +66,24 @@ export type GitHubRepoList = {
   oauth_login: string;
   oauth_authorized: boolean;
   oauth_scope: string;
+  oauth_scope_live?: string;
+  token_source: string;
+  user_repo_count: number;
+  user_error?: string;
   repos: GitHubRepo[];
   warning?: string;
   error?: string;
   fetched_at: string;
+};
+
+export type GitHubPATView = {
+  configured: boolean;
+  login: string;
+  scope: string;
+  repo_count: number;
+  private_count: number;
+  invited_count: number;
+  message: string;
 };
 
 export type GitHubOAuthView = {

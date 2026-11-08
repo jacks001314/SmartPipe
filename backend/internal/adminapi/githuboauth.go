@@ -169,8 +169,8 @@ func (a *API) oauthSettings(ctx context.Context) (clientID, scope string) {
 	}
 	scope = strings.TrimSpace(scope)
 	if scope == "" {
-		// 默认申请 repo：模拟“账号能看到的仓库”，包含别人私有仓库里的协作邀请。
-		scope = "repo"
+		// 默认申请 repo + read:org：模拟“账号能看到的仓库”，包含别人私有仓库里的协作邀请。
+		scope = "repo,read:org"
 	}
 	return clientID, scope
 }
@@ -243,8 +243,8 @@ func (a *API) putGitHubOAuth(c iris.Context) {
 	if scope == "" {
 		scope = "public_repo"
 	}
-	if scope != "public_repo" && scope != "repo" {
-		a.badRequest(c, "scope 只支持 public_repo 或 repo")
+	if scope != "public_repo" && scope != "repo" && scope != "repo,read:org" {
+		a.badRequest(c, "scope 只支持 public_repo、repo 或 repo,read:org")
 		return
 	}
 	ctx := c.Request().Context()

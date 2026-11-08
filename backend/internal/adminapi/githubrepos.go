@@ -32,6 +32,8 @@ type githubRepoView struct {
 	Fork          bool   `json:"fork"`
 	// Source 标记这条仓库来自 App 安装（app）还是账号授权（user）。
 	Source string `json:"source"`
+	// UserVisible 表示账号授权（本人/协作者）这条路径也能看到它。
+	UserVisible bool `json:"user_visible"`
 }
 
 type githubRepoListView struct {
@@ -42,6 +44,10 @@ type githubRepoListView struct {
 	OAuthLogin      string           `json:"oauth_login"`
 	OAuthAuthorized bool             `json:"oauth_authorized"`
 	OAuthScope      string           `json:"oauth_scope"`
+	OAuthScopeLive  string           `json:"oauth_scope_live,omitempty"`
+	TokenSource     string           `json:"token_source"`
+	UserRepoCount   int              `json:"user_repo_count"`
+	UserError       string           `json:"user_error,omitempty"`
 	Repos           []githubRepoView `json:"repos"`
 	Warning         string           `json:"warning,omitempty"`
 	Error           string           `json:"error,omitempty"`
@@ -109,36 +115,49 @@ func (a *API) listGitHubRepositories(c iris.Context) {
 		break
 	}
 
-	// 账号授权：OAuth 设备码（存在名为 github-oauth 的 PAT 凭据里）优先，其次普通 PAT。
+	// 账号凭据：优先手工 PAT（经典 PAT 勾选 repo 能看到全部协作/邀请仓库），
+	// 其次设备码 OAuth（GitHub App 用户授权，权限由 App 决定）。
 	userToken := ""
 	userLogin := ""
-	if oauthCred := a.findOAuthCredential(ctx); oauthCred != nil && oauthCred.Enabled {
-		if kind, secret, _, err := a.store.GetSecret(ctx, oauthCred.ID); err == nil && kind == store.CredentialGitHubPAT {
+	var patCred *store.Credential
+	for i := range creds {
+		cred := &creds[i]
+		if !cred.Enabled || cred.Kind != store.CredentialGitHubPAT || cred.ProjectID != nil {
+			continue
+		}
+		if src, _ := cred.Metadata["source"].(string); src == "oauth_device" {
+			continue
+		}
+		patCred = cred
+		if kind, secret, _, err := a.store.GetSecret(ctx, cred.ID); err == nil && kind == store.CredentialGitHubPAT {
 			userToken = secret
-			userLogin, _ = oauthCred.Metadata["login"].(string)
-			view.OAuthAuthorized = true
+			userLogin, _ = cred.Metadata["login"].(string)
+			view.TokenSource = "pat"
+			view.OAuthScope, _ = cred.Metadata["scope"].(string)
+		}
+		break
+	}
+	oauthCred := a.findOAuthCredential(ctx)
+	if oauthCred != nil && oauthCred.Enabled {
+		view.OAuthAuthorized = true
+		if view.OAuthScope == "" {
 			view.OAuthScope, _ = oauthCred.Metadata["scope"].(string)
 		}
-	}
-	if userToken == "" {
-		for _, cred := range creds {
-			if !cred.Enabled || cred.Kind != store.CredentialGitHubPAT || cred.ProjectID != nil {
-				continue
-			}
-			if src, _ := cred.Metadata["source"].(string); src == "oauth_device" {
-				continue
-			}
-			if kind, secret, _, err := a.store.GetSecret(ctx, cred.ID); err == nil && kind == store.CredentialGitHubPAT {
+		if userToken == "" {
+			if kind, secret, _, err := a.store.GetSecret(ctx, oauthCred.ID); err == nil && kind == store.CredentialGitHubPAT {
 				userToken = secret
-				break
+				userLogin, _ = oauthCred.Metadata["login"].(string)
+				view.TokenSource = "oauth"
+				view.OAuthScope, _ = oauthCred.Metadata["scope"].(string)
 			}
 		}
 	}
 	if userToken != "" {
 		apiBase := github.DefaultAPIBase
-		login, repos, err := a.fetchGitHubUserRepos(ctx, apiBase, userToken)
+		login, scope, repos, err := a.fetchGitHubUserRepos(ctx, apiBase, userToken)
 		if err != nil {
 			lastErr = err
+			view.UserError = err.Error()
 		} else {
 			view.Connected = true
 			if view.Source == "" {
@@ -151,7 +170,43 @@ func (a *API) listGitHubRepositories(c iris.Context) {
 			if view.Account == "" {
 				view.Account = login
 			}
+			view.UserRepoCount = len(repos)
+			if scope != "" {
+				view.OAuthScopeLive = scope
+			}
 			addRepos(repos, "user")
+			privateFromUser := 0
+			for _, repo := range repos {
+				if repo.Private {
+					privateFromUser++
+				}
+			}
+			if !scopeHasRepoAccess(scope) && privateFromUser == 0 {
+				hint := "别人仓库里邀请你参与的私有仓库看不到。"
+				if view.TokenSource == "pat" {
+					hint += "当前 PAT 没有 repo 权限，请新建一个勾选 repo 的经典 Token 后重新保存。"
+				} else {
+					hint += "GitHub App 用户授权拿不到 repo 权限，请改用带 repo 权限的经典 PAT（推荐），或部署方配置自建 OAuth App 后重新授权。"
+				}
+				view.Warning = "账号授权只读到公开仓库（权限：" + scopeLabel(scope) + "），" + hint
+			}
+		}
+	} else if view.OAuthAuthorized {
+		view.UserError = "账号授权存在但没有读到可用 token"
+	}
+	if view.OAuthScopeLive != "" && view.OAuthScopeLive != view.OAuthScope {
+		view.OAuthScope = view.OAuthScopeLive
+		target := oauthCred
+		if view.TokenSource == "pat" {
+			target = patCred
+		}
+		if target != nil {
+			meta := map[string]any{}
+			for k, v := range target.Metadata {
+				meta[k] = v
+			}
+			meta["scope"] = view.OAuthScopeLive
+			_ = a.store.UpdateCredentialMetadata(ctx, target.ID, meta)
 		}
 	}
 
@@ -172,7 +227,12 @@ func mergeGitHubRepoViews(dst []githubRepoView, index map[string]int, list []git
 		key := strings.ToLower(repo.FullName)
 		if existing, ok := index[key]; ok {
 			if dst[existing].Source != "app" && source == "app" {
+				kept := dst[existing]
 				dst[existing] = repo
+				dst[existing].UserVisible = kept.UserVisible || kept.Source == "user"
+			}
+			if source == "user" {
+				dst[existing].UserVisible = true
 			}
 			continue
 		}
@@ -262,18 +322,25 @@ func (a *API) fetchGitHubInstallationRepos(ctx context.Context, apiBase, token s
 }
 
 // fetchGitHubUserRepos 用 PAT 读取账号本人、协作者与组织内可见的仓库。
-func (a *API) fetchGitHubUserRepos(ctx context.Context, apiBase, token string) (string, []githubRepoView, error) {
+func (a *API) fetchGitHubUserRepos(ctx context.Context, apiBase, token string) (string, string, []githubRepoView, error) {
 	client, err := newGitHubClient(a.currentGitHubClient(), apiBase, token)
 	if err != nil {
-		return "", nil, fmt.Errorf("构造 GitHub 客户端失败：%w", err)
+		return "", "", nil, fmt.Errorf("构造 GitHub 客户端失败：%w", err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	user, _, err := client.Users.Get(ctx, "")
+	user, userResp, err := client.Users.Get(ctx, "")
 	if err != nil {
-		return "", nil, githubErr("读取 GitHub 账号失败", err)
+		return "", "", nil, githubErr("读取 GitHub 账号失败", err)
 	}
 	login := user.GetLogin()
+	scope := ""
+	if userResp != nil {
+		scope = strings.TrimSpace(userResp.Header.Get("X-OAuth-Scopes"))
+		if scope == "" {
+			scope = strings.TrimSpace(userResp.Header.Get("X-Accepted-GitHub-Permissions"))
+		}
+	}
 	repos := make([]githubRepoView, 0, 100)
 	for page := 1; page <= 10; page++ {
 		items, resp, err := client.Repositories.ListByAuthenticatedUser(ctx, &gh.RepositoryListByAuthenticatedUserOptions{
@@ -282,7 +349,13 @@ func (a *API) fetchGitHubUserRepos(ctx context.Context, apiBase, token string) (
 			Sort:        "updated",
 		})
 		if err != nil {
-			return "", nil, githubErr("读取 GitHub 仓库失败", err)
+			return "", "", nil, githubErr("读取 GitHub 仓库失败", err)
+		}
+		if scope == "" && resp != nil {
+			scope = strings.TrimSpace(resp.Header.Get("X-OAuth-Scopes"))
+			if scope == "" {
+				scope = strings.TrimSpace(resp.Header.Get("X-Accepted-GitHub-Permissions"))
+			}
 		}
 		for _, repo := range items {
 			repos = append(repos, repoView(repo))
@@ -291,5 +364,23 @@ func (a *API) fetchGitHubUserRepos(ctx context.Context, apiBase, token string) (
 			break
 		}
 	}
-	return login, repos, nil
+	return login, scope, repos, nil
+}
+
+// scopeHasRepoAccess 判断 OAuth 授权是否拿到 repo 权限；细粒度 PAT 不返回 scope 头，
+// 由是否读到私有仓库来兜底判断。
+func scopeHasRepoAccess(scope string) bool {
+	for _, item := range strings.Split(scope, ",") {
+		if strings.TrimSpace(item) == "repo" {
+			return true
+		}
+	}
+	return false
+}
+
+func scopeLabel(scope string) string {
+	if strings.TrimSpace(scope) == "" {
+		return "无 scope"
+	}
+	return scope
 }

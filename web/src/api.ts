@@ -1,4 +1,4 @@
-import type { AgentItem, AgentToken, AppServer, AuditEntry, AuthConfig, AuthSession, BridgeLink, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Derivation, DispatchRecord, Health, IssueAttempt, IssuePlan, Project, ProjectBinding, ReleaseCandidate, ReleaseRecord, ReleaseRun, RepoOp, MCPConfig, TestResult, ToolCall, UserIdentity, VerificationRecord, WebhookDelivery, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView } from "./types";
+import type { AgentItem, AgentToken, AppServer, AuditEntry, AuthConfig, AuthSession, BridgeLink, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Derivation, DispatchRecord, Health, IssueAttempt, IssuePlan, Project, ProjectBinding, ReleaseCandidate, ReleaseRecord, ReleaseRun, RepoOp, MCPConfig, TestResult, ToolCall, UserIdentity, VerificationRecord, WebhookDelivery, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubPATView } from "./types";
 
 const TOKEN_KEY = "smartpipe.adminToken";
 
@@ -98,6 +98,9 @@ export const api = {
   pollGithubOAuth: (flow_id: string) =>
     request<GitHubOAuthPoll>("/github/oauth/poll", { method: "POST", body: { flow_id } }),
   deleteGithubOAuth: () => request<void>("/github/oauth", { method: "DELETE" }),
+  saveGithubToken: (token: string) =>
+    request<GitHubPATView>("/github/token", { method: "POST", body: { token } }),
+  deleteGithubToken: () => request<void>("/github/token", { method: "DELETE" }),
   createCredential: (body: { project_id?: string | null; kind: string; name: string; value: string; metadata?: Record<string, unknown> }) =>
     request<Credential>("/credentials", { method: "POST", body }),
   rotateCredential: (id: string, value: string) =>
