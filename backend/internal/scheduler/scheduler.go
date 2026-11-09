@@ -342,6 +342,13 @@ func (s *Scheduler) runChat(ctx context.Context, p *Project, history []ChatMessa
 	if err != nil {
 		return nil, err
 	}
+	if res == nil {
+		return nil, errors.New("scheduler: chat worker returned no result")
+	}
+	if strings.TrimSpace(res.FinalResponse) == "" {
+		// 只说“空决策”没法排查，把状态和耗时带出来。
+		return nil, fmt.Errorf("scheduler: chat worker returned no output (status=%s duration=%dms)", res.Status, res.DurationMS)
+	}
 	return ParseChatDecision(res.FinalResponse)
 }
 

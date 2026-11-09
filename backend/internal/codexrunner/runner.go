@@ -124,6 +124,9 @@ func Run(ctx context.Context, spec Spec) (*Result, error) {
 	if err := spec.validate(); err != nil {
 		return nil, err
 	}
+	// 开发机的 ~/.codex 会带模型目录、供应商和工具开关，某些网关（如 vLLM）
+	// 会直接拒绝这些请求；worker 统一用独立配置目录。
+	spec.Env = isolateCodexHome(spec.Env)
 	timeout := spec.Timeout
 	if timeout <= 0 {
 		timeout = defaultTimeout
@@ -381,4 +384,23 @@ func modelConfigOverrides(env []string) []string {
 		"model_providers.smartpipe.wire_api=" + wire,
 		"model_providers.smartpipe.env_key=OPENAI_API_KEY",
 	}
+}
+
+// isolateCodexHome 保证 worker 有独立的 CODEX_HOME。
+// 优先用调用方显式传入的 CODEX_HOME，其次 SMARTPIPE_CODEX_HOME，
+// 都没配置时退回到系统临时目录下的固定路径。
+func isolateCodexHome(env []string) []string {
+	for _, kv := range env {
+		if key, _, ok := strings.Cut(kv, "="); ok && strings.TrimSpace(key) == "CODEX_HOME" {
+			return env
+		}
+	}
+	home := strings.TrimSpace(os.Getenv("SMARTPIPE_CODEX_HOME"))
+	if home == "" {
+		home = filepath.Join(os.TempDir(), "smartpipe-codex-home")
+	}
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		return env
+	}
+	return append(env, "CODEX_HOME="+home)
 }
