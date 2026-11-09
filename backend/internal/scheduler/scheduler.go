@@ -857,7 +857,7 @@ func saveChatAttachments(msg Inbound) (images []string, listing []string, cleanu
 			return nil, nil, cleanup, err
 		}
 		saved++
-		if strings.HasPrefix(mimeBase(mimeType), "image/") {
+		if strings.HasPrefix(mimeType, "image/") {
 			images = append(images, path)
 			listing = append(listing, fmt.Sprintf("- 图片 %s（%s）", name, mimeType))
 		} else {
@@ -894,11 +894,11 @@ func chatAttachmentName(name string, index int, mimeType string) string {
 // mimeBase 去掉 mimeType 参数，例如 text/plain; charset=utf-8 -> text/plain。
 func mimeBase(mimeType string) string {
 	base, _, _ := strings.Cut(mimeType, ";")
-	return strings.TrimSpace(base)
+	return strings.ToLower(strings.TrimSpace(base))
 }
 
 func extensionForMime(mimeType string) string {
-	switch strings.ToLower(mimeBase(mimeType)) {
+	switch mimeBase(mimeType) {
 	case "image/png":
 		return ".png"
 	case "image/jpeg":
