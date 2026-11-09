@@ -26,6 +26,7 @@ import (
 
 	"smartpipe/backend/internal/bridge"
 	"smartpipe/backend/internal/crash"
+	"smartpipe/backend/internal/frptunnel"
 	"smartpipe/backend/internal/secretbox"
 	"smartpipe/backend/internal/store"
 )
@@ -300,12 +301,47 @@ func main() {
 	if addr == "" {
 		addr = ":8090"
 	}
+
+	// 内嵌 frpc：配置后由本进程直接连 frps，把 bridge 端口暴露成公网入口，
+	// 不再需要单独安装/守护 frpc 二进制。
+	tunnelCtx, tunnelCancel := context.WithCancel(context.Background())
+	defer tunnelCancel()
+	if serverAddr := strings.TrimSpace(os.Getenv("SMARTPIPE_FRP_SERVER")); serverAddr != "" {
+		localPort := envInt("SMARTPIPE_FRP_LOCAL_PORT", listenPort(addr))
+		frpCfg := frptunnel.Config{
+			ServerAddr: serverAddr,
+			ServerPort: envInt("SMARTPIPE_FRP_SERVER_PORT", 7000),
+			Token:      strings.TrimSpace(os.Getenv("SMARTPIPE_FRP_TOKEN")),
+			LocalPort:  localPort,
+			RemotePort: envInt("SMARTPIPE_FRP_REMOTE_PORT", 18090),
+			ProxyName:  strings.TrimSpace(os.Getenv("SMARTPIPE_FRP_PROXY_NAME")),
+			LogLevel:   strings.TrimSpace(os.Getenv("SMARTPIPE_FRP_LOG_LEVEL")),
+		}
+		log.Printf("启用内嵌 frpc: %s:%d -> 127.0.0.1:%d (remote %d, proxy %s)",
+			frpCfg.ServerAddr, envInt("SMARTPIPE_FRP_SERVER_PORT", 7000), localPort,
+			frpCfg.RemotePort, frpCfg.ProxyName)
+		go func() {
+			for {
+				if err := frptunnel.Run(tunnelCtx, frpCfg); err != nil {
+					log.Printf("内嵌 frpc 退出: %v，%s 后重试", err, frptunnel.DefaultRetryBackoff())
+				} else {
+					return
+				}
+				select {
+				case <-tunnelCtx.Done():
+					return
+				case <-time.After(frptunnel.DefaultRetryBackoff()):
+				}
+			}
+		}()
+	}
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
 	go func() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 		<-sig
+		tunnelCancel()
 		shutdownCtx, done := context.WithTimeout(context.Background(), 10*time.Second)
 		defer done()
 		_ = srv.Shutdown(shutdownCtx)
@@ -330,6 +366,16 @@ func lookupWebhookSecret(ctx context.Context, st *store.Store) string {
 		}
 	}
 	return ""
+}
+
+// listenPort 从 ":8090" / "127.0.0.1:8090" 这类监听地址里取出端口。
+func listenPort(addr string) int {
+	if i := strings.LastIndex(addr, ":"); i >= 0 {
+		if port, err := strconv.Atoi(addr[i+1:]); err == nil && port > 0 {
+			return port
+		}
+	}
+	return 0
 }
 
 func envInt(key string, fallback int) int {

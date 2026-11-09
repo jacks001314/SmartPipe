@@ -76,6 +76,13 @@ services:
       SMARTPIPE_BOT_ADDR: http://bot:8093
       SMARTPIPE_SCHEDULER_URL: http://host.docker.internal:8098
       SCHEDULER_TOKEN: ${SCHEDULER_TOKEN}
+      # 内嵌 frpc：填了 SMARTPIPE_FRP_SERVER 就由 bridge 自己连 frps，
+      # 把 8090 暴露成公网 Webhook 入口，不需要额外进程或配置文件。
+      SMARTPIPE_FRP_SERVER: ${SMARTPIPE_FRP_SERVER:-}
+      SMARTPIPE_FRP_SERVER_PORT: ${SMARTPIPE_FRP_SERVER_PORT:-7000}
+      SMARTPIPE_FRP_TOKEN: ${SMARTPIPE_FRP_TOKEN:-}
+      SMARTPIPE_FRP_REMOTE_PORT: ${SMARTPIPE_FRP_REMOTE_PORT:-18090}
+      SMARTPIPE_FRP_PROXY_NAME: ${SMARTPIPE_FRP_PROXY_NAME:-smartpipe-webhook}
     ports:
       - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_BRIDGE_PORT:-8090}:8090"
     depends_on:
