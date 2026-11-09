@@ -131,7 +131,19 @@ func (c *Client) UploadMedia(ctx context.Context, mt MediaType, filename string,
 }
 
 // DownloadMedia 下载媒体文件（返回原始字节）。
+// DefaultMaxMediaBytes 限制单次媒体下载的字节数，避免异常对象把进程内存打满。
+const DefaultMaxMediaBytes int64 = 16 << 20
+
+// DownloadMedia 下载媒体内容，超过 DefaultMaxMediaBytes 直接报错。
 func (c *Client) DownloadMedia(ctx context.Context, mediaID string) ([]byte, error) {
+	return c.DownloadMediaLimited(ctx, mediaID, DefaultMaxMediaBytes)
+}
+
+// DownloadMediaLimited 下载媒体内容并限制最大字节数；limit<=0 时使用默认上限。
+func (c *Client) DownloadMediaLimited(ctx context.Context, mediaID string, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		limit = DefaultMaxMediaBytes
+	}
 	tok, err := c.tok.get(ctx)
 	if err != nil {
 		return nil, err
@@ -149,7 +161,14 @@ func (c *Client) DownloadMedia(ctx context.Context, mediaID string) ([]byte, err
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("lanxin: media fetch: http %d", resp.StatusCode)
 	}
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("lanxin: media %s exceeds %d bytes", mediaID, limit)
+	}
+	return data, nil
 }
 
 // ---- 消息管理 ----

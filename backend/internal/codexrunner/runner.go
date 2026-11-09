@@ -37,6 +37,8 @@ type Spec struct {
 	WorkDir string
 	// Prompt 是交给模型的完整任务描述。
 	Prompt string
+	// Images 是随本轮一起发给模型的本地图片路径（截图、设计稿等）。
+	Images []string
 	// CodexPath 是 codex 可执行文件路径，默认取 PATH 中的 codex。
 	CodexPath string
 	// Model 为空时使用 Codex 当前默认模型。
@@ -142,9 +144,10 @@ func Run(ctx context.Context, spec Spec) (*Result, error) {
 	defer restoreEnv()
 	client, err := codex.New(runCtx, codex.Options{
 		Spawn: codex.SpawnOptions{
-			CodexPath: strings.TrimSpace(spec.CodexPath),
-			Env:       spec.Env,
-			Stderr:    logs,
+			CodexPath:       strings.TrimSpace(spec.CodexPath),
+			Env:             spec.Env,
+			Stderr:          logs,
+			ConfigOverrides: modelConfigOverrides(spec.Env),
 		},
 		Logger: logger,
 	})
@@ -178,7 +181,14 @@ func Run(ctx context.Context, spec Spec) (*Result, error) {
 	// 用流式接口而不是 thread.Run：Run 会把每条通知都攒进内存，命令输出一大
 	// （例如跑测试）就会把 SDK 的 64 条通知缓冲撑爆，报 notification overflow。
 	// 这里持续消费、只保留最终消息，既不掉队也不吃内存。
-	stream, err := thread.RunStreamed(runCtx, []codex.Input{codex.TextInput(spec.Prompt)}, turnOpts)
+	inputs := make([]codex.Input, 0, 1+len(spec.Images))
+	inputs = append(inputs, codex.TextInput(spec.Prompt))
+	for _, imagePath := range spec.Images {
+		if strings.TrimSpace(imagePath) != "" {
+			inputs = append(inputs, codex.LocalImageInput(strings.TrimSpace(imagePath)))
+		}
+	}
+	stream, err := thread.RunStreamed(runCtx, inputs, turnOpts)
 	if err != nil {
 		return &Result{Status: "error", DurationMS: time.Since(started).Milliseconds()}, fmt.Errorf("codexrunner: start turn: %w", err)
 	}
@@ -339,4 +349,36 @@ func relativeTo(workDir, path string) (string, bool) {
 		return "", false
 	}
 	return filepath.ToSlash(rel), true
+}
+
+// modelConfigOverrides 把配置台注入的 OPENAI_* 变量翻译成 app-server 的
+// --config 覆盖项。只设环境变量时 Codex 仍会使用 ~/.codex/config.toml 里的
+// 默认供应商，项目选择的模型就形同虚设。
+func modelConfigOverrides(env []string) []string {
+	var base, wire string
+	for _, kv := range env {
+		key, value, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		switch strings.TrimSpace(key) {
+		case "OPENAI_BASE_URL":
+			base = strings.TrimSpace(value)
+		case "OPENAI_WIRE_API":
+			wire = strings.TrimSpace(value)
+		}
+	}
+	if base == "" {
+		return nil
+	}
+	if wire == "" {
+		wire = "responses"
+	}
+	return []string{
+		"model_provider=smartpipe",
+		"model_providers.smartpipe.name=SmartPipe",
+		"model_providers.smartpipe.base_url=" + base,
+		"model_providers.smartpipe.wire_api=" + wire,
+		"model_providers.smartpipe.env_key=OPENAI_API_KEY",
+	}
 }

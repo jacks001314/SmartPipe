@@ -2,8 +2,11 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +21,7 @@ type Handler struct {
 	disp  Dispatcher
 	crash *CrashIntake
 	inbox InboxReporter
+	media MediaDownloader
 
 	seenMu sync.Mutex
 	seen   map[string]time.Time // msgId -> first seen，幂等键
@@ -31,6 +35,17 @@ func NewHandler(cfg Config, snd Sender, disp Dispatcher) *Handler {
 func (h *Handler) WithCrash(c *CrashIntake) *Handler {
 	h.crash = c
 	return h
+}
+
+// WithMedia 挂上媒体下载能力；图片/文件消息会下载后随消息交给模型。
+func (h *Handler) WithMedia(m MediaDownloader) *Handler {
+	h.media = m
+	return h
+}
+
+// MediaDownloader 按蓝信 mediaId 取回文件内容。
+type MediaDownloader interface {
+	DownloadMedia(ctx context.Context, mediaID string) ([]byte, error)
 }
 
 // WithInbox 挂上收件箱上报；未挂载时只影响记录，不影响原有处理逻辑。
@@ -131,25 +146,25 @@ func (h *Handler) handleMessage(ctx context.Context, m *lanxin.InboundMessage) e
 			h.reportInbox(ctx, m, "群消息未 @ 机器人")
 			return nil
 		}
-		if h.crash == nil {
-			h.reportInbox(ctx, m, "未开启一键上报")
-			return h.reply(ctx, m, "当前机器人未开启一键上报，请把问题描述发给 pipeline-lead。")
+		// 只有 crash bundle 或 /crash 才走一键上报；图片、文档等交给模型。
+		if h.crash != nil && isCrashBundle(m, text) {
+			chatID := m.GroupID
+			if strings.TrimSpace(chatID) == "" {
+				chatID = m.From
+			}
+			res, msg, err := h.crash.HandleAttachment(ctx, mediaType, ids[0], chatID)
+			if replyErr := h.reply(ctx, m, msg); replyErr != nil {
+				log.Printf("[bot] crash reply failed: %v", replyErr)
+			}
+			if err != nil {
+				return err
+			}
+			if res != nil {
+				log.Printf("[bot] crash ingested status=%s issue=%d msgId=%s", res.Status, res.IssueNumber, m.MsgID)
+			}
+			return nil
 		}
-		chatID := m.GroupID
-		if strings.TrimSpace(chatID) == "" {
-			chatID = m.From
-		}
-		res, msg, err := h.crash.HandleAttachment(ctx, mediaType, ids[0], chatID)
-		if replyErr := h.reply(ctx, m, msg); replyErr != nil {
-			log.Printf("[bot] crash reply failed: %v", replyErr)
-		}
-		if err != nil {
-			return err
-		}
-		if res != nil {
-			log.Printf("[bot] crash ingested status=%s issue=%d msgId=%s", res.Status, res.IssueNumber, m.MsgID)
-		}
-		return nil
+		return h.dispatchMedia(ctx, m, attachmentCaption(m), ids)
 	}
 	// 只处理文本类。
 	if m.MsgType != "text" && m.MsgType != "format" && m.MsgType != "formatText" {
@@ -169,7 +184,7 @@ func (h *Handler) handleMessage(ctx context.Context, m *lanxin.InboundMessage) e
 			h.reportInbox(ctx, m, "命令已在本地处理")
 			return h.reply(ctx, m, "已开启新会话：此前的上下文记忆已重置。")
 		}
-		return h.dispatch(ctx, m, text, false)
+		return h.dispatch(ctx, m, text, false, nil)
 	case "group":
 		if h.cfg.RequireAtMe && (m.Reminder == nil || !m.Reminder.IsAtMe) {
 			h.reportInbox(ctx, m, "群消息未 @ 机器人")
@@ -179,7 +194,7 @@ func (h *Handler) handleMessage(ctx context.Context, m *lanxin.InboundMessage) e
 			h.reportInbox(ctx, m, "命令已在本地处理")
 			return h.reply(ctx, m, "已开启新会话：此前的上下文记忆已重置。")
 		}
-		return h.dispatch(ctx, m, text, true)
+		return h.dispatch(ctx, m, text, true, nil)
 	default:
 		h.reportInbox(ctx, m, "未知会话类型")
 		log.Printf("[bot] unknown chatType=%q msgId=%s groupId=%s", m.ChatType, m.MsgID, m.GroupID)
@@ -187,7 +202,7 @@ func (h *Handler) handleMessage(ctx context.Context, m *lanxin.InboundMessage) e
 	}
 }
 
-func (h *Handler) dispatch(ctx context.Context, m *lanxin.InboundMessage, text string, isGroup bool) error {
+func (h *Handler) dispatch(ctx context.Context, m *lanxin.InboundMessage, text string, isGroup bool, attachments []Attachment) error {
 	in := Inbound{
 		Platform:          "lanxin",
 		BotID:             h.cfg.BotID,
@@ -202,6 +217,7 @@ func (h *Handler) dispatch(ctx context.Context, m *lanxin.InboundMessage, text s
 		MsgType:           m.MsgType,
 		Text:              text,
 		IsAtMe:            m.Reminder != nil && m.Reminder.IsAtMe,
+		Attachments:       attachments,
 	}
 	in.Reply = func(ctx context.Context, replyText string) error {
 		return h.reply(ctx, m, replyText)
@@ -251,4 +267,122 @@ func (h *Handler) SendText(ctx context.Context, chatType, targetID, refMsgID, te
 	}
 	_, err := h.snd.SendGroupMessage(ctx, targetID, t)
 	return err
+}
+
+const (
+	maxBotAttachments     = 4
+	maxBotAttachmentBytes = 8 << 20
+)
+
+// dispatchMedia 下载媒体并连同说明文字一起派单；下载失败也要让模型知道。
+func (h *Handler) dispatchMedia(ctx context.Context, m *lanxin.InboundMessage, text string, mediaIDs []string) error {
+	atts, note, err := h.collectAttachments(ctx, m, mediaIDs)
+	if err != nil {
+		log.Printf("[bot] attachment download failed msgId=%s: %v", m.MsgID, err)
+	}
+	if len(atts) == 0 && strings.TrimSpace(text) == "" {
+		return h.reply(ctx, m, "收到附件，但下载失败或格式不支持，请补充一段文字说明。")
+	}
+	if note != "" {
+		text = strings.TrimSpace(strings.TrimSpace(text) + "\n" + note)
+	}
+	isGroup := m.ChatType == "group"
+	return h.dispatch(ctx, m, text, isGroup, atts)
+}
+
+// collectAttachments 按 mediaId 下载附件，限制数量和单文件大小。
+func (h *Handler) collectAttachments(ctx context.Context, m *lanxin.InboundMessage, mediaIDs []string) ([]Attachment, string, error) {
+	if h.media == nil {
+		return nil, "（未配置媒体下载，附件未随消息发送）", nil
+	}
+	out := make([]Attachment, 0, len(mediaIDs))
+	for i, id := range mediaIDs {
+		if len(out) >= maxBotAttachments {
+			return out, "（附件超过数量上限，其余已忽略）", nil
+		}
+		data, err := h.media.DownloadMedia(ctx, id)
+		if err != nil {
+			return out, "（部分附件下载失败）", err
+		}
+		if len(data) > maxBotAttachmentBytes {
+			return out, "（附件超过单文件大小上限，已忽略）", nil
+		}
+		mimeType := http.DetectContentType(data)
+		out = append(out, Attachment{Name: attachmentName(m, i, mimeType), MimeType: mimeType, Data: data})
+	}
+	return out, "", nil
+}
+
+// attachmentCaption 提取图片/文件消息自带的说明文字。
+func attachmentCaption(m *lanxin.InboundMessage) string {
+	if text := strings.TrimSpace(m.TextContent()); text != "" {
+		return text
+	}
+	var d struct {
+		Image struct {
+			Content string `json:"content"`
+		} `json:"image"`
+		File struct {
+			Content string `json:"content"`
+		} `json:"file"`
+	}
+	if err := json.Unmarshal(m.MsgData, &d); err != nil {
+		return ""
+	}
+	if v := strings.TrimSpace(d.Image.Content); v != "" {
+		return v
+	}
+	return strings.TrimSpace(d.File.Content)
+}
+
+// attachmentName 取文件名；图片按内容类型补扩展名。
+func attachmentName(m *lanxin.InboundMessage, index int, mimeType string) string {
+	var d struct {
+		File struct {
+			Name string `json:"name"`
+		} `json:"file"`
+	}
+	_ = json.Unmarshal(m.MsgData, &d)
+	if name := strings.TrimSpace(d.File.Name); name != "" {
+		return name
+	}
+	ext := extensionForMime(mimeType)
+	if ext == "" {
+		ext = ".bin"
+	}
+	return fmt.Sprintf("attachment-%d%s", index+1, ext)
+}
+
+// isCrashBundle 判断这条附件消息是不是崩溃上报。
+func isCrashBundle(m *lanxin.InboundMessage, text string) bool {
+	if strings.EqualFold(strings.TrimSpace(text), "/crash") {
+		return true
+	}
+	var d struct {
+		File struct {
+			Name string `json:"name"`
+		} `json:"file"`
+	}
+	_ = json.Unmarshal(m.MsgData, &d)
+	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(d.File.Name)), "crash_bundle.json")
+}
+
+func extensionForMime(mimeType string) string {
+	switch strings.ToLower(mimeType) {
+	case "image/png":
+		return ".png"
+	case "image/jpeg":
+		return ".jpg"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	case "application/pdf":
+		return ".pdf"
+	case "text/plain":
+		return ".txt"
+	case "application/json":
+		return ".json"
+	}
+	return ""
 }

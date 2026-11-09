@@ -117,7 +117,7 @@ func TestHandlerRoutesAttachmentToCrashIntake(t *testing.T) {
 
 	ev := lanxin.Event{Type: lanxin.EventGroupMessage, Data: json.RawMessage(`{
 		"msgType":"text","chatType":"group","from":"u-1","msgId":"msg-crash-1","groupId":"grp-1",
-		"msgData":{"text":{"content":"","mediaType":3,"mediaIds":["media-1"]}},
+		"msgData":{"text":{"content":"","mediaType":3,"mediaIds":["media-1"]},"file":{"name":"crash_bundle.json"}},
 		"reminder":{"isAtMe":true}}`)}
 	if err := h.HandleEvent(context.Background(), ev); err != nil {
 		t.Fatalf("handle event: %v", err)
@@ -157,5 +157,37 @@ func TestCrashHelpCommand(t *testing.T) {
 	}
 	if len(snd.p2ps) != 1 || !strings.Contains(fmt.Sprint(snd.p2ps[0].MsgData), "crash_bundle") {
 		t.Fatalf("help reply missing: %+v", snd.p2ps)
+	}
+}
+
+type recordingDispatcher struct{ got []Inbound }
+
+func (r *recordingDispatcher) Dispatch(ctx context.Context, msg Inbound) error {
+	r.got = append(r.got, msg)
+	return nil
+}
+
+// 图片消息带说明文字时应连同附件交给模型，而不是走崩溃上报。
+func TestHandlerDispatchesImageWithCaption(t *testing.T) {
+	snd := &fakeSender{}
+	disp := &recordingDispatcher{}
+	media := &fakeMedia{data: []byte("\x89PNG\r\n\x1a\n0000")}
+	h := NewHandler(Config{RequireAtMe: true}, snd, disp).WithMedia(media)
+	ev := lanxin.Event{Type: lanxin.EventGroupMessage, Data: json.RawMessage(`{
+		"msgType":"image","chatType":"group","from":"u-1","msgId":"msg-img-1","groupId":"grp-1",
+		"msgData":{"image":{"content":"这个报错怎么处理","mediaIds":["media-1"]}},
+		"reminder":{"isAtMe":true}}`)}
+	if err := h.HandleEvent(context.Background(), ev); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(disp.got) != 1 {
+		t.Fatalf("dispatch count = %d", len(disp.got))
+	}
+	got := disp.got[0]
+	if got.Text != "这个报错怎么处理" {
+		t.Fatalf("text = %q", got.Text)
+	}
+	if len(got.Attachments) != 1 || got.Attachments[0].MimeType != "image/png" || len(got.Attachments[0].Data) == 0 {
+		t.Fatalf("attachments = %+v", got.Attachments)
 	}
 }

@@ -42,18 +42,26 @@ func (s State) IsActive() bool {
 
 // Inbound 是 bot 归一化后的蓝信入站消息（JSON 字段与 bot.Inbound 对齐）。
 type Inbound struct {
-	Platform          string `json:"platform"`
-	BotID             string `json:"botId"`
-	BotName           string `json:"botName"`
-	PlatformMessageID string `json:"platformMessageId"`
-	ChatType          string `json:"chatType"`
-	SenderID          string `json:"senderId"`
-	SenderName        string `json:"senderName"`
-	GroupID           string `json:"groupId"`
-	GroupName         string `json:"groupName"`
-	MsgType           string `json:"msgType"`
-	Text              string `json:"text"`
-	IsAtMe            bool   `json:"isAtMe"`
+	Platform          string       `json:"platform"`
+	BotID             string       `json:"botId"`
+	BotName           string       `json:"botName"`
+	PlatformMessageID string       `json:"platformMessageId"`
+	ChatType          string       `json:"chatType"`
+	SenderID          string       `json:"senderId"`
+	SenderName        string       `json:"senderName"`
+	GroupID           string       `json:"groupId"`
+	GroupName         string       `json:"groupName"`
+	MsgType           string       `json:"msgType"`
+	Text              string       `json:"text"`
+	IsAtMe            bool         `json:"isAtMe"`
+	Attachments       []Attachment `json:"attachments,omitempty"`
+}
+
+// Attachment 是随消息一起送来的附件；数据以 base64 放在 JSON 里传输。
+type Attachment struct {
+	Name     string `json:"name"`
+	MimeType string `json:"mimeType"`
+	Data     []byte `json:"data"`
 }
 
 // ChatID 返回用于会话归属的 ID：群消息取群，私聊取用户。

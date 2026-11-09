@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -313,10 +316,20 @@ func decisionSummary(d *ChatDecision) string {
 }
 
 func (s *Scheduler) runChat(ctx context.Context, p *Project, history []ChatMessage, msg Inbound, referenced int) (*ChatDecision, error) {
+	prompt := buildChatPrompt(p, history, msg, referenced)
+	images, listing, cleanup, err := saveChatAttachments(msg)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	if len(listing) > 0 {
+		prompt += "\n\n附件（已经下载到本机，可直接按路径读取）：\n" + strings.Join(listing, "\n")
+	}
 	spec := codexrunner.Spec{
 		WorkDir:          chatWorkDir(p),
 		Env:              s.resolveModelEnv(ctx, p),
-		Prompt:           buildChatPrompt(p, history, msg, referenced),
+		Prompt:           prompt,
+		Images:           images,
 		CodexPath:        s.cfg.CodexPath,
 		Model:            firstNonEmpty(p.Model, s.cfg.Model),
 		Effort:           firstNonEmpty(p.Effort, s.cfg.Effort),
@@ -784,4 +797,98 @@ func shortErr(err error) string {
 		msg = msg[:160] + "…"
 	}
 	return msg
+}
+
+const (
+	maxChatAttachments     = 4
+	maxChatAttachmentBytes = 8 << 20
+)
+
+// saveChatAttachments 把消息附件落到临时目录：图片作为图片输入交给模型，
+// 其他文件给出本地路径让模型按需读取；调用方负责执行 cleanup。
+func saveChatAttachments(msg Inbound) (images []string, listing []string, cleanup func(), err error) {
+	cleanup = func() {}
+	if len(msg.Attachments) == 0 {
+		return nil, nil, cleanup, nil
+	}
+	dir, err := os.MkdirTemp("", "smartpipe-chat-attach-*")
+	if err != nil {
+		return nil, nil, cleanup, err
+	}
+	cleanup = func() { _ = os.RemoveAll(dir) }
+	saved := 0
+	for i, a := range msg.Attachments {
+		if saved >= maxChatAttachments {
+			listing = append(listing, fmt.Sprintf("- 其余附件超过 %d 个上限，已忽略", maxChatAttachments))
+			break
+		}
+		if len(a.Data) == 0 {
+			continue
+		}
+		if len(a.Data) > maxChatAttachmentBytes {
+			listing = append(listing, fmt.Sprintf("- %s（%d 字节，超过单文件上限，已忽略）", a.Name, len(a.Data)))
+			continue
+		}
+		mimeType := strings.TrimSpace(a.MimeType)
+		if mimeType == "" {
+			mimeType = http.DetectContentType(a.Data)
+		}
+		name := chatAttachmentName(a.Name, i, mimeType)
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, a.Data, 0o600); err != nil {
+			return nil, nil, cleanup, err
+		}
+		saved++
+		if strings.HasPrefix(mimeType, "image/") {
+			images = append(images, path)
+			listing = append(listing, fmt.Sprintf("- 图片 %s（%s）", name, mimeType))
+		} else {
+			listing = append(listing, fmt.Sprintf("- 文件 %s（%s）：%s", name, mimeType, path))
+		}
+	}
+	return images, listing, cleanup, nil
+}
+
+// chatAttachmentName 只保留安全的文件名与扩展名，避免路径穿越和重名。
+func chatAttachmentName(name string, index int, mimeType string) string {
+	base := filepath.Base(strings.TrimSpace(name))
+	base = strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '-', r == '_':
+			return r
+		case r == ' ':
+			return '-'
+		default:
+			return -1
+		}
+	}, base)
+	if base == "" || base == "." || base == ".." {
+		base = fmt.Sprintf("attachment-%d", index+1)
+	}
+	if filepath.Ext(base) == "" {
+		if ext := extensionForMime(mimeType); ext != "" {
+			base += ext
+		}
+	}
+	return base
+}
+
+func extensionForMime(mimeType string) string {
+	switch strings.ToLower(mimeType) {
+	case "image/png":
+		return ".png"
+	case "image/jpeg":
+		return ".jpg"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	case "application/pdf":
+		return ".pdf"
+	case "text/plain":
+		return ".txt"
+	case "application/json":
+		return ".json"
+	}
+	return ""
 }

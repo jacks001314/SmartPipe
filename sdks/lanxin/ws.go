@@ -97,19 +97,42 @@ func (m *InboundMessage) MediaAttachment() (MediaType, []string) {
 	if len(m.MsgData) == 0 {
 		return 0, nil
 	}
+	type mediaPart struct {
+		MediaType MediaType `json:"mediaType"`
+		MediaIDs  []string  `json:"mediaIds"`
+	}
 	var d struct {
-		Text struct {
-			MediaType MediaType `json:"mediaType"`
-			MediaIDs  []string  `json:"mediaIds"`
-		} `json:"text"`
+		Text  mediaPart `json:"text"`
+		Image mediaPart `json:"image"`
+		File  mediaPart `json:"file"`
+		Voice mediaPart `json:"voice"`
+		Video mediaPart `json:"video"`
 	}
 	if err := json.Unmarshal(m.MsgData, &d); err != nil {
 		return 0, nil
 	}
-	if len(d.Text.MediaIDs) == 0 {
-		return 0, nil
+	// 图片/文件等消息把 mediaIds 放在各自的 msgData 段里，不能只看 text。
+	parts := []struct {
+		kind MediaType
+		part mediaPart
+	}{
+		{d.Text.MediaType, d.Text},
+		{MediaImage, d.Image},
+		{MediaFile, d.File},
+		{MediaVoice, d.Voice},
+		{MediaVideo, d.Video},
 	}
-	return d.Text.MediaType, d.Text.MediaIDs
+	for _, item := range parts {
+		if len(item.part.MediaIDs) == 0 {
+			continue
+		}
+		kind := item.kind
+		if kind == 0 {
+			kind = item.part.MediaType
+		}
+		return kind, item.part.MediaIDs
+	}
+	return 0, nil
 }
 
 // ApproveCardCallback 审批卡片按钮回调（eventData 为发送时按钮 callbackInfo 原值）。

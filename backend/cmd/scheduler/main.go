@@ -87,6 +87,7 @@ func modelEnvFetcher(adminURL, token string) func(ctx context.Context, projectID
 		var out struct {
 			Data struct {
 				BaseURL string `json:"base_url"`
+				WireAPI string `json:"wire_api"`
 				APIKey  string `json:"api_key"`
 			} `json:"data"`
 		}
@@ -99,6 +100,9 @@ func modelEnvFetcher(adminURL, token string) func(ctx context.Context, projectID
 		}
 		if out.Data.APIKey != "" {
 			env = append(env, "OPENAI_API_KEY="+out.Data.APIKey)
+		}
+		if out.Data.WireAPI != "" {
+			env = append(env, "OPENAI_WIRE_API="+out.Data.WireAPI)
 		}
 		return env, nil
 	}

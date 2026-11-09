@@ -114,8 +114,12 @@ func buildChatPrompt(p *Project, history []ChatMessage, msg Inbound, referenced 
 			fmt.Fprintf(&b, "- %s：%s\n", role, clamp(h.Body, 600))
 		}
 	}
+	text := clamp(msg.Text, 4000)
+	if strings.TrimSpace(text) == "" {
+		text = "（这条消息只带了附件，没有文字说明，请按附件内容理解意图）"
+	}
 	fmt.Fprintf(&b, "\n群：%s\n发言人：%s\n消息：%s\n\n请按系统提示词输出一个 JSON 对象。",
-		msg.GroupName, msg.SenderName, clamp(msg.Text, 4000))
+		msg.GroupName, msg.SenderName, text)
 	return b.String()
 }
 

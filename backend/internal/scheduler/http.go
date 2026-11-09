@@ -31,10 +31,18 @@ func NewServer(cfg ServerConfig, s *Scheduler) *iris.Application {
 		_, _ = ctx.WriteString("unauthorized")
 	}
 	app.Post("/internal/scheduler/messages", guard, func(ctx iris.Context) {
+		// 图片/文件以 base64 随消息过来，请求体放宽到 64MB，同时防止无限读取。
+		ctx.Request().Body = http.MaxBytesReader(ctx.ResponseWriter(), ctx.Request().Body, 64<<20)
 		var msg Inbound
-		if err := ctx.ReadJSON(&msg); err != nil || strings.TrimSpace(msg.Text) == "" {
+		if err := ctx.ReadJSON(&msg); err != nil {
 			ctx.StatusCode(http.StatusBadRequest)
-			ctx.JSON(map[string]string{"error": "text required"})
+			ctx.JSON(map[string]string{"error": "invalid json"})
+			return
+		}
+		// 只有附件、没有文字的消息同样要交给模型理解。
+		if strings.TrimSpace(msg.Text) == "" && len(msg.Attachments) == 0 {
+			ctx.StatusCode(http.StatusBadRequest)
+			ctx.JSON(map[string]string{"error": "text or attachments required"})
 			return
 		}
 		// 模型调用可能持续几分钟，先返回 202，再异步处理。

@@ -37,7 +37,7 @@ func newRunnerManager(base bot.Config, rt *bot.BotRuntime) *runnerManager {
 
 func (m *runnerManager) start(parent context.Context, cfg bot.Config) *wsRunner {
 	client := lanxin.New(cfg.AppID, cfg.AppSecret, lanxin.WithAPIBase(cfg.APIBase))
-	handler := bot.NewHandler(cfg, client, bot.NewDispatcher(cfg, client))
+	handler := bot.NewHandler(cfg, client, bot.NewDispatcher(cfg, client)).WithMedia(client)
 	if cfg.BridgeURL != "" {
 		handler = handler.WithInbox(bot.BridgeInbox{BaseURL: cfg.BridgeURL, Token: cfg.BridgeToken})
 	}

@@ -17,19 +17,20 @@ import (
 
 // Inbound 是归一化后的入站消息（与平台解耦，Orchestrator 只认这个结构）。
 type Inbound struct {
-	Platform          string `json:"platform"` // 固定 "lanxin"
-	BotID             string `json:"botId,omitempty"`
-	BotName           string `json:"botName,omitempty"`
-	PlatformMessageID string `json:"platformMessageId"` // msgId，幂等键
-	ChatType          string `json:"chatType"`          // "p2p" | "group"
-	SenderID          string `json:"senderId"`          // 蓝信 staffId（用户标识）
-	SenderName        string `json:"senderName"`
-	GroupID           string `json:"groupId,omitempty"`
-	GroupName         string `json:"groupName,omitempty"`
-	ConversationID    string `json:"conversationId,omitempty"`
-	MsgType           string `json:"msgType"` // 原始 msgType
-	Text              string `json:"text"`    // 归一化文本（text/format 均提取）
-	IsAtMe            bool   `json:"isAtMe"`
+	Platform          string       `json:"platform"` // 固定 "lanxin"
+	BotID             string       `json:"botId,omitempty"`
+	BotName           string       `json:"botName,omitempty"`
+	PlatformMessageID string       `json:"platformMessageId"` // msgId，幂等键
+	ChatType          string       `json:"chatType"`          // "p2p" | "group"
+	SenderID          string       `json:"senderId"`          // 蓝信 staffId（用户标识）
+	SenderName        string       `json:"senderName"`
+	GroupID           string       `json:"groupId,omitempty"`
+	GroupName         string       `json:"groupName,omitempty"`
+	ConversationID    string       `json:"conversationId,omitempty"`
+	MsgType           string       `json:"msgType"` // 原始 msgType
+	Text              string       `json:"text"`    // 归一化文本（text/format 均提取）
+	IsAtMe            bool         `json:"isAtMe"`
+	Attachments       []Attachment `json:"attachments,omitempty"`
 
 	// Reply 回复该消息的便捷函数（由 Handler 注入；不参与 JSON 序列化）。
 	Reply func(ctx context.Context, text string) error `json:"-"`
@@ -237,4 +238,11 @@ func (d SchedulerDispatcher) Dispatch(ctx context.Context, msg Inbound) error {
 	}
 	log.Printf("[bot] dispatched to scheduler chat=%s msgId=%s", msg.GroupID, msg.PlatformMessageID)
 	return nil
+}
+
+// Attachment 是随消息一起转发的附件；Data 在 JSON 里以 base64 编码。
+type Attachment struct {
+	Name     string `json:"name"`
+	MimeType string `json:"mimeType"`
+	Data     []byte `json:"data"`
 }
