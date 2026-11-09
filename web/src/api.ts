@@ -1,4 +1,4 @@
-import type { AuditEntry, AuthConfig, AuthSession, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Health, IssueAttempt, Project, ReleaseCandidate, ReleaseRecord, ReleaseRun, RepoOp, TestResult, UserIdentity, VerificationRecord, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubPATView, GitHubRepoCatalog, GitHubRepo } from "./types";
+import type { AuditEntry, AuthConfig, AuthSession, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Health, IssueAttempt, Project, ReleaseCandidate, ReleaseRecord, ReleaseRun, RepoOp, TestResult, UserIdentity, VerificationRecord, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubTunnelView, GitHubPATView, GitHubRepoCatalog, GitHubRepo } from "./types";
 
 const TOKEN_KEY = "smartpipe.adminToken";
 
@@ -99,6 +99,15 @@ export const api = {
   getGithubProxy: () => request<GitHubProxyView>("/github/proxy"),
   setGithubProxy: (url: string) => request<GitHubProxyView>("/github/proxy", { method: "PUT", body: { url } }),
   testGithubProxy: (url: string) => request<{ ok: boolean; message: string; latency_ms: number }>("/github/proxy/test", { method: "POST", body: { url } }),
+  getGithubTunnel: () => request<GitHubTunnelView>("/github/tunnel"),
+  setGithubTunnel: (body: {
+    enabled: boolean;
+    server: string;
+    server_port: number;
+    remote_port: number;
+    proxy_name: string;
+    token?: string;
+  }) => request<GitHubTunnelView>("/github/tunnel", { method: "PUT", body }),
   startGithubApp: () => request<GitHubAppSetup>("/github/app/start", { method: "POST" }),
   getGithubAppStatus: (setup_id: string) =>
     request<GitHubAppSetupStatus>("/github/app/status/" + encodeURIComponent(setup_id)),

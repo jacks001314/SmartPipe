@@ -8,6 +8,7 @@ import type {
   GitHubOAuthView,
   GitHubRepo,
   GitHubRepoList,
+  GitHubTunnelView,
   Project,
 } from "../types";
 import type { Notify } from "../App";
@@ -67,6 +68,16 @@ export function GitHubPage({ notify }: { notify: Notify }) {
   const [cloneError, setCloneError] = useState("");
   const [cloneProgress, setCloneProgress] = useState<{ status: string; pct: number; phase: string; msg: string; bytes: number } | null>(null);
   const [cloneStartedMs, setCloneStartedMs] = useState(0);
+  const [tunnel, setTunnel] = useState<GitHubTunnelView | null>(null);
+  const [tunnelEnabled, setTunnelEnabled] = useState(false);
+  const [tunnelServer, setTunnelServer] = useState("");
+  const [tunnelServerPort, setTunnelServerPort] = useState("7000");
+  const [tunnelRemotePort, setTunnelRemotePort] = useState("18090");
+  const [tunnelProxyName, setTunnelProxyName] = useState("smartpipe-webhook");
+  const [tunnelToken, setTunnelToken] = useState("");
+  const [tunnelBusy, setTunnelBusy] = useState(false);
+  const [tunnelNote, setTunnelNote] = useState("");
+  const [tunnelNoteOk, setTunnelNoteOk] = useState(true);
   const [nowTick, setNowTick] = useState(Date.now());
   const accountScope = repos?.oauth_scope ?? "";
   const scopeHasRepo = accountScope.split(",").map((item) => item.trim()).includes("repo");
@@ -74,16 +85,23 @@ export function GitHubPage({ notify }: { notify: Notify }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [repoList, creds, projs, oauthView, proxyView, cloneRootView] = await Promise.all([
+      const [repoList, creds, projs, oauthView, proxyView, cloneRootView, tunnelView] = await Promise.all([
         api.listGitHubRepos(),
         api.listCredentials(),
         api.listProjects(),
         api.getGithubOAuth(),
         api.getGithubProxy(),
         api.getGithubCloneRoot(),
+        api.getGithubTunnel(),
       ]);
       setProxyURL(proxyView.url ?? "");
       setCloneRoot(cloneRootView.root ?? "");
+      setTunnel(tunnelView);
+      setTunnelEnabled(tunnelView.enabled);
+      setTunnelServer(tunnelView.server ?? "");
+      setTunnelServerPort(String(tunnelView.server_port ?? 7000));
+      setTunnelRemotePort(String(tunnelView.remote_port ?? 18090));
+      setTunnelProxyName(tunnelView.proxy_name || "smartpipe-webhook");
       setRepos({ ...repoList, repos: repoList.repos ?? [] });
       setOauth(oauthView);
       setCredentials(creds ?? []);
@@ -199,6 +217,36 @@ export function GitHubPage({ notify }: { notify: Notify }) {
       notify(err instanceof ApiError ? err.message : "保存克隆目录失败", "error");
     } finally {
       setCloneRootBusy(false);
+    }
+  };
+
+  const saveTunnel = async () => {
+    setTunnelBusy(true);
+    setTunnelNote("");
+    try {
+      const view = await api.setGithubTunnel({
+        enabled: tunnelEnabled,
+        server: tunnelServer.trim(),
+        server_port: Number(tunnelServerPort) || 7000,
+        remote_port: Number(tunnelRemotePort) || 18090,
+        proxy_name: tunnelProxyName.trim() || "smartpipe-webhook",
+        token: tunnelToken.trim() || undefined,
+      });
+      setTunnel(view);
+      setTunnelEnabled(view.enabled);
+      setTunnelServer(view.server ?? "");
+      setTunnelServerPort(String(view.server_port));
+      setTunnelRemotePort(String(view.remote_port));
+      setTunnelProxyName(view.proxy_name);
+      setTunnelToken("");
+      setTunnelNoteOk(true);
+      setTunnelNote("已保存，bridge 将在 30 秒内生效");
+      notify("Webhook 隧道配置已保存", "ok");
+    } catch (err) {
+      setTunnelNoteOk(false);
+      setTunnelNote(err instanceof ApiError ? err.message : "保存隧道配置失败");
+    } finally {
+      setTunnelBusy(false);
     }
   };
 
@@ -558,6 +606,54 @@ export function GitHubPage({ notify }: { notify: Notify }) {
               {cloneRootBusy ? "保存中…" : "保存"}
             </button>
             <span className="tiny github-proxy-hint">仓库会 clone 到该目录下的 owner/repo，项目创建时选择本地库。</span>
+          </div>
+          <div className="github-proxy github-tunnel">
+            <span className="github-proxy-label">Webhook 隧道</span>
+            <label className="tiny github-tunnel-switch">
+              <input type="checkbox" checked={tunnelEnabled} onChange={(event) => setTunnelEnabled(event.target.checked)} />
+              启用内嵌 frpc
+            </label>
+            <input
+              value={tunnelServer}
+              onChange={(event) => setTunnelServer(event.target.value)}
+              placeholder="frps 地址，如 frp.example.com"
+              spellCheck={false}
+            />
+            <input
+              className="github-tunnel-port"
+              value={tunnelServerPort}
+              onChange={(event) => setTunnelServerPort(event.target.value)}
+              placeholder="7000"
+              inputMode="numeric"
+            />
+            <span className="tiny">→ 远端端口</span>
+            <input
+              className="github-tunnel-port"
+              value={tunnelRemotePort}
+              onChange={(event) => setTunnelRemotePort(event.target.value)}
+              placeholder="18090"
+              inputMode="numeric"
+            />
+            <input
+              value={tunnelProxyName}
+              onChange={(event) => setTunnelProxyName(event.target.value)}
+              placeholder="smartpipe-webhook"
+              spellCheck={false}
+            />
+            <input
+              type="password"
+              value={tunnelToken}
+              onChange={(event) => setTunnelToken(event.target.value)}
+              placeholder={tunnel?.token_set ? "已配置 frps token（留空不改）" : "frps auth.token"}
+              spellCheck={false}
+            />
+            <button className="btn small" disabled={tunnelBusy} onClick={() => void saveTunnel()}>
+              {tunnelBusy ? "保存中…" : "保存"}
+            </button>
+            {tunnelNote && <span className={"tiny " + (tunnelNoteOk ? "" : "bad-note")}>{tunnelNote}</span>}
+            <span className="tiny github-proxy-hint">
+              bridge 以库方式连接 frps，把 Webhook 端口映射到远端端口，配置改动 30 秒内自动生效。GitHub 的回调地址要填 frps 那台机器上对应的反向代理入口。
+            </span>
           </div>
           <div className="github-account-auth">
             <div className="tiny">

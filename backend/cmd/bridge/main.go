@@ -13,7 +13,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -26,6 +28,7 @@ import (
 
 	"smartpipe/backend/internal/bridge"
 	"smartpipe/backend/internal/crash"
+	"smartpipe/backend/internal/frptunnel"
 	"smartpipe/backend/internal/secretbox"
 	"smartpipe/backend/internal/store"
 )
@@ -300,12 +303,20 @@ func main() {
 	if addr == "" {
 		addr = ":8090"
 	}
+
+	// 内嵌 frpc：隧道参数来自配置页（settings 表），环境变量优先；
+	// bridge 每 30 秒比对一次配置，改动后自动重建隧道。
+	tunnelCtx, tunnelCancel := context.WithCancel(context.Background())
+	defer tunnelCancel()
+	go watchTunnel(tunnelCtx, st, addr)
+
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
 	go func() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 		<-sig
+		tunnelCancel()
 		shutdownCtx, done := context.WithTimeout(context.Background(), 10*time.Second)
 		defer done()
 		_ = srv.Shutdown(shutdownCtx)
@@ -332,6 +343,16 @@ func lookupWebhookSecret(ctx context.Context, st *store.Store) string {
 	return ""
 }
 
+// listenPort 从 ":8090" / "127.0.0.1:8090" 这类监听地址里取出端口。
+func listenPort(addr string) int {
+	if i := strings.LastIndex(addr, ":"); i >= 0 {
+		if port, err := strconv.Atoi(addr[i+1:]); err == nil && port > 0 {
+			return port
+		}
+	}
+	return 0
+}
+
 func envInt(key string, fallback int) int {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
@@ -345,4 +366,146 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+// tunnelSpec 是一份完整的隧道配置，来自环境变量或配置页。
+type tunnelSpec struct {
+	enabled    bool
+	server     string
+	serverPort int
+	localPort  int
+	remotePort int
+	proxyName  string
+	token      string
+}
+
+func (s tunnelSpec) key() string {
+	return fmt.Sprintf("%t|%s|%d|%d|%d|%s|%x", s.enabled, s.server, s.serverPort,
+		s.localPort, s.remotePort, s.proxyName, sha256.Sum256([]byte(s.token)))
+}
+
+func (s tunnelSpec) usable() bool {
+	return s.enabled && strings.TrimSpace(s.server) != "" && s.token != ""
+}
+
+// resolveTunnelSpec 合并配置页与 SMARTPIPE_FRP_* 环境变量。
+// 配置页优先，环境变量只在配置页留空时兜底，这样前端改完能真正生效。
+func resolveTunnelSpec(ctx context.Context, st *store.Store, listenAddr string) tunnelSpec {
+	spec := tunnelSpec{
+		serverPort: envInt("SMARTPIPE_FRP_SERVER_PORT", 7000),
+		localPort:  envInt("SMARTPIPE_FRP_LOCAL_PORT", listenPort(listenAddr)),
+		remotePort: envInt("SMARTPIPE_FRP_REMOTE_PORT", 18090),
+		proxyName:  firstNonEmpty(os.Getenv("SMARTPIPE_FRP_PROXY_NAME"), "smartpipe-webhook"),
+	}
+	if v := strings.TrimSpace(os.Getenv("SMARTPIPE_FRP_SERVER")); v != "" {
+		spec.server = v
+		spec.enabled = true
+	}
+
+	if v, err := st.GetSetting(ctx, "github_tunnel_server"); err == nil && strings.TrimSpace(v) != "" {
+		spec.server = strings.TrimSpace(v)
+	}
+	if v, err := st.GetSetting(ctx, "github_tunnel_enabled"); err == nil && strings.TrimSpace(v) != "" {
+		spec.enabled = strings.EqualFold(strings.TrimSpace(v), "true")
+	}
+	if v, err := st.GetSetting(ctx, "github_tunnel_server_port"); err == nil {
+		if port, convErr := strconv.Atoi(strings.TrimSpace(v)); convErr == nil && port > 0 {
+			spec.serverPort = port
+		}
+	}
+	if v, err := st.GetSetting(ctx, "github_tunnel_remote_port"); err == nil {
+		if port, convErr := strconv.Atoi(strings.TrimSpace(v)); convErr == nil && port > 0 {
+			spec.remotePort = port
+		}
+	}
+	if v, err := st.GetSetting(ctx, "github_tunnel_proxy_name"); err == nil && strings.TrimSpace(v) != "" {
+		spec.proxyName = strings.TrimSpace(v)
+	}
+
+	// token 以配置页保存的凭据为准，没有凭据才退回环境变量。
+	spec.token = lookupCredentialSecret(ctx, st, store.CredentialFRPToken)
+	if spec.token == "" {
+		spec.token = strings.TrimSpace(os.Getenv("SMARTPIPE_FRP_TOKEN"))
+	}
+	return spec
+}
+
+func firstNonEmpty(value, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return strings.TrimSpace(value)
+	}
+	return fallback
+}
+
+// watchTunnel 保证进程内始终跑着「当前配置」对应的隧道：配置变化即重建。
+func watchTunnel(ctx context.Context, st *store.Store, listenAddr string) {
+	var (
+		cancel context.CancelFunc
+		key    string
+	)
+	apply := func() {
+		spec := resolveTunnelSpec(ctx, st, listenAddr)
+		next := spec.key()
+		if next == key {
+			return
+		}
+		key = next
+		if cancel != nil {
+			cancel()
+			cancel = nil
+		}
+		if !spec.usable() {
+			if spec.enabled {
+				log.Printf("内嵌 frpc 配置不完整（缺 frps 地址或 token），暂不启动")
+			}
+			return
+		}
+		runCtx, runCancel := context.WithCancel(ctx)
+		cancel = runCancel
+		log.Printf("启用内嵌 frpc: %s:%d -> 127.0.0.1:%d (remote %d, proxy %s)",
+			spec.server, spec.serverPort, spec.localPort, spec.remotePort, spec.proxyName)
+		go func() {
+			if err := frptunnel.Run(runCtx, frptunnel.Config{
+				ServerAddr: spec.server,
+				ServerPort: spec.serverPort,
+				Token:      spec.token,
+				LocalPort:  spec.localPort,
+				RemotePort: spec.remotePort,
+				ProxyName:  spec.proxyName,
+				LogLevel:   strings.TrimSpace(os.Getenv("SMARTPIPE_FRP_LOG_LEVEL")),
+			}); err != nil && runCtx.Err() == nil {
+				log.Printf("内嵌 frpc 退出: %v", err)
+			}
+		}()
+	}
+	apply()
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			if cancel != nil {
+				cancel()
+			}
+			return
+		case <-ticker.C:
+			apply()
+		}
+	}
+}
+
+// lookupCredentialSecret 返回某一类全局凭据里第一个启用项的明文。
+func lookupCredentialSecret(ctx context.Context, st *store.Store, kind string) string {
+	items, err := st.ListCredentials(ctx, nil)
+	if err != nil {
+		return ""
+	}
+	for _, c := range items {
+		if c.Enabled && c.Kind == kind {
+			if _, secret, _, err := st.GetSecret(ctx, c.ID); err == nil {
+				return secret
+			}
+		}
+	}
+	return ""
 }

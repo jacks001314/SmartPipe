@@ -52,6 +52,8 @@ services:
       SMARTPIPE_BOT_ADDR: http://bot:8093
       # 仓库 clone 根目录；项目创建时选择这里克隆出来的本地库。
       SMARTPIPE_CLONE_ROOT: /data/repos
+      # 仅用于在 GitHub 配置页展示 token 是否已配置；真实隧道用的是 bridge 那一份。
+      SMARTPIPE_FRP_TOKEN: ${SMARTPIPE_FRP_TOKEN:-}
     ports:
       - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_ADMIN_PORT:-8092}:8092"
     volumes:
@@ -76,6 +78,13 @@ services:
       SMARTPIPE_BOT_ADDR: http://bot:8093
       SMARTPIPE_SCHEDULER_URL: http://host.docker.internal:8098
       SCHEDULER_TOKEN: ${SCHEDULER_TOKEN}
+      # 内嵌 frpc：填了 SMARTPIPE_FRP_SERVER 就由 bridge 自己连 frps，
+      # 把 8090 暴露成公网 Webhook 入口，不需要额外进程或配置文件。
+      SMARTPIPE_FRP_SERVER: ${SMARTPIPE_FRP_SERVER:-}
+      SMARTPIPE_FRP_SERVER_PORT: ${SMARTPIPE_FRP_SERVER_PORT:-7000}
+      SMARTPIPE_FRP_TOKEN: ${SMARTPIPE_FRP_TOKEN:-}
+      SMARTPIPE_FRP_REMOTE_PORT: ${SMARTPIPE_FRP_REMOTE_PORT:-18090}
+      SMARTPIPE_FRP_PROXY_NAME: ${SMARTPIPE_FRP_PROXY_NAME:-smartpipe-webhook}
     ports:
       - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_BRIDGE_PORT:-8090}:8090"
     depends_on:
@@ -100,6 +109,8 @@ services:
     ports:
       - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_VERIFY_PORT:-8095}:8095"
     volumes:
+      # 验证器按项目里记录的 /data/repos/... 路径 clone 源仓库，必须能看到同一份数据。
+      - ./data/repos:/data/repos
       - ./data/verify:/data/verify
       - ./data/releases:/data/releases
       - ./data/go:/data/go

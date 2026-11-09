@@ -93,6 +93,11 @@ func (c *Checker) Dispatch(ctx context.Context, kind, secret string, meta map[st
 		res = Result{OK: len(secret) > 0, Message: "签名密钥已登记（未做联网校验）"}
 	case "model_provider":
 		res = c.modelProvider(ctx, secret, meta)
+	case "frp_token":
+		res = Result{OK: len(secret) > 0, Message: "frps token 已登记（连接状态由 bridge 隧道日志反映）"}
+		if !res.OK {
+			res.Message = "frps token 不能为空"
+		}
 	default:
 		res = Result{OK: false, Message: "不支持的凭据类型: " + kind}
 	}
