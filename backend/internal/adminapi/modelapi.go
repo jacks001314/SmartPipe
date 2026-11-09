@@ -103,9 +103,16 @@ func (a *API) createModelProvider(c iris.Context) {
 		if strings.TrimSpace(modelID) == "" {
 			continue
 		}
-		if _, err := a.store.AddProviderModel(ctx, p.ID, modelID, true); err != nil {
+		m, err := a.store.AddProviderModel(ctx, p.ID, modelID, true)
+		if err != nil {
 			a.fail(c, err)
 			return
+		}
+		if m.Enabled {
+			if err := a.ensureModelProfile(ctx, c, p.ID, modelID); err != nil {
+				a.fail(c, err)
+				return
+			}
 		}
 	}
 	p, _ = a.store.GetModelProvider(ctx, p.ID)
@@ -208,14 +215,21 @@ func (a *API) addProviderModel(c iris.Context) {
 	if in.Enabled != nil {
 		enabled = *in.Enabled
 	}
-	if _, err := a.store.GetModelProvider(c.Request().Context(), id); err != nil {
+	ctx := c.Request().Context()
+	if _, err := a.store.GetModelProvider(ctx, id); err != nil {
 		a.fail(c, err)
 		return
 	}
-	m, err := a.store.AddProviderModel(c.Request().Context(), id, in.ModelID, enabled)
+	m, err := a.store.AddProviderModel(ctx, id, in.ModelID, enabled)
 	if err != nil {
 		a.badRequest(c, err.Error())
 		return
+	}
+	if m.Enabled {
+		if err := a.ensureModelProfile(ctx, c, id, m.ModelID); err != nil {
+			a.fail(c, err)
+			return
+		}
 	}
 	a.audit(c.Request().Context(), c, "model.catalog.add", "model_provider", id, nil, "ok",
 		map[string]any{"model": m.ModelID, "enabled": m.Enabled})
@@ -233,8 +247,18 @@ func (a *API) setProviderModelEnabled(c iris.Context) {
 		a.badRequest(c, "请求体不是合法 JSON")
 		return
 	}
-	m, err := a.store.SetProviderModelEnabled(c.Request().Context(), id, modelID, in.Enabled)
+	ctx := c.Request().Context()
+	m, err := a.store.SetProviderModelEnabled(ctx, id, modelID, in.Enabled)
 	if err != nil {
+		a.fail(c, err)
+		return
+	}
+	if in.Enabled {
+		if err := a.ensureModelProfile(ctx, c, id, modelID); err != nil {
+			a.fail(c, err)
+			return
+		}
+	} else if err := a.setCatalogModelProfilesEnabled(ctx, c, id, modelID, false); err != nil {
 		a.fail(c, err)
 		return
 	}
@@ -246,10 +270,12 @@ func (a *API) setProviderModelEnabled(c iris.Context) {
 func (a *API) deleteProviderModel(c iris.Context) {
 	id := c.Params().Get("id")
 	modelID := c.Params().Get("model")
-	if err := a.store.DeleteProviderModel(c.Request().Context(), id, modelID); err != nil {
+	ctx := c.Request().Context()
+	if err := a.store.DeleteProviderModel(ctx, id, modelID); err != nil {
 		a.fail(c, err)
 		return
 	}
+	a.purgeModelProfiles(ctx, c, id, modelID)
 	a.audit(c.Request().Context(), c, "model.catalog.delete", "model_provider", id, nil, "ok",
 		map[string]any{"model": modelID})
 	c.StatusCode(http.StatusNoContent)
@@ -492,6 +518,9 @@ func probeResponsesModel(ctx context.Context, base, apiKey, model string) (bool,
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 32768))
 	latency := time.Since(start).Milliseconds()
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if bad, msg := probeBodyFailure(body); bad {
+			return false, truncateModelText(scrubSecret(msg, apiKey), 240), latency
+		}
 		return true, "模型响应正常（responses）", latency
 	}
 	return false, fmt.Sprintf("上游返回 %d: %s", resp.StatusCode, truncateModelText(scrubSecret(string(body), apiKey), 240)), latency
@@ -558,4 +587,33 @@ func truncateModelText(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// probeBodyFailure 识别“HTTP 200 但 body 是错误”的网关响应，例如 glm 在 Key
+// 失效时返回 {"code":1000,"msg":"身份验证失败。"}；只看状态码会把坏 Key 判成通过。
+func probeBodyFailure(body []byte) (bool, string) {
+	var probe struct {
+		Error   json.RawMessage `json:"error"`
+		Code    *int            `json:"code"`
+		Success *bool           `json:"success"`
+		Msg     string          `json:"msg"`
+		Message string          `json:"message"`
+	}
+	if json.Unmarshal(body, &probe) != nil {
+		return false, ""
+	}
+	if e := bytes.TrimSpace(probe.Error); len(e) > 0 && string(e) != "null" {
+		return true, "上游返回错误: " + string(e)
+	}
+	msg := probe.Msg
+	if msg == "" {
+		msg = probe.Message
+	}
+	if probe.Success != nil && !*probe.Success {
+		return true, "上游判定失败: " + msg
+	}
+	if probe.Code != nil && *probe.Code != 0 {
+		return true, fmt.Sprintf("上游返回 code=%d: %s", *probe.Code, msg)
+	}
+	return false, ""
 }

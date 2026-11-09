@@ -496,7 +496,7 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
                   {legacyModelLabel && <option value="__current">当前：{legacyModelLabel}</option>}
                   {modelProfiles.filter((p) => p.enabled).map((profile) => (
                     <option key={profile.id} value={profile.id}>
-                      {profile.name + " · " + profile.model + (profile.reasoning_effort ? " · 推理 " + profile.reasoning_effort : "")}
+                      {(profile.name.toLowerCase().includes(profile.model.toLowerCase()) ? profile.name : profile.name + " · " + profile.model) + (profile.reasoning_effort ? " · 推理 " + profile.reasoning_effort : "")}
                     </option>
                   ))}
                 </select>

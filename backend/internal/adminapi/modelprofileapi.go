@@ -1,9 +1,13 @@
 package adminapi
 
 import (
+	"context"
 	"net/http"
+	"strings"
 
 	"github.com/kataras/iris/v12"
+
+	"smartpipe/backend/internal/store"
 )
 
 func (a *API) listModelProfiles(c iris.Context) {
@@ -79,4 +83,97 @@ func (a *API) setModelProfileDefault(c iris.Context) {
 	_ = c.JSON(envelope{Data: modelDefaultView{
 		ProviderID: profile.ProviderID, Model: profile.Model, ReasoningEffort: profile.ReasoningEffort,
 	}})
+}
+
+// ensureModelProfile 在供应商模型被启用后自动生成对应档案，
+// 让项目创建页无需再导入配置就能选到这个模型。
+func (a *API) ensureModelProfile(ctx context.Context, c iris.Context, providerID, modelID string) error {
+	profiles, err := a.store.ListModelProfiles(ctx)
+	if err != nil {
+		return err
+	}
+	for _, p := range profiles {
+		if p.ProviderID != providerID || !strings.EqualFold(p.Model, modelID) {
+			continue
+		}
+		if p.Enabled {
+			return nil
+		}
+		if _, err := a.store.SetModelProfileEnabled(ctx, p.ID, true); err != nil {
+			return err
+		}
+		a.audit(ctx, c, "model.profile.auto_enable", "model_profile", p.ID, nil, "ok",
+			map[string]any{"model": modelID, "trigger": "catalog_enabled"})
+		return nil
+	}
+	provider, err := a.store.GetModelProvider(ctx, providerID)
+	if err != nil {
+		return err
+	}
+	name := strings.TrimSpace(provider.Name)
+	if name == "" {
+		name = providerID
+	}
+	if profileNameTaken(profiles, name) {
+		name = name + " · " + modelID
+	}
+	if profileNameTaken(profiles, name) {
+		// 重名时跳过建档，避免 Upsert 覆盖同名的其它档案。
+		return nil
+	}
+	profile, err := a.store.UpsertModelProfile(ctx, &store.ModelProfile{
+		Name: name, ProviderID: providerID, Model: modelID, Enabled: true, Source: "auto",
+	})
+	if err != nil {
+		return err
+	}
+	a.audit(ctx, c, "model.profile.auto_create", "model_profile", profile.ID, nil, "ok",
+		map[string]any{"model": modelID, "provider_id": providerID})
+	return nil
+}
+
+// setCatalogModelProfilesEnabled 让档案跟随目录模型的启停，避免档案指向已停用的模型。
+func (a *API) setCatalogModelProfilesEnabled(ctx context.Context, c iris.Context, providerID, modelID string, enabled bool) error {
+	profiles, err := a.store.ListModelProfiles(ctx)
+	if err != nil {
+		return err
+	}
+	for _, p := range profiles {
+		if p.ProviderID != providerID || !strings.EqualFold(p.Model, modelID) || p.Enabled == enabled {
+			continue
+		}
+		if _, err := a.store.SetModelProfileEnabled(ctx, p.ID, enabled); err != nil {
+			return err
+		}
+		a.audit(ctx, c, "model.profile.auto_toggle", "model_profile", p.ID, nil, "ok",
+			map[string]any{"model": modelID, "enabled": enabled})
+	}
+	return nil
+}
+
+// purgeModelProfiles 删除目录模型时清理对应档案，避免留下选不中的空档案。
+func (a *API) purgeModelProfiles(ctx context.Context, c iris.Context, providerID, modelID string) {
+	profiles, err := a.store.ListModelProfiles(ctx)
+	if err != nil {
+		return
+	}
+	for _, p := range profiles {
+		if p.ProviderID != providerID || !strings.EqualFold(p.Model, modelID) {
+			continue
+		}
+		if err := a.store.DeleteModelProfile(ctx, p.ID); err != nil {
+			continue
+		}
+		a.audit(ctx, c, "model.profile.auto_delete", "model_profile", p.ID, nil, "ok",
+			map[string]any{"model": modelID})
+	}
+}
+
+func profileNameTaken(profiles []store.ModelProfile, name string) bool {
+	for _, p := range profiles {
+		if strings.EqualFold(strings.TrimSpace(p.Name), name) {
+			return true
+		}
+	}
+	return false
 }

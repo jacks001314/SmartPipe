@@ -179,17 +179,21 @@ func main() {
 				AppSecret: base.AppSecret, APIBase: base.APIBase, RequireAtMe: base.RequireAtMe,
 			}})
 		}
-	} else if configs, err := bot.FetchRemoteConfigs(ctx, base.AdminURL, base.InternalToken); err != nil {
-		log.Printf("[bot] 读取配置台机器人列表失败，暂用环境变量: %v", err)
-		if base.AppID != "" && base.AppSecret != "" {
-			manager.apply(ctx, []bot.RemoteLanxinConfig{{
-				BotID: "env", BotName: "环境变量机器人", AppID: base.AppID,
-				AppSecret: base.AppSecret, APIBase: base.APIBase, RequireAtMe: base.RequireAtMe,
-			}})
-		}
 	} else {
-		log.Printf("[bot] 配置台加载 %d 个机器人", len(configs))
-		manager.apply(ctx, configs)
+		if configs, err := bot.FetchRemoteConfigs(ctx, base.AdminURL, base.InternalToken); err != nil {
+			log.Printf("[bot] 读取配置台机器人列表失败，暂用环境变量并继续轮询: %v", err)
+			if base.AppID != "" && base.AppSecret != "" {
+				manager.apply(ctx, []bot.RemoteLanxinConfig{{
+					BotID: "env", BotName: "环境变量机器人", AppID: base.AppID,
+					AppSecret: base.AppSecret, APIBase: base.APIBase, RequireAtMe: base.RequireAtMe,
+				}})
+			}
+		} else {
+			log.Printf("[bot] 配置台加载 %d 个机器人", len(configs))
+			manager.apply(ctx, configs)
+		}
+		// 首次拉取失败也要轮询：admin-api 比 bot 晚启动时，bot 会停在
+		// 环境变量兜底配置上，永远连不到配置台里的真实机器人。
 		go func() {
 			ticker := time.NewTicker(30 * time.Second)
 			defer ticker.Stop()
