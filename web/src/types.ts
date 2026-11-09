@@ -120,6 +120,16 @@ export type GitHubProxyView = {
   source: string;
 };
 
+export type GitHubTunnelView = {
+  enabled: boolean;
+  server: string;
+  server_port: number;
+  remote_port: number;
+  proxy_name: string;
+  token_set: boolean;
+  source: string;
+};
+
 export type GitHubDeviceFlow = {
   flow_id: string;
   user_code: string;

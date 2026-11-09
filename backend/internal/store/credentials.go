@@ -23,6 +23,8 @@ const (
 	CredentialSigningKey = "signing_key"
 	// CredentialModelProvider 是模型网关的 API Key，供模型档案引用。
 	CredentialModelProvider = "model_provider"
+	// CredentialFRPToken 是内嵌 frpc 连接 frps 的 auth.token。
+	CredentialFRPToken = "frp_token"
 )
 
 var allowedKinds = map[string]bool{
@@ -34,6 +36,7 @@ var allowedKinds = map[string]bool{
 	CredentialGitSSH:        true,
 	CredentialSigningKey:    true,
 	CredentialModelProvider: true,
+	CredentialFRPToken:      true,
 }
 
 // ValidKind 判断凭据类型是否受支持。

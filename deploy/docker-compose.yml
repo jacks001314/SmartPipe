@@ -52,6 +52,8 @@ services:
       SMARTPIPE_BOT_ADDR: http://bot:8093
       # 仓库 clone 根目录；项目创建时选择这里克隆出来的本地库。
       SMARTPIPE_CLONE_ROOT: /data/repos
+      # 仅用于在 GitHub 配置页展示 token 是否已配置；真实隧道用的是 bridge 那一份。
+      SMARTPIPE_FRP_TOKEN: ${SMARTPIPE_FRP_TOKEN:-}
     ports:
       - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_ADMIN_PORT:-8092}:8092"
     volumes:
