@@ -2,6 +2,7 @@ package patch
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"strings"
 )
@@ -59,11 +60,7 @@ func (v *Verifier) Push(ctx context.Context, req PushRequest) (*PushResult, erro
 		if err != nil {
 			return "", err
 		}
-		fields := strings.Fields(out)
-		if len(fields) == 0 {
-			return "", nil
-		}
-		return fields[0], nil
+		return parseRefSHA(out), nil
 	}
 	if before, err := lsRemote(); err == nil {
 		res.Before = before
@@ -97,4 +94,29 @@ func (v *Verifier) Push(ctx context.Context, req PushRequest) (*PushResult, erro
 	}
 	res.OK = true
 	return res, nil
+}
+
+// parseRefSHA 从 ls-remote 输出里取出 ref 的 SHA。
+// git 可能把 "warning: redirecting to ..." 之类的提示混进输出，
+// 直接取第一个字段会拿到 "warning:"。
+func parseRefSHA(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		sha := fields[0]
+		if len(sha) != 40 {
+			continue
+		}
+		if _, err := hex.DecodeString(sha); err != nil {
+			continue
+		}
+		return sha
+	}
+	return ""
 }
