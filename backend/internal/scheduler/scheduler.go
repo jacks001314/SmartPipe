@@ -292,6 +292,9 @@ func (s *Scheduler) HandleMessage(ctx context.Context, msg Inbound) error {
 		return runErr
 	}
 	if err := s.applyChatDecision(ctx, p, msg, decision, referenced); err != nil {
+		log.Printf("[scheduler] apply chat decision failed project=%s chat=%s: %v", p.ID, msg.ChatID(), err)
+		_ = s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID,
+			"抱歉，这次没能完成操作："+shortErr(err)+"。稍后再试，或直接把问题贴到 Issue 里。")
 		return err
 	}
 	_ = s.repo.AppendChat(ctx, ChatMessage{ChatID: msg.ChatID(), ProjectID: p.ID, Role: "assistant", Body: decisionSummary(decision)})
@@ -769,4 +772,16 @@ func (s *Scheduler) resolveModelEnv(ctx context.Context, p *Project) []string {
 		return nil
 	}
 	return env
+}
+
+// shortErr 把内部错误压成一条适合发到群里的短句，避免刷屏和泄露细节。
+func shortErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.TrimSpace(err.Error())
+	if len(msg) > 160 {
+		msg = msg[:160] + "…"
+	}
+	return msg
 }
