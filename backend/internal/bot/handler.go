@@ -307,43 +307,56 @@ func (h *Handler) collectAttachments(ctx context.Context, m *lanxin.InboundMessa
 		if len(data) > maxBotAttachmentBytes {
 			return out, "（附件超过单文件大小上限，已忽略）", nil
 		}
-		mimeType := http.DetectContentType(data)
+		mimeType := mimeBaseType(http.DetectContentType(data))
 		out = append(out, Attachment{Name: attachmentName(m, i, mimeType), MimeType: mimeType, Data: data})
 	}
 	return out, "", nil
 }
 
-// attachmentCaption 提取图片/文件消息自带的说明文字。
+// inboundMediaMeta 是入站消息各媒体段里与展示相关的字段。
+type inboundMediaMeta struct {
+	Content  string `json:"content"`
+	Name     string `json:"name"`
+	FileName string `json:"fileName"`
+}
+
+// displayName 兼容不同网关版本的文件名字段。
+func (m inboundMediaMeta) displayName() string {
+	if name := strings.TrimSpace(m.Name); name != "" {
+		return name
+	}
+	return strings.TrimSpace(m.FileName)
+}
+
+// attachmentCaption 提取图片/文件/语音/视频消息自带的说明文字。
 func attachmentCaption(m *lanxin.InboundMessage) string {
 	if text := strings.TrimSpace(m.TextContent()); text != "" {
 		return text
 	}
 	var d struct {
-		Image struct {
-			Content string `json:"content"`
-		} `json:"image"`
-		File struct {
-			Content string `json:"content"`
-		} `json:"file"`
+		Image inboundMediaMeta `json:"image"`
+		File  inboundMediaMeta `json:"file"`
+		Voice inboundMediaMeta `json:"voice"`
+		Video inboundMediaMeta `json:"video"`
 	}
 	if err := json.Unmarshal(m.MsgData, &d); err != nil {
 		return ""
 	}
-	if v := strings.TrimSpace(d.Image.Content); v != "" {
-		return v
+	for _, part := range []inboundMediaMeta{d.Image, d.File, d.Voice, d.Video} {
+		if v := strings.TrimSpace(part.Content); v != "" {
+			return v
+		}
 	}
-	return strings.TrimSpace(d.File.Content)
+	return ""
 }
 
-// attachmentName 取文件名；图片按内容类型补扩展名。
+// attachmentName 取文件名；没有文件名时按内容类型补扩展名。
 func attachmentName(m *lanxin.InboundMessage, index int, mimeType string) string {
 	var d struct {
-		File struct {
-			Name string `json:"name"`
-		} `json:"file"`
+		File inboundMediaMeta `json:"file"`
 	}
 	_ = json.Unmarshal(m.MsgData, &d)
-	if name := strings.TrimSpace(d.File.Name); name != "" {
+	if name := d.File.displayName(); name != "" {
 		return name
 	}
 	ext := extensionForMime(mimeType)
@@ -359,16 +372,20 @@ func isCrashBundle(m *lanxin.InboundMessage, text string) bool {
 		return true
 	}
 	var d struct {
-		File struct {
-			Name string `json:"name"`
-		} `json:"file"`
+		File inboundMediaMeta `json:"file"`
 	}
 	_ = json.Unmarshal(m.MsgData, &d)
-	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(d.File.Name)), "crash_bundle.json")
+	return strings.HasSuffix(strings.ToLower(d.File.displayName()), "crash_bundle.json")
+}
+
+// mimeBaseType 去掉 Content-Type 参数，例如 text/plain; charset=utf-8 -> text/plain。
+func mimeBaseType(mimeType string) string {
+	base, _, _ := strings.Cut(mimeType, ";")
+	return strings.TrimSpace(base)
 }
 
 func extensionForMime(mimeType string) string {
-	switch strings.ToLower(mimeType) {
+	switch strings.ToLower(mimeBaseType(mimeType)) {
 	case "image/png":
 		return ".png"
 	case "image/jpeg":
