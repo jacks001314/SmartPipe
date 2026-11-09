@@ -388,19 +388,25 @@ func (s tunnelSpec) usable() bool {
 	return s.enabled && strings.TrimSpace(s.server) != "" && s.token != ""
 }
 
-// resolveTunnelSpec 合并配置页与 SMARTPIPE_FRP_* 环境变量，环境变量优先。
+// resolveTunnelSpec 合并配置页与 SMARTPIPE_FRP_* 环境变量。
+// 配置页优先，环境变量只在配置页留空时兜底，这样前端改完能真正生效。
 func resolveTunnelSpec(ctx context.Context, st *store.Store, listenAddr string) tunnelSpec {
 	spec := tunnelSpec{
-		serverPort: 7000,
+		serverPort: envInt("SMARTPIPE_FRP_SERVER_PORT", 7000),
 		localPort:  envInt("SMARTPIPE_FRP_LOCAL_PORT", listenPort(listenAddr)),
-		remotePort: 18090,
-		proxyName:  "smartpipe-webhook",
+		remotePort: envInt("SMARTPIPE_FRP_REMOTE_PORT", 18090),
+		proxyName:  firstNonEmpty(os.Getenv("SMARTPIPE_FRP_PROXY_NAME"), "smartpipe-webhook"),
 	}
-	if v, err := st.GetSetting(ctx, "github_tunnel_enabled"); err == nil {
-		spec.enabled = strings.EqualFold(strings.TrimSpace(v), "true")
+	if v := strings.TrimSpace(os.Getenv("SMARTPIPE_FRP_SERVER")); v != "" {
+		spec.server = v
+		spec.enabled = true
 	}
+
 	if v, err := st.GetSetting(ctx, "github_tunnel_server"); err == nil && strings.TrimSpace(v) != "" {
 		spec.server = strings.TrimSpace(v)
+	}
+	if v, err := st.GetSetting(ctx, "github_tunnel_enabled"); err == nil && strings.TrimSpace(v) != "" {
+		spec.enabled = strings.EqualFold(strings.TrimSpace(v), "true")
 	}
 	if v, err := st.GetSetting(ctx, "github_tunnel_server_port"); err == nil {
 		if port, convErr := strconv.Atoi(strings.TrimSpace(v)); convErr == nil && port > 0 {
@@ -415,21 +421,20 @@ func resolveTunnelSpec(ctx context.Context, st *store.Store, listenAddr string) 
 	if v, err := st.GetSetting(ctx, "github_tunnel_proxy_name"); err == nil && strings.TrimSpace(v) != "" {
 		spec.proxyName = strings.TrimSpace(v)
 	}
-	spec.token = lookupCredentialSecret(ctx, st, store.CredentialFRPToken)
 
-	if v := strings.TrimSpace(os.Getenv("SMARTPIPE_FRP_SERVER")); v != "" {
-		spec.server = v
-		spec.enabled = true
-	}
-	spec.serverPort = envInt("SMARTPIPE_FRP_SERVER_PORT", spec.serverPort)
-	spec.remotePort = envInt("SMARTPIPE_FRP_REMOTE_PORT", spec.remotePort)
-	if v := strings.TrimSpace(os.Getenv("SMARTPIPE_FRP_PROXY_NAME")); v != "" {
-		spec.proxyName = v
-	}
-	if v := strings.TrimSpace(os.Getenv("SMARTPIPE_FRP_TOKEN")); v != "" {
-		spec.token = v
+	// token 以配置页保存的凭据为准，没有凭据才退回环境变量。
+	spec.token = lookupCredentialSecret(ctx, st, store.CredentialFRPToken)
+	if spec.token == "" {
+		spec.token = strings.TrimSpace(os.Getenv("SMARTPIPE_FRP_TOKEN"))
 	}
 	return spec
+}
+
+func firstNonEmpty(value, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return strings.TrimSpace(value)
+	}
+	return fallback
 }
 
 // watchTunnel 保证进程内始终跑着「当前配置」对应的隧道：配置变化即重建。
