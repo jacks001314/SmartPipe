@@ -19,9 +19,14 @@ type fakeRunner struct {
 	fixReply  string
 	chatErr   error
 	fixErr    error
+	// before 在记录 spec 之前调用，便于测试在临时附件被清理前读取文件。
+	before func(codexrunner.Spec)
 }
 
 func (f *fakeRunner) Run(ctx context.Context, spec codexrunner.Spec) (*codexrunner.Result, error) {
+	if f.before != nil {
+		f.before(spec)
+	}
 	f.mu.Lock()
 	f.specs = append(f.specs, spec)
 	f.mu.Unlock()

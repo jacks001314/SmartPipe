@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -91,15 +92,19 @@ func (m *InboundMessage) TextContent() string {
 	return ""
 }
 
-// MediaAttachment 解析消息里的媒体附件（text 消息带 mediaType/mediaIds）。
+// mediaPart 是 msgData 里按 msgType 分段的媒体字段。
+type mediaPart struct {
+	MediaType MediaType `json:"mediaType"`
+	MediaIDs  []string  `json:"mediaIds"`
+}
+
+// MediaAttachment 解析消息里的媒体附件。
+// 图片/文件/语音/视频分别把 mediaIds 放在 image/file/voice/video 段，
+// text 消息则放在 text 段并用 mediaType 标明类型。
 // 返回媒体类型与 mediaId 列表；非媒体消息返回 nil。
 func (m *InboundMessage) MediaAttachment() (MediaType, []string) {
 	if len(m.MsgData) == 0 {
 		return 0, nil
-	}
-	type mediaPart struct {
-		MediaType MediaType `json:"mediaType"`
-		MediaIDs  []string  `json:"mediaIds"`
 	}
 	var d struct {
 		Text  mediaPart `json:"text"`
@@ -111,8 +116,31 @@ func (m *InboundMessage) MediaAttachment() (MediaType, []string) {
 	if err := json.Unmarshal(m.MsgData, &d); err != nil {
 		return 0, nil
 	}
-	// 图片/文件等消息把 mediaIds 放在各自的 msgData 段里，不能只看 text。
-	parts := []struct {
+
+	// 先按 msgType 取对应段，避免同一条消息里其他段的重名 mediaIds 干扰。
+	kind := MediaType(0)
+	var primary mediaPart
+	switch strings.ToLower(strings.TrimSpace(m.MsgType)) {
+	case "image":
+		primary, kind = d.Image, MediaImage
+	case "file":
+		primary, kind = d.File, MediaFile
+	case "voice":
+		primary, kind = d.Voice, MediaVoice
+	case "video":
+		primary, kind = d.Video, MediaVideo
+	default:
+		primary = d.Text
+	}
+	if len(primary.MediaIDs) > 0 {
+		if kind == 0 {
+			kind = primary.MediaType
+		}
+		return kind, primary.MediaIDs
+	}
+
+	// 兼容部分网关把媒体挂在 text 段或 msgType 与段名不一致的报文。
+	for _, item := range []struct {
 		kind MediaType
 		part mediaPart
 	}{
@@ -121,8 +149,7 @@ func (m *InboundMessage) MediaAttachment() (MediaType, []string) {
 		{MediaFile, d.File},
 		{MediaVoice, d.Voice},
 		{MediaVideo, d.Video},
-	}
-	for _, item := range parts {
+	} {
 		if len(item.part.MediaIDs) == 0 {
 			continue
 		}

@@ -836,9 +836,9 @@ func saveChatAttachments(msg Inbound) (images []string, listing []string, cleanu
 			listing = append(listing, fmt.Sprintf("- %s（%d 字节，超过单文件上限，已忽略）", a.Name, len(a.Data)))
 			continue
 		}
-		mimeType := strings.TrimSpace(a.MimeType)
+		mimeType := mimeBase(a.MimeType)
 		if mimeType == "" {
-			mimeType = http.DetectContentType(a.Data)
+			mimeType = mimeBase(http.DetectContentType(a.Data))
 		}
 		name := chatAttachmentName(a.Name, i, mimeType)
 		path := filepath.Join(dir, name)
@@ -880,8 +880,15 @@ func chatAttachmentName(name string, index int, mimeType string) string {
 	return base
 }
 
+// mimeBase 去掉 Content-Type 参数，例如 text/plain; charset=utf-8 -> text/plain。
+// 图片判断和扩展名都依赖它，否则带 charset 的文本会被当成未知二进制。
+func mimeBase(mimeType string) string {
+	base, _, _ := strings.Cut(mimeType, ";")
+	return strings.ToLower(strings.TrimSpace(base))
+}
+
 func extensionForMime(mimeType string) string {
-	switch strings.ToLower(mimeType) {
+	switch mimeBase(mimeType) {
 	case "image/png":
 		return ".png"
 	case "image/jpeg":

@@ -61,3 +61,57 @@ func TestParseApproveCallback(t *testing.T) {
 		t.Fatalf("cb: %+v", cb)
 	}
 }
+
+// 图片/文件/语音/视频的 mediaIds 在各自的 msgData 段里，必须按 msgType 取对应段。
+func TestMediaAttachmentByMsgType(t *testing.T) {
+	cases := []struct {
+		name    string
+		msgType string
+		msgData string
+		want    MediaType
+		ids     []string
+	}{
+		{"file", "file", `{"file":{"mediaIds":["file-1"],"content":"看配置"}}`, MediaFile, []string{"file-1"}},
+		{"image", "image", `{"image":{"mediaIds":["img-1"],"content":"看截图"}}`, MediaImage, []string{"img-1"}},
+		{"voice", "voice", `{"voice":{"mediaIds":["voice-1"],"content":"听语音"}}`, MediaVoice, []string{"voice-1"}},
+		{"video", "video", `{"video":{"mediaIds":["video-1","cover-1"],"content":"看录屏"}}`, MediaVideo, []string{"video-1", "cover-1"}},
+		{"text-media", "text", `{"text":{"content":"附件","mediaType":3,"mediaIds":["txt-1"]}}`, MediaFile, []string{"txt-1"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &InboundMessage{MsgType: tc.msgType, MsgData: json.RawMessage(tc.msgData)}
+			kind, ids := m.MediaAttachment()
+			if kind != tc.want {
+				t.Fatalf("media type = %d, want %d", kind, tc.want)
+			}
+			if len(ids) != len(tc.ids) {
+				t.Fatalf("ids = %v, want %v", ids, tc.ids)
+			}
+			for i := range ids {
+				if ids[i] != tc.ids[i] {
+					t.Fatalf("ids = %v, want %v", ids, tc.ids)
+				}
+			}
+		})
+	}
+}
+
+// msgType=file 时即使 text 段也带了 mediaIds，也应优先用 file 段。
+func TestMediaAttachmentPrefersSectionForMsgType(t *testing.T) {
+	m := &InboundMessage{MsgType: "file", MsgData: json.RawMessage(`{
+		"text":{"mediaType":2,"mediaIds":["unrelated-image"]},
+		"file":{"mediaIds":["real-file"]}}`)}
+	kind, ids := m.MediaAttachment()
+	if kind != MediaFile || len(ids) != 1 || ids[0] != "real-file" {
+		t.Fatalf("kind=%d ids=%v", kind, ids)
+	}
+}
+
+// 兼容 msgType 与段名不一致的报文：仍能从 image 段取到媒体。
+func TestMediaAttachmentFallsBackToAnySection(t *testing.T) {
+	m := &InboundMessage{MsgType: "unknown", MsgData: json.RawMessage(`{"image":{"mediaIds":["img-2"]}}`)}
+	kind, ids := m.MediaAttachment()
+	if kind != MediaImage || len(ids) != 1 || ids[0] != "img-2" {
+		t.Fatalf("kind=%d ids=%v", kind, ids)
+	}
+}
