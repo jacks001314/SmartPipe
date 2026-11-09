@@ -42,7 +42,13 @@ services:
   admin-api:
     <<: *service
     command: ["admin-api"]
+    # 提交/推送在宿主机创建的 worktree 上执行：沿用宿主机用户名下的文件，
+    # 因此以 root 运行并显式放开 git 的属主检查。
+    user: "0:0"
     environment:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: "safe.directory"
+      GIT_CONFIG_VALUE_0: "*"
       SMARTPIPE_ADMIN_ADDR: ":8092"
       SMARTPIPE_WEB_DIST: /app/web
       # 服务端自动读取 Codex 配置的位置；宿主目录用 SMARTPIPE_CODEX_HOME 覆盖。
@@ -57,6 +63,8 @@ services:
     ports:
       - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_ADMIN_PORT:-8092}:8092"
     volumes:
+      # 与宿主机同路径，调度器传来的 worktree 绝对路径在容器内可用。
+      - ./data:/opt/smartpipe-v05/deploy/data
       - ./data/repos:/data/repos
       - ${SMARTPIPE_CODEX_HOME:-/home/jacks/.codex}:/config/codex:ro
     depends_on:
