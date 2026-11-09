@@ -109,6 +109,8 @@ services:
     ports:
       - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_VERIFY_PORT:-8095}:8095"
     volumes:
+      # 验证器按项目里记录的 /data/repos/... 路径 clone 源仓库，必须能看到同一份数据。
+      - ./data/repos:/data/repos
       - ./data/verify:/data/verify
       - ./data/releases:/data/releases
       - ./data/go:/data/go
