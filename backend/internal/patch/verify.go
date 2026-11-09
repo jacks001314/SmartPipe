@@ -47,9 +47,12 @@ type Report struct {
 	ChangedLines int               `json:"changed_lines"`
 	Checks       []CheckResult     `json:"checks,omitempty"`
 	Environment  map[string]string `json:"environment,omitempty"`
-	DurationMS   int64             `json:"duration_ms"`
-	WorkDir      string            `json:"work_dir,omitempty"`
-	VerifiedAt   time.Time         `json:"verified_at"`
+	// EnvironmentError 表示验证环境本身不可用（仓库不存在、checkout 失败等），
+	// 与补丁质量无关，调用方不应因此重跑模型。
+	EnvironmentError bool      `json:"environment_error,omitempty"`
+	DurationMS       int64     `json:"duration_ms"`
+	WorkDir          string    `json:"work_dir,omitempty"`
+	VerifiedAt       time.Time `json:"verified_at"`
 }
 
 func (v *Verifier) gitBin() string {
@@ -109,22 +112,26 @@ func (v *Verifier) Verify(ctx context.Context, b Bundle, repoSource string) (*Re
 
 	if _, err := v.runGit(ctx, "", "clone", "--no-hardlinks", "--quiet", repoSource, repoDir); err != nil {
 		rep.Error = "clone failed: " + err.Error()
+		rep.EnvironmentError = true
 		rep.DurationMS = time.Since(started).Milliseconds()
 		return rep, nil
 	}
 	if _, err := v.runGit(ctx, repoDir, "checkout", "--detach", rep.BaseCommit); err != nil {
 		rep.Error = "checkout base commit failed: " + err.Error()
+		rep.EnvironmentError = true
 		rep.DurationMS = time.Since(started).Milliseconds()
 		return rep, nil
 	}
 	head, err := v.runGit(ctx, repoDir, "rev-parse", "HEAD")
 	if err != nil {
 		rep.Error = "rev-parse failed: " + err.Error()
+		rep.EnvironmentError = true
 		return rep, nil
 	}
 	rep.HeadCommit = strings.TrimSpace(head)
 	if !strings.HasPrefix(rep.HeadCommit, rep.BaseCommit) {
 		rep.Error = fmt.Sprintf("base commit mismatch: requested %s, checked out %s", rep.BaseCommit, rep.HeadCommit)
+		rep.EnvironmentError = true
 		rep.DurationMS = time.Since(started).Milliseconds()
 		return rep, nil
 	}
