@@ -752,3 +752,197 @@ func TestChatIssueUpdateEnqueuesWorker(t *testing.T) {
 		t.Fatalf("worker not enqueued: %+v", w)
 	}
 }
+
+type blockingRunner struct {
+	started  chan struct{}
+	finished chan struct{}
+}
+
+func (b *blockingRunner) Run(ctx context.Context, spec codexrunner.Spec) (*codexrunner.Result, error) {
+	select {
+	case b.started <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	select {
+	case b.finished <- struct{}{}:
+	default:
+	}
+	return nil, ctx.Err()
+}
+
+func TestPauseWorkerCancelsActiveTurn(t *testing.T) {
+	h := newHarness(t, Config{})
+	br := &blockingRunner{started: make(chan struct{}, 1), finished: make(chan struct{}, 1)}
+	h.s.runner = br
+	w := &Worker{ProjectID: "prj-1", Issue: 31, State: StateQueued, ChatID: "group-1"}
+	if _, err := h.repo.CreateWorker(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.s.DispatchOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-br.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker did not start")
+	}
+	got, err := h.s.PauseWorker(context.Background(), w.ID)
+	if err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	if got.State != StatePaused {
+		t.Fatalf("want paused, got %s", got.State)
+	}
+	select {
+	case <-br.finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("running turn was not cancelled")
+	}
+	h.s.Wait()
+	fresh, _ := h.repo.GetWorker(context.Background(), w.ID)
+	if fresh.State != StatePaused {
+		t.Fatalf("pause must survive turn cancellation, got %s (%s)", fresh.State, fresh.LastError)
+	}
+	if h.tracker.prCount() != 0 || h.vcs.commits != 0 {
+		t.Fatal("paused worker must not push or create a PR")
+	}
+}
+
+func TestStopWorkerCancelsAndCloses(t *testing.T) {
+	h := newHarness(t, Config{})
+	br := &blockingRunner{started: make(chan struct{}, 1), finished: make(chan struct{}, 1)}
+	h.s.runner = br
+	w := &Worker{ProjectID: "prj-1", Issue: 32, State: StateQueued, ChatID: "group-1"}
+	if _, err := h.repo.CreateWorker(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.s.DispatchOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-br.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker did not start")
+	}
+	got, err := h.s.StopWorker(context.Background(), w.ID)
+	if err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if got.State != StateClosed {
+		t.Fatalf("want closed, got %s", got.State)
+	}
+	select {
+	case <-br.finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("running turn was not cancelled")
+	}
+	h.s.Wait()
+	fresh, _ := h.repo.GetWorker(context.Background(), w.ID)
+	if fresh.State != StateClosed {
+		t.Fatalf("stop must stay closed, got %s", fresh.State)
+	}
+	if h.tracker.prCount() != 0 || h.vcs.commits != 0 {
+		t.Fatal("stopped worker must not push or create a PR")
+	}
+}
+
+func TestResumePausedWorkerRequeues(t *testing.T) {
+	h := newHarness(t, Config{})
+	w := &Worker{ProjectID: "prj-1", Issue: 33, State: StatePaused, ChatID: "group-1", BlockedReason: "paused by human"}
+	if _, err := h.repo.CreateWorker(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.s.ResumeWorker(context.Background(), w.ID)
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if got.State != StateQueued {
+		t.Fatalf("want queued, got %s", got.State)
+	}
+	h.runner.fixReply = "resumed"
+	if err := h.s.DispatchOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.s.Wait()
+	fresh, _ := h.repo.GetWorker(context.Background(), w.ID)
+	if fresh.State != StateAwaitingReview {
+		t.Fatalf("want awaiting_review, got %s (%s)", fresh.State, fresh.LastError)
+	}
+}
+
+func TestWorkerDetailIncludesTimeline(t *testing.T) {
+	h := newHarness(t, Config{})
+	w := &Worker{ProjectID: "prj-1", Issue: 34, State: StateQueued, ChatID: "group-1"}
+	if _, err := h.repo.CreateWorker(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.s.DispatchOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.s.Wait()
+	detail, err := h.s.WorkerDetail(context.Background(), w.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Worker == nil || detail.Worker.ProjectName != "core" {
+		t.Fatalf("worker metadata missing: %+v", detail.Worker)
+	}
+	if len(detail.Events) == 0 {
+		t.Fatal("timeline should contain state events")
+	}
+	if len(detail.Worker.AllowedActions) == 0 {
+		t.Fatal("allowed actions should be computed")
+	}
+}
+
+func TestRecoverMarksOrphanedActiveWorkers(t *testing.T) {
+	h := newHarness(t, Config{})
+	old := time.Now().Add(-5 * time.Minute)
+	w := &Worker{ProjectID: "prj-1", Issue: 35, State: StateCoding, ChatID: "group-1"}
+	if _, err := h.repo.CreateWorker(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	w.HeartbeatAt = &old
+	_ = h.repo.UpdateWorker(context.Background(), w)
+	if err := h.s.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	fresh, _ := h.repo.GetWorker(context.Background(), w.ID)
+	if fresh.State != StateBlocked {
+		t.Fatalf("orphan should become blocked, got %s", fresh.State)
+	}
+	if !strings.Contains(fresh.BlockedReason, "重启") {
+		t.Fatalf("reason missing: %q", fresh.BlockedReason)
+	}
+}
+
+func TestMessageLifecycleRecorded(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.runner.chatReply = `{"action":"issue","title":"消息记录测试","body":"测试","severity":"low"}`
+	if err := h.s.HandleMessage(context.Background(), msg("msg-record-1", "记录这条消息")); err != nil {
+		t.Fatal(err)
+	}
+	list, err := h.repo.ListMessages(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("want 1 message, got %d", len(list))
+	}
+	if list[0].Status != "issue_created" || list[0].Issue != 1 || list[0].PlatformMessageID != "msg-record-1" {
+		t.Fatalf("unexpected message record: %+v", list[0])
+	}
+}
+
+func TestUnboundMessageRecorded(t *testing.T) {
+	h := newHarness(t, Config{})
+	err := h.s.HandleMessage(context.Background(), Inbound{PlatformMessageID: "msg-unbound", GroupID: "other", Text: "你好"})
+	if !errors.Is(err, ErrUnbound) {
+		t.Fatalf("want unbound, got %v", err)
+	}
+	list, _ := h.repo.ListMessages(context.Background(), 10)
+	if len(list) != 1 || list[0].Status != "unbound" {
+		t.Fatalf("unexpected unbound record: %+v", list)
+	}
+}

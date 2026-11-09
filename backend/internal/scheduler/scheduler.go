@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,6 +19,12 @@ import (
 
 // ErrUnbound 表示群没有绑定项目。
 var ErrUnbound = errors.New("scheduler: chat is not bound to a project")
+
+// ErrWorkerNotFound 表示 worker 不存在。
+var ErrWorkerNotFound = errors.New("scheduler: worker not found")
+
+// ErrActionNotAllowed 表示当前状态不允许执行该动作。
+var ErrActionNotAllowed = errors.New("scheduler: action not allowed")
 
 // Runner 执行一轮 Codex 会话；生产实现直接调用 codexrunner.Run。
 type Runner interface {
@@ -96,6 +103,13 @@ type Config struct {
 	ChatHistorySize int
 	// ReconcileInterval 定期核对 Issue 是否已关闭（默认 5 分钟）。
 	ReconcileInterval time.Duration
+	// HeartbeatInterval 是执行期心跳间隔（默认 20 秒）。
+	HeartbeatInterval time.Duration
+	// HeartbeatTimeout 是判定执行器失联的阈值（默认 2 分钟）。
+	HeartbeatTimeout time.Duration
+	// OutputDir 保存超过内联阈值的大段 Codex 输出；默认落在系统临时目录，
+	// 生产部署应显式指向持久卷。
+	OutputDir string
 }
 
 // Deps 是全部外部依赖，便于替换与测试。
@@ -114,9 +128,16 @@ type Deps struct {
 }
 
 // Scheduler 是调度器核心。
+type workerRun struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+// Scheduler 是调度器核心。
 type Scheduler struct {
-	cfg  Config
-	repo Repo
+	cfg       Config
+	repo      Repo
+	startedAt time.Time
 
 	runner    Runner
 	differ    Differ
@@ -128,11 +149,15 @@ type Scheduler struct {
 	vcs       VCS
 	modelEnv  func(ctx context.Context, projectID, providerID string) ([]string, error)
 
-	wake chan struct{}
-	now  func() time.Time
+	wake        chan struct{}
+	now         func() time.Time
+	outputBlobs *outputBlobStore
 
 	mu      sync.Mutex
 	running sync.WaitGroup
+	stateMu sync.Mutex
+	runsMu  sync.Mutex
+	runs    map[string]*workerRun
 }
 
 // New 校验依赖并构造调度器。
@@ -164,20 +189,29 @@ func New(cfg Config, deps Deps) (*Scheduler, error) {
 	if cfg.ReconcileInterval <= 0 {
 		cfg.ReconcileInterval = 5 * time.Minute
 	}
+	if cfg.HeartbeatInterval <= 0 {
+		cfg.HeartbeatInterval = 20 * time.Second
+	}
+	if cfg.HeartbeatTimeout <= 0 {
+		cfg.HeartbeatTimeout = 2 * time.Minute
+	}
 	return &Scheduler{
-		cfg:       cfg,
-		repo:      deps.Repo,
-		runner:    deps.Runner,
-		differ:    deps.Differ,
-		tracker:   deps.Tracker,
-		notifier:  deps.Notifier,
-		resolver:  deps.Resolver,
-		workspace: deps.Workspace,
-		verifier:  deps.Verifier,
-		vcs:       deps.VCS,
-		modelEnv:  deps.ModelEnv,
-		wake:      make(chan struct{}, 1),
-		now:       time.Now,
+		cfg:         cfg,
+		startedAt:   time.Now(),
+		repo:        deps.Repo,
+		runner:      deps.Runner,
+		differ:      deps.Differ,
+		tracker:     deps.Tracker,
+		notifier:    deps.Notifier,
+		resolver:    deps.Resolver,
+		workspace:   deps.Workspace,
+		verifier:    deps.Verifier,
+		vcs:         deps.VCS,
+		modelEnv:    deps.ModelEnv,
+		wake:        make(chan struct{}, 1),
+		now:         time.Now,
+		runs:        map[string]*workerRun{},
+		outputBlobs: newOutputBlobStore(cfg.OutputDir),
 	}, nil
 }
 
@@ -194,6 +228,9 @@ func (s *Scheduler) Wake() {
 
 // Run 持续领取排队任务，直到 ctx 结束。
 func (s *Scheduler) Run(ctx context.Context) error {
+	if err := s.Recover(ctx); err != nil {
+		log.Printf("[scheduler] recover: %v", err)
+	}
 	ticker := time.NewTicker(s.cfg.PollInterval)
 	defer ticker.Stop()
 	reconcile := time.NewTicker(s.cfg.ReconcileInterval)
@@ -224,9 +261,17 @@ func (s *Scheduler) Reconcile(ctx context.Context) error {
 		return err
 	}
 	for _, w := range workers {
-		switch w.State {
-		case StateAwaitingReview, StateAwaitingInput, StateBlocked, StateFailed:
-		default:
+		if w.State == StateClosed || w.State == StateFailed {
+			continue
+		}
+		if w.State.IsActive() && !s.isRunning(w.ID) && staleHeartbeat(w, s.now(), s.cfg.HeartbeatTimeout) {
+			fresh, _ := s.repo.GetWorker(ctx, w.ID)
+			if fresh == nil {
+				continue
+			}
+			fresh.LastError = "heartbeat lost"
+			fresh.BlockedReason = "执行器心跳中断，请重试或停止"
+			s.setState(ctx, fresh, StateBlocked, "执行器心跳中断，已转为待人工处理", "scheduler")
 			continue
 		}
 		issue, err := s.tracker.GetIssue(ctx, w.ProjectID, w.Issue)
@@ -240,6 +285,38 @@ func (s *Scheduler) Reconcile(ctx context.Context) error {
 	return nil
 }
 
+func staleHeartbeat(w *Worker, now time.Time, timeout time.Duration) bool {
+	if timeout <= 0 {
+		return false
+	}
+	last := w.UpdatedAt
+	if w.HeartbeatAt != nil {
+		last = *w.HeartbeatAt
+	}
+	return !last.IsZero() && now.Sub(last) > timeout
+}
+
+// Recover 在调度器启动时收拢上次进程遗留的活跃 worker，避免幽灵任务长期占用并发名额。
+func (s *Scheduler) Recover(ctx context.Context) error {
+	workers, err := s.repo.ListWorkers(ctx)
+	if err != nil {
+		return err
+	}
+	for _, w := range workers {
+		if !w.State.IsActive() || !staleHeartbeat(w, s.now(), s.cfg.HeartbeatTimeout) {
+			continue
+		}
+		fresh, err := s.repo.GetWorker(ctx, w.ID)
+		if err != nil || fresh == nil {
+			continue
+		}
+		fresh.LastError = "scheduler restarted while worker was " + string(w.State)
+		fresh.BlockedReason = "调度器重启，执行已中断，请重试或停止"
+		_ = s.setState(ctx, fresh, StateBlocked, "调度器重启，遗留执行已转为待人工处理", "scheduler")
+	}
+	return nil
+}
+
 func closeReason(w *Worker) string {
 	if w.PRNumber > 0 {
 		return fmt.Sprintf("PR #%d 已合并", w.PRNumber)
@@ -247,7 +324,7 @@ func closeReason(w *Worker) string {
 	return "Issue 已关闭"
 }
 
-// DispatchOnce 在名额允许时领取并启动排队任务（同步等待本轮启动完成）。
+// DispatchOnce 在名额允许时领取并启动排队任务。
 func (s *Scheduler) DispatchOnce(ctx context.Context) error {
 	for {
 		w, err := s.repo.ClaimNext(ctx, s.cfg.MaxGlobal, s.cfg.MaxPerProject)
@@ -257,19 +334,16 @@ func (s *Scheduler) DispatchOnce(ctx context.Context) error {
 		if w == nil {
 			return nil
 		}
-		s.mu.Lock()
-		s.running.Add(1)
-		s.mu.Unlock()
-		go func(w *Worker) {
-			defer s.running.Done()
-			runCtx, cancel := context.WithTimeout(context.Background(), s.cfg.TurnTimeout*4)
-			defer cancel()
-			if err := s.execute(runCtx, w, ""); err != nil {
-				s.failWorker(runCtx, w, err)
-			}
-			s.Wake()
-		}(w)
+		s.recordEvent(context.Background(), w, "claim", "", string(w.State), "scheduler", "worker 已领取", nil)
+		s.startWorker(w, "")
 	}
+}
+
+type messageOutcome struct {
+	Status   string
+	Reason   string
+	Issue    int
+	IssueURL string
 }
 
 // HandleMessage 处理一条蓝信消息：问答、建单或 Issue 补充。
@@ -281,9 +355,11 @@ func (s *Scheduler) HandleMessage(ctx context.Context, msg Inbound) error {
 	}
 	p, err := s.resolver.ByChat(ctx, msg.ChatID())
 	if err != nil {
+		_ = s.repo.RecordMessage(ctx, messageRecord(msg, "", "unbound", "群未绑定项目"))
 		_ = s.notify(ctx, "", msg.ChatID(), "", "这个群还没有绑定项目，请管理员在配置台完成绑定。")
 		return ErrUnbound
 	}
+	_ = s.repo.RecordMessage(ctx, messageRecord(msg, p.ID, "processing", ""))
 	history, _ := s.repo.RecentChat(ctx, msg.ChatID(), s.cfg.ChatHistorySize)
 	referenced := referencedIssue(msg.Text)
 	_ = s.repo.AppendChat(ctx, ChatMessage{ChatID: msg.ChatID(), ProjectID: p.ID, Role: "user", Body: msg.Text})
@@ -291,18 +367,31 @@ func (s *Scheduler) HandleMessage(ctx context.Context, msg Inbound) error {
 	decision, runErr := s.runChat(ctx, p, history, msg, referenced)
 	if runErr != nil {
 		log.Printf("[scheduler] chat worker failed project=%s chat=%s: %v", p.ID, msg.ChatID(), runErr)
+		_ = s.repo.MarkMessage(ctx, msg.PlatformMessageID, "failed", clamp(runErr.Error(), 1000), 0, "")
 		_ = s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, "抱歉，这次处理失败了，稍后再试或直接把问题贴到 Issue 里。")
 		return runErr
 	}
-	if err := s.applyChatDecision(ctx, p, msg, decision, referenced); err != nil {
+	outcome, err := s.applyChatDecision(ctx, p, msg, decision, referenced)
+	if err != nil {
 		log.Printf("[scheduler] apply chat decision failed project=%s chat=%s: %v", p.ID, msg.ChatID(), err)
 		_ = s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID,
 			"抱歉，这次没能完成操作："+shortErr(err)+"。稍后再试，或直接把问题贴到 Issue 里。")
+		_ = s.repo.MarkMessage(ctx, msg.PlatformMessageID, "failed", clamp(err.Error(), 1000), outcome.Issue, outcome.IssueURL)
 		return err
 	}
+	_ = s.repo.MarkMessage(ctx, msg.PlatformMessageID, outcome.Status, outcome.Reason, outcome.Issue, outcome.IssueURL)
 	_ = s.repo.AppendChat(ctx, ChatMessage{ChatID: msg.ChatID(), ProjectID: p.ID, Role: "assistant", Body: decisionSummary(decision)})
-	_ = s.repo.PutLink(ctx, Link{PlatformMessageID: msg.PlatformMessageID, ProjectID: p.ID, Issue: decision.Issue, ChatID: msg.ChatID()})
+	_ = s.repo.PutLink(ctx, Link{PlatformMessageID: msg.PlatformMessageID, ProjectID: p.ID, Issue: outcome.Issue, ChatID: msg.ChatID()})
 	return nil
+}
+
+func messageRecord(msg Inbound, projectID, status, reason string) MessageRecord {
+	return MessageRecord{
+		PlatformMessageID: msg.PlatformMessageID, BotID: msg.BotID, BotName: msg.BotName,
+		ChatType: msg.ChatType, ChatID: msg.ChatID(), SenderID: msg.SenderID, SenderName: msg.SenderName,
+		GroupName: msg.GroupName, MsgType: msg.MsgType, Text: msg.Text, IsAtMe: msg.IsAtMe,
+		ProjectID: projectID, Status: status, Reason: reason,
+	}
 }
 
 func decisionSummary(d *ChatDecision) string {
@@ -352,33 +441,44 @@ func (s *Scheduler) runChat(ctx context.Context, p *Project, history []ChatMessa
 	return ParseChatDecision(res.FinalResponse)
 }
 
-func (s *Scheduler) applyChatDecision(ctx context.Context, p *Project, msg Inbound, d *ChatDecision, referenced int) error {
+func (s *Scheduler) applyChatDecision(ctx context.Context, p *Project, msg Inbound, d *ChatDecision, referenced int) (messageOutcome, error) {
 	switch d.Action {
 	case "answer", "need_info":
-		return s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, d.Reply)
+		if err := s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, d.Reply); err != nil {
+			return messageOutcome{Status: "failed", Reason: err.Error()}, err
+		}
+		status := "answered"
+		if d.Action == "need_info" {
+			status = "need_info"
+		}
+		return messageOutcome{Status: status, Reason: clamp(d.Reply, 500)}, nil
 	case "issue_update":
 		issue := d.Issue
 		if issue == 0 {
 			issue = referenced
 		}
 		if issue <= 0 {
-			return s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, "没能确定要更新哪个 Issue，请在消息里带上 #编号。")
+			_ = s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, "没能确定要更新哪个 Issue，请在消息里带上 #编号。")
+			return messageOutcome{Status: "need_info", Reason: "没有识别到 Issue 编号"}, nil
 		}
 		if err := s.tracker.Comment(ctx, p.ID, issue, botComment(d.Reply)); err != nil {
-			return err
+			return messageOutcome{Status: "failed", Issue: issue, IssueURL: issueURLFor(p, issue)}, err
 		}
 		if w, _ := s.repo.ActiveWorker(ctx, p.ID, issue); w != nil {
 			s.resume(w, msg.Text)
 		} else {
-			created, err := s.repo.CreateWorker(ctx, &Worker{ProjectID: p.ID, Issue: issue, ChatID: msg.ChatID(), State: StateQueued})
+			created, err := s.queueWorker(ctx, &Worker{ProjectID: p.ID, Issue: issue, ChatID: msg.ChatID(), State: StateQueued}, "来自蓝信补充，worker 已入队")
 			if err != nil {
-				return err
+				return messageOutcome{Status: "failed", Issue: issue, IssueURL: issueURLFor(p, issue)}, err
 			}
 			if created {
 				s.Wake()
 			}
 		}
-		return s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, fmt.Sprintf("已补充到 Issue #%d。", issue))
+		if err := s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, fmt.Sprintf("已补充到 Issue #%d。", issue)); err != nil {
+			return messageOutcome{Status: "failed", Issue: issue, IssueURL: issueURLFor(p, issue)}, err
+		}
+		return messageOutcome{Status: "issue_updated", Reason: clamp(d.Reply, 500), Issue: issue, IssueURL: issueURLFor(p, issue)}, nil
 	case "issue":
 		existing, err := s.findDuplicate(ctx, p.ID, d.Title)
 		if err != nil {
@@ -389,26 +489,46 @@ func (s *Scheduler) applyChatDecision(ctx context.Context, p *Project, msg Inbou
 			if w, _ := s.repo.ActiveWorker(ctx, p.ID, existing.Number); w != nil {
 				s.resume(w, msg.Text)
 			}
-			return s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID,
-				fmt.Sprintf("这个问题已经有 Issue #%d，已把新反馈补充进去。\n%s", existing.Number, existing.URL))
+			if err := s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID,
+				fmt.Sprintf("这个问题已经有 Issue #%d，已把新反馈补充进去。\n%s", existing.Number, existing.URL)); err != nil {
+				return messageOutcome{Status: "failed", Issue: existing.Number, IssueURL: existing.URL}, err
+			}
+			return messageOutcome{Status: "issue_updated", Reason: "重复问题，已补充到已有 Issue", Issue: existing.Number, IssueURL: existing.URL}, nil
 		}
 		labels := []string{"from-lanxin", "severity/" + d.Severity}
 		issue, err := s.tracker.CreateIssue(ctx, p.ID, d.Title, buildIssueBody(msg, d), labels)
 		if err != nil {
-			return err
+			return messageOutcome{Status: "failed"}, err
 		}
-		w := &Worker{ProjectID: p.ID, Issue: issue.Number, IssueURL: issue.URL, ChatID: msg.ChatID(), State: StateQueued}
-		created, err := s.repo.CreateWorker(ctx, w)
+		w := &Worker{ProjectID: p.ID, Issue: issue.Number, IssueTitle: issue.Title, IssueURL: issue.URL, ChatID: msg.ChatID(), State: StateQueued}
+		created, err := s.queueWorker(ctx, w, "来自蓝信建单，worker 已入队")
 		if err != nil {
-			return err
+			return messageOutcome{Status: "failed", Issue: issue.Number, IssueURL: issue.URL}, err
 		}
 		if created {
 			s.Wake()
 		}
 		_ = s.repo.PutLink(ctx, Link{PlatformMessageID: msg.PlatformMessageID, ProjectID: p.ID, Issue: issue.Number, ChatID: msg.ChatID()})
-		return s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, buildIssueReply(msg, issue))
+		if err := s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, buildIssueReply(msg, issue)); err != nil {
+			return messageOutcome{Status: "failed", Issue: issue.Number, IssueURL: issue.URL}, err
+		}
+		return messageOutcome{Status: "issue_created", Reason: d.Title, Issue: issue.Number, IssueURL: issue.URL}, nil
 	}
-	return nil
+	return messageOutcome{Status: "ignored"}, nil
+}
+
+func issueURLFor(p *Project, issue int) string {
+	if p == nil || issue <= 0 {
+		return ""
+	}
+	repo := firstNonEmpty(p.IssueRepo, p.Repo)
+	repo = strings.TrimPrefix(repo, "https://github.com/")
+	repo = strings.TrimSuffix(repo, ".git")
+	repo = strings.Trim(repo, "/")
+	if repo == "" {
+		return ""
+	}
+	return fmt.Sprintf("https://github.com/%s/issues/%d", repo, issue)
 }
 
 func buildIssueBody(msg Inbound, d *ChatDecision) string {
@@ -450,8 +570,8 @@ func (s *Scheduler) HandleIssueEvent(ctx context.Context, ev IssueEvent) error {
 			}
 			return nil
 		case "reopened":
-			w := &Worker{ProjectID: p.ID, Issue: ev.Issue, IssueURL: ev.IssueURL(), State: StateQueued}
-			if created, _ := s.repo.CreateWorker(ctx, w); created {
+			w := &Worker{ProjectID: p.ID, Issue: ev.Issue, IssueTitle: ev.Title, IssueURL: ev.IssueURL(), State: StateQueued}
+			if created, _ := s.queueWorker(ctx, w, "Issue 重新打开，worker 已入队"); created {
 				s.Wake()
 			}
 			return nil
@@ -475,8 +595,8 @@ func (s *Scheduler) HandleIssueEvent(ctx context.Context, ev IssueEvent) error {
 		return s.handleCommand(ctx, p, ev, w, cmd)
 	}
 	if w == nil {
-		w = &Worker{ProjectID: p.ID, Issue: ev.Issue, IssueURL: ev.IssueURL(), State: StateQueued}
-		created, err := s.repo.CreateWorker(ctx, w)
+		w = &Worker{ProjectID: p.ID, Issue: ev.Issue, IssueTitle: ev.Title, IssueURL: ev.IssueURL(), State: StateQueued}
+		created, err := s.queueWorker(ctx, w, "Issue 评论触发 worker 入队")
 		if err != nil {
 			return err
 		}
@@ -521,41 +641,396 @@ func (s *Scheduler) handleCommand(ctx context.Context, p *Project, ev IssueEvent
 		return s.tracker.Comment(ctx, p.ID, ev.Issue, botComment(fmt.Sprintf(
 			"状态：`%s`\n分支：`%s`\nPR：#%d\n最近错误：%s", w.State, w.Branch, w.PRNumber, firstNonEmpty(w.LastError, "无"))))
 	case "/pause":
-		w.State = StateBlocked
-		w.LastError = "paused by human"
-		return s.repo.UpdateWorker(ctx, w)
-	case "/resume", "/retry", "/fix":
-		w.State = StateQueued
-		w.Attempts = 0
-		w.LastError = ""
-		if err := s.repo.UpdateWorker(ctx, w); err != nil {
-			return err
-		}
-		s.Wake()
-		return nil
+		_, err := s.PauseWorker(ctx, w.ID)
+		return err
+	case "/resume", "/fix":
+		_, err := s.ResumeWorker(ctx, w.ID)
+		return err
+	case "/retry":
+		_, err := s.RetryWorker(ctx, w.ID)
+		return err
 	case "/stop":
-		s.closeWorker(ctx, w, "人工停止")
-		return nil
+		_, err := s.StopWorker(ctx, w.ID)
+		return err
 	default:
 		return nil
 	}
 }
 
 func (s *Scheduler) resume(w *Worker, trigger string) {
+	s.startWorker(w, trigger)
+}
+
+// startWorker 为单个 worker 建立可取消的执行上下文；同一 worker 同时最多一个 turn。
+func (s *Scheduler) startWorker(w *Worker, trigger string) bool {
+	s.runsMu.Lock()
+	if _, exists := s.runs[w.ID]; exists {
+		s.runsMu.Unlock()
+		s.recordEvent(context.Background(), w, "resume_ignored", string(w.State), string(w.State), "scheduler", "worker 已在执行，忽略重复唤醒", nil)
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.TurnTimeout*4)
+	done := make(chan struct{})
+	s.runs[w.ID] = &workerRun{cancel: cancel, done: done}
+	s.runsMu.Unlock()
+
 	s.mu.Lock()
 	s.running.Add(1)
 	s.mu.Unlock()
 	go func() {
-		defer s.running.Done()
-		ctx, cancel := context.WithTimeout(context.Background(), s.cfg.TurnTimeout*4)
-		defer cancel()
-		w.State = StatePreparing
-		_ = s.repo.UpdateWorker(ctx, w)
-		if err := s.execute(ctx, w, trigger); err != nil {
-			s.failWorker(ctx, w, err)
+		defer func() {
+			close(done)
+			cancel()
+			s.runsMu.Lock()
+			delete(s.runs, w.ID)
+			s.runsMu.Unlock()
+			s.running.Done()
+			s.Wake()
+		}()
+		fresh, err := s.repo.GetWorker(context.Background(), w.ID)
+		if err == nil && fresh != nil {
+			w = fresh
 		}
-		s.Wake()
+		if w.State == StatePaused || w.State == StateClosed || w.State == StateFailed {
+			return
+		}
+		if w.State != StatePreparing {
+			_ = s.setState(context.Background(), w, StatePreparing, "开始准备执行", "scheduler")
+		}
+		s.markStarted(context.Background(), w)
+		if err := s.execute(ctx, w, trigger); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			fresh, _ := s.repo.GetWorker(context.Background(), w.ID)
+			if fresh != nil && (fresh.State == StatePaused || fresh.State == StateClosed) {
+				return
+			}
+			s.failWorker(context.Background(), w, err)
+		}
 	}()
+	return true
+}
+
+func (s *Scheduler) isRunning(id string) bool {
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
+	_, ok := s.runs[id]
+	return ok
+}
+
+func (s *Scheduler) cancelRun(id string) chan struct{} {
+	s.runsMu.Lock()
+	run := s.runs[id]
+	s.runsMu.Unlock()
+	if run == nil {
+		return nil
+	}
+	run.cancel()
+	return run.done
+}
+
+func (s *Scheduler) markStarted(ctx context.Context, w *Worker) {
+	now := s.now()
+	if w.StartedAt == nil {
+		w.StartedAt = &now
+	}
+	w.Round++
+	if w.Round <= 1 {
+		s.recordEvent(ctx, w, "round", "", string(w.State), "scheduler", "开始第 1 轮执行", map[string]any{"round": w.Round})
+	} else {
+		s.recordEvent(ctx, w, "round", "", string(w.State), "scheduler", fmt.Sprintf("开始第 %d 轮执行", w.Round), map[string]any{"round": w.Round})
+	}
+	_ = s.repo.UpdateWorker(ctx, w)
+	s.startHeartbeat(w.ID)
+}
+
+func (s *Scheduler) startHeartbeat(id string) {
+	go func() {
+		ticker := time.NewTicker(s.cfg.HeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.runsMu.Lock()
+				_, alive := s.runs[id]
+				s.runsMu.Unlock()
+				if !alive {
+					return
+				}
+				_ = s.repo.TouchWorker(context.Background(), id, s.now())
+			case <-time.After(s.cfg.TurnTimeout * 4):
+				return
+			}
+		}
+	}()
+}
+
+func (s *Scheduler) setState(ctx context.Context, w *Worker, next State, summary, actor string) error {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	from := w.State
+	if from == StatePaused && next != StateQueued && next != StateClosed {
+		return nil
+	}
+	if from == StateClosed && next != StateClosed {
+		return nil
+	}
+	if from != next {
+		now := s.now()
+		w.StateChangedAt = now
+		if next == StateClosed || next == StateFailed {
+			w.FinishedAt = &now
+		}
+		if next == StateQueued {
+			w.FinishedAt = nil
+			w.BlockedReason = ""
+			w.QueuedAt = now
+		}
+	}
+	w.State = next
+	if err := s.repo.UpdateWorker(ctx, w); err != nil {
+		return err
+	}
+	if from != next {
+		s.recordEvent(ctx, w, "state", string(from), string(next), actor, summary, nil)
+	}
+	return nil
+}
+
+func (s *Scheduler) recordEvent(ctx context.Context, w *Worker, kind, from, to, actor, summary string, detail map[string]any) {
+	if w == nil || w.ID == "" {
+		return
+	}
+	if actor == "" {
+		actor = "scheduler"
+	}
+	_ = s.repo.AppendWorkerEvent(ctx, WorkerEvent{
+		WorkerID: w.ID, ProjectID: w.ProjectID, Issue: w.Issue, At: s.now(),
+		Kind: kind, StateFrom: from, StateTo: to, Actor: actor, Summary: summary, Detail: detail,
+	})
+}
+
+func (s *Scheduler) queueWorker(ctx context.Context, w *Worker, summary string) (bool, error) {
+	created, err := s.repo.CreateWorker(ctx, w)
+	if err != nil {
+		return false, err
+	}
+	if created {
+		s.recordEvent(ctx, w, "state", "", string(w.State), "scheduler", summary, nil)
+	}
+	return created, nil
+}
+
+// Workers 返回全部 worker，并补充项目名、运行态和允许动作。
+func (s *Scheduler) Workers(ctx context.Context) ([]*Worker, error) {
+	workers, err := s.repo.ListWorkers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.decorate(ctx, workers)
+	return workers, nil
+}
+
+// WorkerDetail 返回单个 worker 与事件时间线。
+func (s *Scheduler) WorkerDetail(ctx context.Context, id string) (*WorkerDetail, error) {
+	w, err := s.repo.GetWorker(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if w == nil {
+		return nil, ErrWorkerNotFound
+	}
+	s.decorate(ctx, []*Worker{w})
+	events, err := s.repo.ListWorkerEvents(ctx, id, 300)
+	if err != nil {
+		return nil, err
+	}
+	if len(events) == 0 {
+		events = []WorkerEvent{{
+			WorkerID: w.ID, ProjectID: w.ProjectID, Issue: w.Issue, At: w.CreatedAt,
+			Kind: "state", StateTo: string(w.State), Actor: "scheduler", Summary: "worker 已创建",
+		}}
+	}
+	return &WorkerDetail{Worker: w, Events: events}, nil
+}
+
+// Overview 汇总调度器状态、并发配置、状态计数和 worker 列表。
+func (s *Scheduler) Overview(ctx context.Context) (*Overview, error) {
+	all, err := s.Workers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	counts := map[string]int{}
+	active := make([]*Worker, 0, len(all))
+	terminal := make([]*Worker, 0)
+	for _, w := range all {
+		counts[string(w.State)]++
+		if w.State == StateClosed || w.State == StateFailed {
+			terminal = append(terminal, w)
+		} else {
+			active = append(active, w)
+		}
+	}
+	sort.SliceStable(terminal, func(i, j int) bool { return terminal[i].UpdatedAt.After(terminal[j].UpdatedAt) })
+	if len(terminal) > 50 {
+		terminal = terminal[:50]
+	}
+	workers := append(active, terminal...)
+	return &Overview{
+		Service: "smartpipe-scheduler", StartedAt: s.startedAt,
+		MaxGlobal: s.cfg.MaxGlobal, MaxPerProject: s.cfg.MaxPerProject,
+		Counts: counts, Workers: workers,
+	}, nil
+}
+
+func (s *Scheduler) decorate(ctx context.Context, workers []*Worker) {
+	projects := map[string]*Project{}
+	for _, w := range workers {
+		if w == nil {
+			continue
+		}
+		w.Running = s.isRunning(w.ID)
+		w.AllowedActions = allowedActions(w.State)
+		if _, seen := projects[w.ProjectID]; !seen {
+			p, err := s.resolver.ByID(ctx, w.ProjectID)
+			if err != nil {
+				p = nil
+			}
+			projects[w.ProjectID] = p
+		}
+		if p := projects[w.ProjectID]; p != nil {
+			w.ProjectName = p.Name
+		}
+	}
+}
+
+func allowedActions(state State) []string {
+	switch state {
+	case StateQueued, StatePreparing, StateCoding, StateVerifying, StatePushing:
+		return []string{"pause", "stop"}
+	case StatePaused:
+		return []string{"resume", "stop"}
+	case StateBlocked:
+		return []string{"resume", "retry", "stop"}
+	case StateAwaitingInput:
+		return []string{"resume", "stop"}
+	case StateAwaitingReview:
+		return []string{"resume", "stop"}
+	case StateFailed:
+		return []string{"retry"}
+	default:
+		return nil
+	}
+}
+
+func (s *Scheduler) loadWorker(ctx context.Context, id string) (*Worker, error) {
+	w, err := s.repo.GetWorker(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if w == nil {
+		return nil, ErrWorkerNotFound
+	}
+	return w, nil
+}
+
+// PauseWorker 只暂停指定 worker：取消当前 turn，保留分支和工作区。
+func (s *Scheduler) PauseWorker(ctx context.Context, id string) (*Worker, error) {
+	w, err := s.loadWorker(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if w.State == StateClosed || w.State == StateFailed || w.State == StatePaused {
+		return w, fmt.Errorf("%w: cannot pause from %s", ErrActionNotAllowed, w.State)
+	}
+	w.LastError = ""
+	w.BlockedReason = "paused by human"
+	if err := s.setState(ctx, w, StatePaused, "人工暂停当前 worker", "console"); err != nil {
+		return nil, err
+	}
+	s.cancelRun(id)
+	return w, nil
+}
+
+// ResumeWorker 把暂停或等待中的 worker 重新放回队列。
+func (s *Scheduler) ResumeWorker(ctx context.Context, id string) (*Worker, error) {
+	w, err := s.loadWorker(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if s.isRunning(id) {
+		return w, fmt.Errorf("%w: worker is already running", ErrActionNotAllowed)
+	}
+	switch w.State {
+	case StatePaused, StateBlocked, StateAwaitingInput, StateAwaitingReview:
+	default:
+		return w, fmt.Errorf("%w: cannot resume from %s", ErrActionNotAllowed, w.State)
+	}
+	w.LastError = ""
+	w.BlockedReason = ""
+	if err := s.setState(ctx, w, StateQueued, "人工恢复，重新排队", "console"); err != nil {
+		return nil, err
+	}
+	s.Wake()
+	return w, nil
+}
+
+// RetryWorker 清空尝试次数后重新排队。
+func (s *Scheduler) RetryWorker(ctx context.Context, id string) (*Worker, error) {
+	w, err := s.loadWorker(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if s.isRunning(id) {
+		return w, fmt.Errorf("%w: worker is already running", ErrActionNotAllowed)
+	}
+	switch w.State {
+	case StateBlocked, StateFailed, StatePaused:
+	default:
+		return w, fmt.Errorf("%w: cannot retry from %s", ErrActionNotAllowed, w.State)
+	}
+	w.Attempts = 0
+	w.LastError = ""
+	w.BlockedReason = ""
+	if err := s.setState(ctx, w, StateQueued, "人工重试，重新排队", "console"); err != nil {
+		return nil, err
+	}
+	s.Wake()
+	return w, nil
+}
+
+// StopWorker 取消当前 turn 并结束 worker。
+func (s *Scheduler) StopWorker(ctx context.Context, id string) (*Worker, error) {
+	w, err := s.loadWorker(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if w.State == StateClosed {
+		return w, nil
+	}
+	s.closeWorker(ctx, w, "人工停止")
+	fresh, _ := s.repo.GetWorker(ctx, id)
+	if fresh == nil {
+		fresh = w
+	}
+	return fresh, nil
+}
+
+// Act 执行控制台动作。
+func (s *Scheduler) Act(ctx context.Context, id, action string) (*Worker, error) {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "pause":
+		return s.PauseWorker(ctx, id)
+	case "resume":
+		return s.ResumeWorker(ctx, id)
+	case "retry":
+		return s.RetryWorker(ctx, id)
+	case "stop":
+		return s.StopWorker(ctx, id)
+	default:
+		return nil, fmt.Errorf("%w: unknown action %q", ErrActionNotAllowed, action)
+	}
 }
 
 // execute 跑一轮完整修复：worktree → codex → 验证 → 提交推送 → PR。
@@ -584,17 +1059,21 @@ func (s *Scheduler) execute(ctx context.Context, w *Worker, trigger string) erro
 
 	var report, patch string
 	ok := false
+	w.Model = firstNonEmpty(p.Model, s.cfg.Model)
+	w.ProviderID = p.ProviderID
 	for attempt := 0; attempt < s.cfg.VerifyAttempts; attempt++ {
-		w.State = StateCoding
-		if err := s.repo.UpdateWorker(ctx, w); err != nil {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
-		res, err := s.runner.Run(ctx, codexrunner.Spec{
+		if err := s.setState(ctx, w, StateCoding, fmt.Sprintf("第 %d 轮 Codex 开始修改代码", w.Round), "scheduler"); err != nil {
+			return err
+		}
+		res, err := s.runWorkerTurn(ctx, w, codexrunner.Spec{
 			WorkDir:          dir,
 			Env:              s.resolveModelEnv(ctx, p),
 			Prompt:           buildFixPrompt(p, issue, comments, trigger, report),
 			CodexPath:        s.cfg.CodexPath,
-			Model:            firstNonEmpty(p.Model, s.cfg.Model),
+			Model:            w.Model,
 			Effort:           firstNonEmpty(p.Effort, s.cfg.Effort),
 			BaseInstructions: FixSystemPrompt,
 			Timeout:          s.cfg.TurnTimeout,
@@ -603,34 +1082,43 @@ func (s *Scheduler) execute(ctx context.Context, w *Worker, trigger string) erro
 		if err != nil {
 			return fmt.Errorf("codex: %w", err)
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		patch, err = s.differ.Diff(ctx, dir, "")
 		if err != nil {
 			return fmt.Errorf("diff: %w", err)
 		}
 		if strings.TrimSpace(patch) == "" {
-			w.State = StateAwaitingInput
 			w.LastError = ""
-			_ = s.repo.UpdateWorker(ctx, w)
+			if err := s.setState(ctx, w, StateAwaitingInput, "本轮没有代码改动，等待人工补充信息", "scheduler"); err != nil {
+				return err
+			}
 			_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment(
 				"这一轮没有产生代码改动。需要补充信息或确认方案：\n\n"+clamp(res.FinalResponse, 3000)))
 			s.notifyIssue(ctx, p, w, "需要你补充信息："+clamp(res.FinalResponse, 300))
 			return nil
 		}
-		w.State = StateVerifying
-		_ = s.repo.UpdateWorker(ctx, w)
+		if err := s.setState(ctx, w, StateVerifying, "补丁已生成，开始验证", "scheduler"); err != nil {
+			return err
+		}
 		ok, report, err = s.verifier.Verify(ctx, p, dir, patch)
 		if err != nil {
 			return fmt.Errorf("verify: %w", err)
 		}
 		if ok {
+			s.recordEvent(ctx, w, "verify", "", string(w.State), "scheduler", "补丁验证通过", map[string]any{"report": clamp(report, 2000)})
 			break
 		}
+		s.recordEvent(ctx, w, "verify", "", string(w.State), "scheduler", "补丁验证失败", map[string]any{"report": clamp(report, 2000)})
 		if verificationEnvironmentError(report) {
 			// 环境类错误（仓库缺失、checkout 失败）重跑模型只会浪费一轮，
 			// 直接暂停并提示人工修复。
-			w.State = StateBlocked
 			w.LastError = "verification environment error"
-			_ = s.repo.UpdateWorker(ctx, w)
+			w.BlockedReason = "验证环境异常，请修复环境后重试"
+			if err := s.setState(ctx, w, StateBlocked, "验证环境异常，已暂停等待人工修复", "scheduler"); err != nil {
+				return err
+			}
 			_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment(
 				"验证环境异常，已暂停（未消耗模型重试次数）：\n\n```\n"+clamp(report, 3000)+"\n```\n修复环境后发送 `/retry` 重新尝试。"))
 			s.notifyIssue(ctx, p, w, "验证环境异常，需要人工处理。")
@@ -639,19 +1127,28 @@ func (s *Scheduler) execute(ctx context.Context, w *Worker, trigger string) erro
 		_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment("验证未通过，正在带日志重试：\n\n```\n"+clamp(report, 3000)+"\n```"))
 	}
 	if !ok {
-		w.State = StateBlocked
 		w.LastError = "verification failed"
-		_ = s.repo.UpdateWorker(ctx, w)
+		w.BlockedReason = "连续验证失败，请查看验证报告后重试"
+		if err := s.setState(ctx, w, StateBlocked, "连续验证失败，已暂停等待人工处理", "scheduler"); err != nil {
+			return err
+		}
 		_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment("连续验证失败，已暂停。\n\n```\n"+clamp(report, 4000)+"\n```"))
 		s.notifyIssue(ctx, p, w, "验证连续失败，需要人工确认。")
 		return nil
 	}
 
-	w.State = StatePushing
-	_ = s.repo.UpdateWorker(ctx, w)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := s.setState(ctx, w, StatePushing, "验证通过，开始提交并推送", "scheduler"); err != nil {
+		return err
+	}
 	commit, err := s.vcs.CommitPush(ctx, p, w, commitMessage(issue), patch)
 	if err != nil {
 		return fmt.Errorf("commit/push: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if w.PRNumber == 0 {
 		pr, err := s.tracker.CreatePR(ctx, p.ID, w.Issue, branch, firstNonEmpty(p.DefaultBase, "main"),
@@ -660,6 +1157,7 @@ func (s *Scheduler) execute(ctx context.Context, w *Worker, trigger string) erro
 			return fmt.Errorf("create pr: %w", err)
 		}
 		w.PRNumber = pr.Number
+		w.PRURL = pr.URL
 		_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment(fmt.Sprintf(
 			"已提交 `%s` 并创建 PR #%d（验证通过）。\n%s", shortSHA(commit), pr.Number, pr.URL)))
 		s.notifyIssue(ctx, p, w, fmt.Sprintf("修复完成，PR #%d 等待 review：%s", pr.Number, pr.URL))
@@ -668,9 +1166,8 @@ func (s *Scheduler) execute(ctx context.Context, w *Worker, trigger string) erro
 			"已追加提交 `%s` 到 PR #%d。", shortSHA(commit), w.PRNumber)))
 		s.notifyIssue(ctx, p, w, fmt.Sprintf("已按你的意见更新 PR #%d。", w.PRNumber))
 	}
-	w.State = StateAwaitingReview
 	w.LastError = ""
-	return s.repo.UpdateWorker(ctx, w)
+	return s.setState(ctx, w, StateAwaitingReview, "PR 已就绪，等待 review", "scheduler")
 }
 
 func commitMessage(issue Issue) string {
@@ -694,15 +1191,33 @@ func shortSHA(s string) string {
 }
 
 func (s *Scheduler) failWorker(ctx context.Context, w *Worker, cause error) {
+	if errors.Is(cause, context.Canceled) {
+		return
+	}
 	log.Printf("[scheduler] worker %s (project=%s issue=%d) failed: %v", w.ID, w.ProjectID, w.Issue, cause)
+	if ctx == nil || ctx.Err() != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+	}
+	if fresh, err := s.repo.GetWorker(ctx, w.ID); err == nil && fresh != nil {
+		w = fresh
+	}
+	if w.State == StatePaused || w.State == StateClosed || w.State == StateFailed {
+		return
+	}
 	w.Attempts++
 	w.LastError = cause.Error()
 	state := StateBlocked
+	w.BlockedReason = clamp(cause.Error(), 500)
 	if w.Attempts < s.cfg.MaxAttempts {
 		state = StateQueued
+		w.BlockedReason = ""
 	}
-	w.State = state
-	_ = s.repo.UpdateWorker(ctx, w)
+	if err := s.setState(ctx, w, state, "worker 执行失败："+clamp(cause.Error(), 300), "scheduler"); err != nil {
+		log.Printf("[scheduler] update failed worker %s: %v", w.ID, err)
+		return
+	}
 	if state == StateBlocked {
 		_ = s.tracker.Comment(ctx, w.ProjectID, w.Issue, botComment("worker 执行失败，已暂停：\n\n```\n"+clamp(cause.Error(), 2000)+"\n```\n发送 `/retry` 重新尝试。"))
 		if p, err := s.resolver.ByID(ctx, w.ProjectID); err == nil {
@@ -726,19 +1241,42 @@ func (s *Scheduler) mirrorComment(ctx context.Context, w *Worker, ev IssueEvent)
 }
 
 func (s *Scheduler) closeWorker(ctx context.Context, w *Worker, reason string) {
-	w.State = StateClosed
-	_ = s.repo.UpdateWorker(ctx, w)
-	if s.workspace != nil {
-		if p, err := s.resolver.ByID(ctx, w.ProjectID); err == nil {
-			_ = s.workspace.Cleanup(ctx, p, w.Issue)
+	if ctx == nil || ctx.Err() != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+	}
+	_ = s.setState(ctx, w, StateClosed, "worker 已结束："+reason, "scheduler")
+	done := s.cancelRun(w.ID)
+	cleanup := func() {
+		if s.workspace == nil {
+			return
+		}
+		bg, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if p, err := s.resolver.ByID(bg, w.ProjectID); err == nil {
+			_ = s.workspace.Cleanup(bg, p, w.Issue)
 		}
 	}
+	if done != nil {
+		go func() {
+			select {
+			case <-done:
+			case <-time.After(30 * time.Second):
+			}
+			cleanup()
+		}()
+	} else {
+		cleanup()
+	}
 	if w.ChatID != "" {
+		bg, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 		text := fmt.Sprintf("Issue #%d 已结束（%s）。", w.Issue, reason)
 		if w.IssueURL != "" {
 			text += "\n" + w.IssueURL
 		}
-		_ = s.notify(ctx, "", w.ChatID, "", text)
+		_ = s.notify(bg, "", w.ChatID, "", text)
 	}
 }
 

@@ -86,6 +86,8 @@ func main() {
 		ReleaseToken:          strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_TOKEN")),
 		BotAddr:               envOr("SMARTPIPE_BOT_ADDR", ""),
 		BotToken:              strings.TrimSpace(os.Getenv("SMARTPIPE_BOT_INTERNAL_TOKEN")),
+		SchedulerURL:          envOr("SMARTPIPE_SCHEDULER_URL", "http://127.0.0.1:8098"),
+		SchedulerToken:        strings.TrimSpace(os.Getenv("SMARTPIPE_SCHEDULER_TOKEN")),
 		CrashRetentionDays:    envInt("SMARTPIPE_CRASH_RETENTION_DAYS", 30),
 		RejectedRetentionDays: envInt("SMARTPIPE_CRASH_REJECT_RETENTION_DAYS", 7),
 		AdminUser:             envOr("SMARTPIPE_ADMIN_USER", "admin"),

@@ -13,6 +13,7 @@ Environment=SCHEDULER_HTTP_ADDR=:8098
 Environment=SMARTPIPE_ADMIN_URL=http://127.0.0.1:8092
 Environment=BOT_ADDR=http://127.0.0.1:8093
 Environment=SCHEDULER_WORKSPACE_ROOT=@STATE_DIR@/workspaces
+Environment=SCHEDULER_OUTPUT_DIR=@STATE_DIR@/scheduler-outputs
 ExecStart=@INSTALL_DIR@/bin/scheduler
 Restart=on-failure
 RestartSec=3

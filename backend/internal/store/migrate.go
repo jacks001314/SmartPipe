@@ -14,6 +14,76 @@ type migration struct {
 
 var migrations = []migration{
 	{
+		version: 31,
+		name:    "scheduler_worker_outputs",
+		sql: `
+CREATE SEQUENCE IF NOT EXISTS scheduler_worker_output_revision_seq;
+
+CREATE TABLE IF NOT EXISTS scheduler_worker_outputs (
+  worker_id   TEXT NOT NULL,
+  item_id     TEXT NOT NULL,
+  round       INTEGER NOT NULL DEFAULT 0,
+  turn_id     TEXT NOT NULL DEFAULT '',
+  kind        TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'running',
+  title       TEXT NOT NULL DEFAULT '',
+  content     TEXT NOT NULL DEFAULT '',
+  output      TEXT NOT NULL DEFAULT '',
+  metadata    JSONB NOT NULL DEFAULT '{}'::jsonb,
+  bytes       BIGINT NOT NULL DEFAULT 0,
+  truncated   BOOLEAN NOT NULL DEFAULT FALSE,
+  blob_ref    TEXT NOT NULL DEFAULT '',
+  revision    BIGINT NOT NULL DEFAULT nextval('scheduler_worker_output_revision_seq'),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (worker_id, item_id)
+);
+CREATE INDEX IF NOT EXISTS scheduler_worker_outputs_stream_idx
+  ON scheduler_worker_outputs (worker_id, revision);
+CREATE INDEX IF NOT EXISTS scheduler_worker_outputs_updated_idx
+  ON scheduler_worker_outputs (updated_at DESC);
+`,
+	},
+	{
+		version: 30,
+		name:    "scheduler_observability",
+		sql: `
+ALTER TABLE scheduler_workers ADD COLUMN IF NOT EXISTS issue_title TEXT NOT NULL DEFAULT '';
+ALTER TABLE scheduler_workers ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE scheduler_workers ADD COLUMN IF NOT EXISTS queued_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE scheduler_workers ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+ALTER TABLE scheduler_workers ADD COLUMN IF NOT EXISTS state_changed_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE scheduler_workers ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ;
+ALTER TABLE scheduler_workers ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
+ALTER TABLE scheduler_workers ADD COLUMN IF NOT EXISTS round INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE scheduler_workers ADD COLUMN IF NOT EXISTS model TEXT NOT NULL DEFAULT '';
+ALTER TABLE scheduler_workers ADD COLUMN IF NOT EXISTS provider_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE scheduler_workers ADD COLUMN IF NOT EXISTS pr_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE scheduler_workers ADD COLUMN IF NOT EXISTS blocked_reason TEXT NOT NULL DEFAULT '';
+
+CREATE INDEX IF NOT EXISTS scheduler_workers_queue_idx
+  ON scheduler_workers (state, priority DESC, queued_at, created_at);
+
+CREATE TABLE IF NOT EXISTS scheduler_worker_events (
+  id BIGSERIAL PRIMARY KEY,
+  worker_id TEXT NOT NULL,
+  project_id TEXT NOT NULL DEFAULT '',
+  issue_number INTEGER NOT NULL DEFAULT 0,
+  at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  kind TEXT NOT NULL,
+  state_from TEXT NOT NULL DEFAULT '',
+  state_to TEXT NOT NULL DEFAULT '',
+  actor TEXT NOT NULL DEFAULT 'scheduler',
+  summary TEXT NOT NULL DEFAULT '',
+  detail JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS scheduler_worker_events_worker_idx
+  ON scheduler_worker_events (worker_id, id);
+CREATE INDEX IF NOT EXISTS scheduler_worker_events_at_idx
+  ON scheduler_worker_events (at DESC);
+`,
+	},
+	{
 		version: 29,
 		name:    "scheduler_core",
 		sql: `

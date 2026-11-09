@@ -57,6 +57,17 @@ type Spec struct {
 	LogWriter io.Writer
 	// ModelOutput 为 true 时把最终回复写进结果，否则只保留长度。
 	KeepResponse bool
+	// OnEvent 可选地接收 app-server 的原始流式通知。调度器用它把 Codex 的
+	// 消息、命令输出和文件变更实时投影到控制台；普通调用方可以留空。
+	OnEvent func(Event)
+}
+
+// Event 是一条已按到达顺序读出的 Codex app-server 通知。
+// Params 保留原始 JSON，避免 SDK 的 sanitized 类型丢掉 turnId 等字段。
+type Event struct {
+	Method string
+	Params json.RawMessage
+	At     time.Time
 }
 
 // Result 是一次执行的可核对结果。
@@ -210,6 +221,20 @@ func Run(ctx context.Context, spec Spec) (*Result, error) {
 			result.FinalResponse = finalText
 			result.ResponseBytes = len(finalText)
 			return result, fmt.Errorf("codexrunner: read turn events: %w", err)
+		}
+		if spec.OnEvent != nil {
+			params := append(json.RawMessage(nil), note.Raw...)
+			if len(params) == 0 && note.Params != nil {
+				params, _ = json.Marshal(note.Params)
+			}
+			func() {
+				defer func() {
+					if recovered := recover(); recovered != nil {
+						_, _ = fmt.Fprintf(logs, "codexrunner: event sink panic: %v\n", recovered)
+					}
+				}()
+				spec.OnEvent(Event{Method: note.Method, Params: params, At: time.Now()})
+			}()
 		}
 		switch value := note.Params.(type) {
 		case protocol.ItemCompletedNotification:

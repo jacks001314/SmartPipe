@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,5 +113,93 @@ func TestHTTPEndToEnd(t *testing.T) {
 	})
 	if h.ws.cleanedCount() != 1 {
 		t.Fatalf("worktree should be cleaned once, got %d", h.ws.cleanedCount())
+	}
+}
+
+func TestHTTPWorkerActionAndDetail(t *testing.T) {
+	h := newHarness(t, Config{})
+	app := NewServer(ServerConfig{Token: "tok"}, h.s)
+	if err := app.Build(); err != nil {
+		t.Fatalf("build app: %v", err)
+	}
+	ts := httptest.NewServer(app)
+	defer ts.Close()
+
+	w := &Worker{ProjectID: "prj-1", Issue: 41, State: StateQueued, ChatID: "group-1"}
+	if _, err := h.repo.CreateWorker(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	if code := postJSON(t, ts.URL+"/internal/scheduler/workers/"+w.ID+"/action", "tok", map[string]string{"action": "pause"}); code != http.StatusOK {
+		t.Fatalf("pause code=%d", code)
+	}
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/internal/scheduler/workers/"+w.ID, nil)
+	req.Header.Set("X-Scheduler-Token", "tok")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var payload WorkerDetail
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Worker == nil || payload.Worker.State != StatePaused {
+		t.Fatalf("worker not paused: %+v", payload.Worker)
+	}
+	if len(payload.Events) == 0 {
+		t.Fatal("detail should include events")
+	}
+}
+
+func TestHTTPWorkerOutputStream(t *testing.T) {
+	h := newHarness(t, Config{})
+	w := &Worker{ProjectID: "prj-1", Issue: 42, State: StateQueued, ChatID: "group-1"}
+	if _, err := h.repo.CreateWorker(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	item := &WorkerOutput{WorkerID: w.ID, ItemID: "msg-1", Round: 1, TurnID: "turn-1",
+		Kind: OutputKindAgentMessage, Status: "streaming", Title: "Agent 回复", Content: "实时回答"}
+	if err := h.repo.UpsertWorkerOutput(context.Background(), item); err != nil {
+		t.Fatal(err)
+	}
+	app := NewServer(ServerConfig{Token: "tok"}, h.s)
+	if err := app.Build(); err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(app)
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/internal/scheduler/workers/"+w.ID+"/output?after=0", nil)
+	req.Header.Set("X-Scheduler-Token", "tok")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var frame OutputFrame
+	if err := json.NewDecoder(resp.Body).Decode(&frame); err != nil {
+		t.Fatal(err)
+	}
+	if len(frame.Items) != 1 || frame.Items[0].Content != "实时回答" || frame.Cursor == 0 {
+		t.Fatalf("unexpected output frame: %#v", frame)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	streamReq, _ := http.NewRequestWithContext(ctx, http.MethodGet,
+		ts.URL+"/internal/scheduler/workers/"+w.ID+"/stream?after=0", nil)
+	streamReq.Header.Set("X-Scheduler-Token", "tok")
+	streamResp, err := http.DefaultClient.Do(streamReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer streamResp.Body.Close()
+	if got := streamResp.Header.Get("Content-Type"); !strings.Contains(got, "text/event-stream") {
+		t.Fatalf("content-type=%q", got)
+	}
+	buf := make([]byte, 4096)
+	n, _ := streamResp.Body.Read(buf)
+	if !strings.Contains(string(buf[:n]), "event: outputs") || !strings.Contains(string(buf[:n]), "实时回答") {
+		t.Fatalf("unexpected SSE frame: %s", buf[:n])
 	}
 }

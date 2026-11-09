@@ -10,25 +10,35 @@ import { AuditPage } from "./pages/AuditPage";
 import { VerificationPage } from "./pages/VerificationPage";
 import { ReleasePage } from "./pages/ReleasePage";
 import { CrashPage } from "./pages/CrashPage";
+import { SchedulerPage } from "./pages/SchedulerPage";
 
-type PageKey = "projects" | "credentials" | "models" | "lanxin" | "verify" | "release" | "crash" | "audit";
+type PageKey = "projects" | "credentials" | "models" | "lanxin" | "scheduler" | "verify" | "release" | "crash" | "audit";
 
-const NAV: { key: PageKey; label: string; icon: string }[] = [
+type NavItem = { key: PageKey; label: string; icon: string };
+
+const CONFIG_NAV: NavItem[] = [
   { key: "projects", label: "项目", icon: "▤" },
   { key: "credentials", label: "GitHub 配置", icon: "⌥" },
   { key: "models", label: "模型配置", icon: "◎" },
   { key: "lanxin", label: "蓝信机器人", icon: "✆" },
+];
+
+const OPS_NAV: NavItem[] = [
+  { key: "scheduler", label: "调度器", icon: "⇄" },
   { key: "verify", label: "补丁验证", icon: "✓" },
   { key: "release", label: "发版", icon: "⬆" },
   { key: "crash", label: "崩溃上报", icon: "⚠" },
   { key: "audit", label: "审计日志", icon: "☰" },
 ];
 
+const NAV = [...CONFIG_NAV, ...OPS_NAV];
+
 const META: Record<PageKey, { crumb: string; title: string; sub: string }> = {
   projects: { crumb: "配置中心 / 项目", title: "项目", sub: "管理项目、GitHub 仓库、蓝信群和 Codex 模型绑定。" },
   credentials: { crumb: "配置中心 / GitHub 配置", title: "GitHub 配置", sub: "GitHub 账户授权与仓库列表；仓库绑定在项目中完成。" },
   models: { crumb: "配置中心 / 模型配置", title: "模型配置", sub: "管理模型供应商、模型目录与推理强度，支持从本机 Codex 配置导入。" },
   lanxin: { crumb: "配置中心 / 蓝信机器人", title: "蓝信机器人", sub: "管理多个机器人、自动同步所在群，并查看每个机器人的聊天消息与连接状态。" },
+  scheduler: { crumb: "运行中心 / 调度器", title: "调度器", sub: "查看 worker 当前阶段、心跳和事件时间线，并暂停、恢复、重试或停止单个任务。" },
   verify: { crumb: "配置中心 / 补丁验证", title: "补丁验证", sub: "无 Actions 的合并门禁：干净副本应用补丁并执行 smartpipe.yaml。" },
   release: { crumb: "配置中心 / 发版", title: "发版", sub: "从干净提交构建制品，生成带校验和与签名的 manifest。" },
   crash: { crumb: "配置中心 / 崩溃上报", title: "崩溃上报", sub: "客户端 crash_bundle 脱敏、指纹去重、限流与自动建单。" },
@@ -149,7 +159,20 @@ export function App() {
         <div>
           <div className="nav-label">配置中心</div>
           <nav className="nav">
-            {NAV.map((item) => (
+            {CONFIG_NAV.map((item) => (
+              <button
+                key={item.key}
+                className={"nav-item" + (page === item.key ? " active" : "")}
+                onClick={() => setPage(item.key)}
+              >
+                <span className="nav-icon">{item.icon}</span>
+                {item.label}
+              </button>
+            ))}
+          </nav>
+          <div className="nav-label" style={{ marginTop: 18 }}>运行中心</div>
+          <nav className="nav">
+            {OPS_NAV.map((item) => (
               <button
                 key={item.key}
                 className={"nav-item" + (page === item.key ? " active" : "")}
@@ -204,6 +227,7 @@ export function App() {
           {page === "credentials" && <GitHubPage notify={notify} />}
           {page === "models" && <ModelsPage notify={notify} />}
           {page === "lanxin" && <LanxinPage notify={notify} />}
+          {page === "scheduler" && <SchedulerPage notify={notify} />}
           {page === "verify" && <VerificationPage notify={notify} />}
           {page === "release" && <ReleasePage notify={notify} />}
           {page === "crash" && <CrashPage notify={notify} />}

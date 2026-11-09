@@ -56,6 +56,8 @@ services:
       SMARTPIPE_VERIFY_URL: http://patch-verifier:8095
       SMARTPIPE_RELEASE_URL: http://patch-verifier:8095
       SMARTPIPE_BOT_ADDR: http://bot:8093
+      SMARTPIPE_SCHEDULER_URL: http://scheduler:8098
+      SMARTPIPE_SCHEDULER_TOKEN: ${SCHEDULER_TOKEN}
       # 仓库 clone 根目录；项目创建时选择这里克隆出来的本地库。
       SMARTPIPE_CLONE_ROOT: /data/repos
       # 仅用于在 GitHub 配置页展示 token 是否已配置；真实隧道用的是 bridge 那一份。
@@ -162,6 +164,7 @@ services:
       SCHEDULER_HTTP_ADDR: ":8098"
       SCHEDULER_TOKEN: ${SCHEDULER_TOKEN}
       SCHEDULER_WORKSPACE_ROOT: /data/workspaces
+      SCHEDULER_OUTPUT_DIR: /data/scheduler-outputs
       SCHEDULER_MAX_GLOBAL: ${SCHEDULER_MAX_GLOBAL:-3}
       SCHEDULER_MAX_PER_PROJECT: ${SCHEDULER_MAX_PER_PROJECT:-2}
       SCHEDULER_VERIFY_ATTEMPTS: ${SCHEDULER_VERIFY_ATTEMPTS:-2}
@@ -174,6 +177,7 @@ services:
     volumes:
       - ./data/repos:/data/repos
       - ./data/workspaces:/data/workspaces
+      - ./data/scheduler-outputs:/data/scheduler-outputs
       - ${SMARTPIPE_CODEX_HOME:-/home/jacks/.codex}:/config/codex:ro
     depends_on:
       admin-api:
