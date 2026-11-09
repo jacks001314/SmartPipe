@@ -625,6 +625,17 @@ func (s *Scheduler) execute(ctx context.Context, w *Worker, trigger string) erro
 		if ok {
 			break
 		}
+		if verificationEnvironmentError(report) {
+			// 环境类错误（仓库缺失、checkout 失败）重跑模型只会浪费一轮，
+			// 直接暂停并提示人工修复。
+			w.State = StateBlocked
+			w.LastError = "verification environment error"
+			_ = s.repo.UpdateWorker(ctx, w)
+			_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment(
+				"验证环境异常，已暂停（未消耗模型重试次数）：\n\n```\n"+clamp(report, 3000)+"\n```\n修复环境后发送 `/retry` 重新尝试。"))
+			s.notifyIssue(ctx, p, w, "验证环境异常，需要人工处理。")
+			return nil
+		}
 		_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment("验证未通过，正在带日志重试：\n\n```\n"+clamp(report, 3000)+"\n```"))
 	}
 	if !ok {
@@ -904,4 +915,22 @@ func extensionForMime(mimeType string) string {
 		return ".json"
 	}
 	return ""
+}
+
+// verificationEnvironmentError 判断验证报告是否属于环境问题。
+// 新版验证器会在报告里带 environment_error=true；旧版只返回文本，按已知前缀兜底。
+func verificationEnvironmentError(report string) bool {
+	if strings.Contains(report, `"environment_error":true`) {
+		return true
+	}
+	for _, mark := range []string{
+		"clone failed:",
+		"checkout base commit failed:",
+		"base commit mismatch:",
+	} {
+		if strings.Contains(report, mark) {
+			return true
+		}
+	}
+	return false
 }

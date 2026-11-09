@@ -82,19 +82,30 @@ func (v *HTTPVerifier) Verify(ctx context.Context, p *Project, workdir, patch st
 		}
 		return false, msg, fmt.Errorf("scheduler: verify http %d: %s", resp.StatusCode, msg)
 	}
+	// admin-api 返回 {"record":..., "report":{...}, "attempt":...}；
+	// 早期实现把 data 直接当报告，这里两种形状都兼容。
 	var report struct {
-		OK     bool            `json:"ok"`
-		Error  string          `json:"error"`
-		Checks json.RawMessage `json:"checks"`
-	}
-	if len(env.Data) > 0 {
-		if err := json.Unmarshal(env.Data, &report); err != nil {
-			return false, string(raw), nil
-		}
+		OK               bool            `json:"ok"`
+		Error            string          `json:"error"`
+		EnvironmentError bool            `json:"environment_error"`
+		Checks           json.RawMessage `json:"checks"`
 	}
 	detail := string(raw)
 	if len(env.Data) > 0 {
-		detail = string(env.Data)
+		payload := env.Data
+		var wrapper struct {
+			Report json.RawMessage `json:"report"`
+		}
+		if err := json.Unmarshal(payload, &wrapper); err != nil {
+			return false, string(raw), nil
+		}
+		if len(wrapper.Report) > 0 {
+			payload = wrapper.Report
+		}
+		if err := json.Unmarshal(payload, &report); err != nil {
+			return false, string(raw), nil
+		}
+		detail = string(payload)
 	}
 	return report.OK, detail, nil
 }

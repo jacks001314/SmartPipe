@@ -81,6 +81,11 @@ func (m *Manager) Prepare(ctx context.Context, id, repoSource, baseCommit, branc
 		if existing.BaseCommit != strings.TrimSpace(baseCommit) {
 			return nil, fmt.Errorf("%w: workspace %s already exists at %s", ErrInvalid, id, existing.BaseCommit)
 		}
+		// 复用工作区时回到基线：上一轮失败可能留下本地提交，
+		// 验证器克隆的源仓库里没有这些提交，会导致 checkout 基线失败。
+		if err := m.resetTo(ctx, existing.Path, existing.BaseCommit); err != nil {
+			return nil, err
+		}
 		return existing, nil
 	} else if !errors.Is(err, ErrNotFound) {
 		return nil, err
@@ -213,4 +218,15 @@ func (m *Manager) gitOutput(ctx context.Context, dir string, args ...string) (st
 func ShortID(issueRef string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(strings.ToLower(issueRef))))
 	return "ws-" + hex.EncodeToString(sum[:6])
+}
+
+// resetTo 把工作区强制拉回基线提交并清掉未跟踪文件。
+func (m *Manager) resetTo(ctx context.Context, dir, commit string) error {
+	if err := m.runGit(ctx, dir, "reset", "--hard", strings.TrimSpace(commit)); err != nil {
+		return fmt.Errorf("workspace: reset to base: %w", err)
+	}
+	if err := m.runGit(ctx, dir, "clean", "-fd"); err != nil {
+		return fmt.Errorf("workspace: clean worktree: %w", err)
+	}
+	return nil
 }

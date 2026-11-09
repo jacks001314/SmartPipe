@@ -81,6 +81,11 @@ func (g *GitWorkspace) Prepare(ctx context.Context, p *Project, issue int) (stri
 	branch := g.Branch(issue)
 	dir := g.Dir(p, issue)
 	if st, err := os.Stat(filepath.Join(dir, ".git")); err == nil && st != nil {
+		// 复用工作区时先回到基线：上一轮失败可能留下本地提交，
+		// 验证器克隆的项目仓库里没有这些提交，会导致 checkout 基线失败。
+		if err := g.resetExisting(ctx, p, dir, branch); err != nil {
+			return "", "", err
+		}
 		return dir, branch, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
@@ -137,4 +142,34 @@ func (g *GitWorkspace) Cleanup(ctx context.Context, p *Project, issue int) error
 	_, err := g.run(ctx, g.mirror(p), "worktree", "remove", "--force", dir)
 	_ = os.RemoveAll(dir)
 	return err
+}
+
+// resetExisting 把已存在的工作区强制拉回项目基线的提交。
+func (g *GitWorkspace) resetExisting(ctx context.Context, p *Project, dir, branch string) error {
+	repo := g.mirror(p)
+	base := firstNonEmpty(p.DefaultBase, "main")
+	ref := ""
+	for _, candidate := range []string{"refs/heads/" + base, "origin/" + base, base} {
+		if _, err := g.run(ctx, repo, "rev-parse", "--verify", candidate); err == nil {
+			ref = candidate
+			break
+		}
+	}
+	if ref == "" {
+		return nil
+	}
+	sha, err := g.run(ctx, repo, "rev-parse", ref)
+	if err != nil {
+		return fmt.Errorf("scheduler: resolve base %s: %w", ref, err)
+	}
+	if _, err := g.run(ctx, dir, "checkout", "-B", branch, sha); err != nil {
+		return fmt.Errorf("scheduler: checkout branch: %w", err)
+	}
+	if _, err := g.run(ctx, dir, "reset", "--hard", sha); err != nil {
+		return fmt.Errorf("scheduler: reset workspace: %w", err)
+	}
+	if _, err := g.run(ctx, dir, "clean", "-fd"); err != nil {
+		return fmt.Errorf("scheduler: clean workspace: %w", err)
+	}
+	return nil
 }

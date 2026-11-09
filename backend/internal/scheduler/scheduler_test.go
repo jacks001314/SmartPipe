@@ -220,6 +220,7 @@ func (f *fakeWorkspace) issueSeen() int {
 type fakeVerifier struct {
 	mu      sync.Mutex
 	results []bool
+	reports []string
 	calls   int
 }
 
@@ -227,6 +228,11 @@ func (f *fakeVerifier) Verify(ctx context.Context, p *Project, workdir, patch st
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
+	if len(f.reports) > 0 {
+		report := f.reports[0]
+		f.reports = f.reports[1:]
+		return false, report, nil
+	}
 	if len(f.results) == 0 {
 		return true, `{"ok":true}`, nil
 	}
@@ -437,6 +443,27 @@ func TestVerificationRetryThenSuccess(t *testing.T) {
 	}
 	if h.verifier.calls != 2 {
 		t.Fatalf("want 2 verify calls, got %d", h.verifier.calls)
+	}
+}
+
+func TestEnvironmentVerificationErrorBlocksWithoutRetry(t *testing.T) {
+	h := newHarness(t, Config{VerifyAttempts: 2})
+	h.verifier.reports = []string{`{"ok":false,"environment_error":true,"error":"clone failed: repository '/data/repos/x' does not exist"}`}
+	w := &Worker{ProjectID: "prj-1", Issue: 5, State: StateQueued, ChatID: "group-1"}
+	_, _ = h.repo.CreateWorker(context.Background(), w)
+	if err := h.s.DispatchOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.s.Wait()
+	w, _ = h.repo.GetWorker(context.Background(), w.ID)
+	if w.State != StateBlocked {
+		t.Fatalf("want blocked, got %s", w.State)
+	}
+	if h.runner.count("fix") != 1 {
+		t.Fatalf("environment error must not re-run codex, fix runs = %d", h.runner.count("fix"))
+	}
+	if h.verifier.calls != 1 {
+		t.Fatalf("want 1 verify call, got %d", h.verifier.calls)
 	}
 }
 
