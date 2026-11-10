@@ -181,3 +181,22 @@ func TestDiffSkipsExcludedPaths(t *testing.T) {
 		t.Fatalf("补丁应保留 README.md：\n%s", diff)
 	}
 }
+
+func TestApplyEnvOverridesScrubsSensitiveKeys(t *testing.T) {
+	t.Setenv("SMARTPIPE_MASTER_KEY", "secret-value")
+	t.Setenv("OPENAI_BASE_URL", "http://old")
+	restore := applyEnvOverrides([]string{"OPENAI_BASE_URL=http://new"})
+	if got := os.Getenv("SMARTPIPE_MASTER_KEY"); got != "" {
+		t.Fatalf("sensitive key leaked to codex env: %q", got)
+	}
+	if got := os.Getenv("OPENAI_BASE_URL"); got != "http://new" {
+		t.Fatalf("override not applied: %q", got)
+	}
+	restore()
+	if got := os.Getenv("SMARTPIPE_MASTER_KEY"); got != "secret-value" {
+		t.Fatalf("sensitive key not restored: %q", got)
+	}
+	if got := os.Getenv("OPENAI_BASE_URL"); got != "http://old" {
+		t.Fatalf("override not restored: %q", got)
+	}
+}

@@ -86,26 +86,47 @@ var envMu sync.Mutex
 
 // applyEnvOverrides 把 KEY=VALUE 写入当前进程环境，返回恢复函数。
 // 调用方串行执行，避免并发会话互相覆盖。
+// sensitiveEnvKeys 是只给调度器自己用的凭据。Codex 子进程会继承父进程环境，
+// 这些变量必须在 turn 期间摘掉，避免模型通过 shell 读到主密钥或服务令牌。
+var sensitiveEnvKeys = []string{
+	"SMARTPIPE_MASTER_KEY",
+	"SMARTPIPE_DSN",
+	"SMARTPIPE_ADMIN_TOKEN",
+	"SMARTPIPE_BOT_INTERNAL_TOKEN",
+	"INTERNAL_TOKEN",
+	"SCHEDULER_TOKEN",
+	"SMARTPIPE_VERIFY_TOKEN",
+	"SMARTPIPE_RELEASE_TOKEN",
+	"SMARTPIPE_CRASH_TOKEN",
+	"GITHUB_WEBHOOK_SECRET",
+	"SMARTPIPE_FRP_TOKEN",
+}
+
 func applyEnvOverrides(env []string) func() {
-	if len(env) == 0 {
-		return func() {}
-	}
 	envMu.Lock()
 	type oldValue struct {
 		value string
 		set   bool
 	}
 	saved := map[string]oldValue{}
+	remember := func(key string) {
+		if _, seen := saved[key]; seen {
+			return
+		}
+		v, exists := os.LookupEnv(key)
+		saved[key] = oldValue{value: v, set: exists}
+	}
 	for _, entry := range env {
 		key, value, ok := strings.Cut(entry, "=")
 		if !ok || strings.TrimSpace(key) == "" {
 			continue
 		}
-		if _, seen := saved[key]; !seen {
-			v, exists := os.LookupEnv(key)
-			saved[key] = oldValue{value: v, set: exists}
-		}
+		remember(key)
 		_ = os.Setenv(key, value)
+	}
+	for _, key := range sensitiveEnvKeys {
+		remember(key)
+		_ = os.Unsetenv(key)
 	}
 	return func() {
 		for key, old := range saved {
@@ -172,8 +193,13 @@ func Run(ctx context.Context, spec Spec) (*Result, error) {
 
 	ephemeral := true
 	sandbox := codex.SandboxModeWorkspaceWrite
-	if strings.EqualFold(strings.TrimSpace(spec.Sandbox), "read-only") {
+	switch strings.ToLower(strings.TrimSpace(spec.Sandbox)) {
+	case "read-only":
 		sandbox = codex.SandboxModeReadOnly
+	case "danger-full-access":
+		// 容器本身是隔离边界时使用：容器内无法创建 user namespace，
+		// Codex 自带沙箱起不来，只能关掉内层沙箱。
+		sandbox = codex.SandboxModeDangerFullAccess
 	}
 	thread, err := client.StartThread(runCtx, codex.ThreadStartOptions{
 		Cwd:              spec.WorkDir,
