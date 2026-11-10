@@ -92,7 +92,7 @@ export function VerificationPage({ notify }: { notify: Notify }) {
           <span className="mono">smartpipe.yaml</span> 声明的验证命令，并查看历史验证记录。
           提交 <span className="mono">base_commit + unified diff</span> 后，verifier 会克隆干净副本、
           校验路径/大小/密钥，<span className="mono">git apply</span> 后执行验证命令。
-          该功能不再作为 Issue 修复的合并门禁：Issue 修复由 Codex 在 worker 内自测后提交；
+          补丁验证不再作为 Issue 修复的合并门禁：Issue 修复由 Codex 在 worker 内自测后提交；
           patch-verifier 仍保留在 worker 中，用于手动验证与发版构建。
         </div>
       </div>

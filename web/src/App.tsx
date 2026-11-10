@@ -39,7 +39,7 @@ const META: Record<PageKey, { crumb: string; title: string; sub: string }> = {
   models: { crumb: "配置中心 / 模型配置", title: "模型配置", sub: "管理模型供应商、模型目录与推理强度，支持从本机 Codex 配置导入。" },
   lanxin: { crumb: "配置中心 / 蓝信机器人", title: "蓝信机器人", sub: "管理多个机器人、自动同步所在群，并查看每个机器人的聊天消息与连接状态。" },
   scheduler: { crumb: "运行中心 / 调度器", title: "调度器", sub: "查看 worker 当前阶段、心跳和事件时间线，并暂停、恢复、重试或停止单个任务。" },
-  verify: { crumb: "配置中心 / 补丁验证", title: "补丁验证", sub: "手动验证：在干净副本上应用补丁并执行 smartpipe.yaml；不再作为 Issue 修复的合并门禁。" },
+  verify: { crumb: "配置中心 / 补丁验证", title: "补丁验证", sub: "手动验证：在干净副本上执行 smartpipe.yaml 声明的验证命令，并查看历史验证记录；不再作为 Issue 修复的合并门禁。" },
   release: { crumb: "配置中心 / 发版", title: "发版", sub: "从干净提交构建制品，生成带校验和与签名的 manifest。" },
   crash: { crumb: "配置中心 / 崩溃上报", title: "崩溃上报", sub: "客户端 crash_bundle 脱敏、指纹去重、限流与自动建单。" },
   audit: { crumb: "配置中心 / 审计日志", title: "审计日志", sub: "记录项目、凭据与流水线的管理操作，不保存明文秘密。" },
