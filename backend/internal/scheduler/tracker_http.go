@@ -81,6 +81,21 @@ func (t *HTTPTracker) do(ctx context.Context, method, path string, payload any, 
 	return nil
 }
 
+// SyncRepo 让 admin-api 用凭据把项目的本地 clone 拉到远端最新。
+// 调度器自己拿不到 GitHub 凭据，只能从这里拿到新鲜代码。
+func (t *HTTPTracker) SyncRepo(ctx context.Context, projectID string) error {
+	var out struct {
+		Head    string `json:"head"`
+		Branch  string `json:"branch"`
+		Updated bool   `json:"updated"`
+		Note    string `json:"note"`
+	}
+	if err := t.do(ctx, http.MethodPost, "/admin/repos/sync", map[string]string{"project_id": projectID}, &out); err != nil {
+		return err
+	}
+	return nil
+}
+
 // CreateIssue 建 Issue。
 func (t *HTTPTracker) CreateIssue(ctx context.Context, projectID, title, body string, labels []string) (Issue, error) {
 	var out struct {
