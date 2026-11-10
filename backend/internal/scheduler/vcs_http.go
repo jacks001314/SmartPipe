@@ -73,8 +73,9 @@ func (v *HTTPVCS) Push(ctx context.Context, p *Project, w *Worker) (string, erro
 	if err := v.do(ctx, "/admin/pushes", map[string]any{
 		"project_id": p.ID, "issue_ref": fmt.Sprintf("#%d", w.Issue),
 		"repo": w.Worktree, "branch": w.Branch,
-		// 还没有 PR 说明这条分支是失败尝试的残留，允许按 lease 覆盖。
-		"force_with_lease": w.PRNumber == 0,
+		// agent/* 分支由机器人独占；远端可能停在失败尝试的提交上，
+		// 统一按刚读到的 ref 做 lease 覆盖，避免历史分叉把推送卡死。
+		"force_with_lease": true,
 	}, &out); err != nil {
 		return "", err
 	}
