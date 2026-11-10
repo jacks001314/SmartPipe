@@ -78,3 +78,35 @@ func TestGitWorkspacePrepareDiffCleanup(t *testing.T) {
 		t.Fatalf("mirror count=%d", len(entries))
 	}
 }
+
+func TestGitWorkspaceFetchKeepsLocalAgentBranches(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, src, "init", "-q", "-b", "main")
+	runGitTest(t, src, "config", "user.email", "test@example.com")
+	runGitTest(t, src, "config", "user.name", "test")
+	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, src, "add", ".")
+	runGitTest(t, src, "commit", "-q", "-m", "init")
+
+	ws := NewGitWorkspace(filepath.Join(root, "wt"), filepath.Join(root, "mirrors"), "git")
+	p := &Project{ID: "prj", Name: "demo", Repo: "demo/repo", DefaultBase: "main", LocalPath: src}
+	if _, _, err := ws.Prepare(context.Background(), p, 1, false); err != nil {
+		t.Fatalf("prepare 1: %v", err)
+	}
+	mirror := filepath.Join(root, "mirrors", "prj.git")
+	if _, err := os.Stat(mirror); err != nil {
+		t.Fatal(err)
+	}
+	// 第二个 issue 会先跑一次 fetch；agent/issue-1 只存在于 mirror，
+	// upstream 里没有，prune 会把它删掉。
+	if _, _, err := ws.Prepare(context.Background(), p, 2, false); err != nil {
+		t.Fatalf("prepare 2: %v", err)
+	}
+	runGitTest(t, mirror, "rev-parse", "--verify", "refs/heads/agent/issue-1")
+}
