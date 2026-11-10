@@ -97,6 +97,9 @@ services:
       BOT_ADDR: http://app:8093
       INTERNAL_TOKEN: ${SMARTPIPE_BOT_INTERNAL_TOKEN}
       CODEX_PATH: /usr/local/bin/codex
+      # 容器内无法创建 user namespace，Codex 自带沙箱起不来；
+      # 隔离由本容器承担，模型进程内层关闭沙箱。
+      SCHEDULER_CODEX_SANDBOX: ${SCHEDULER_CODEX_SANDBOX:-danger-full-access}
       SMARTPIPE_CODEX_HOME: /data/codex-home
       HOME: /data/codex-home
       # patch-verifier 在 worker 里只承担发版构建和手动验证。

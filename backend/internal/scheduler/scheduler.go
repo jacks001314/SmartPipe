@@ -91,14 +91,17 @@ type VCS interface {
 
 // Config 是调度器运行参数。
 type Config struct {
-	MaxGlobal       int
-	MaxPerProject   int
-	TurnTimeout     time.Duration
-	PollInterval    time.Duration
-	MaxAttempts     int
-	Model           string
-	Effort          string
-	CodexPath       string
+	MaxGlobal     int
+	MaxPerProject int
+	TurnTimeout   time.Duration
+	PollInterval  time.Duration
+	MaxAttempts   int
+	Model         string
+	Effort        string
+	CodexPath     string
+	// CodexSandbox 是 Codex 内层沙箱模式；容器部署用 danger-full-access，
+	// 由容器本身承担隔离，宿主机部署可以留空走 workspace-write。
+	CodexSandbox    string
 	ChatHistorySize int
 	// ReconcileInterval 定期核对 Issue 是否已关闭（默认 5 分钟）。
 	ReconcileInterval time.Duration
@@ -419,7 +422,7 @@ func (s *Scheduler) runChat(ctx context.Context, p *Project, history []ChatMessa
 		Model:            firstNonEmpty(p.Model, s.cfg.Model),
 		Effort:           firstNonEmpty(p.Effort, s.cfg.Effort),
 		BaseInstructions: ChatSystemPrompt,
-		Sandbox:          "read-only",
+		Sandbox:          firstNonEmpty(s.cfg.CodexSandbox, "read-only"),
 		Timeout:          s.cfg.TurnTimeout,
 		KeepResponse:     true,
 	}
@@ -1066,6 +1069,7 @@ func (s *Scheduler) execute(ctx context.Context, w *Worker, trigger string) erro
 		Model:            w.Model,
 		Effort:           firstNonEmpty(p.Effort, s.cfg.Effort),
 		BaseInstructions: FixSystemPrompt,
+		Sandbox:          s.cfg.CodexSandbox,
 		Timeout:          s.cfg.TurnTimeout,
 		KeepResponse:     true,
 	})
