@@ -107,7 +107,11 @@ func (g *GitWorkspace) Prepare(ctx context.Context, p *Project, issue int, prese
 		if out, err := g.run(ctx, "", "clone", "--mirror", p.LocalPath, repo); err != nil {
 			return "", "", fmt.Errorf("scheduler: mirror %s: %w: %s", p.ID, err, out)
 		}
-	} else if out, err := g.run(ctx, repo, "fetch", "--prune", "--all"); err != nil {
+	} else if out, err := g.run(ctx, repo, "fetch", "--no-prune", "--all"); err != nil {
+		// 拉取失败不影响后续（基分支可能已经存在），但绝不能 prune：
+		// mirror 里的 agent/* 分支只存在于本机，且可能正被别的 worktree 使用。
+		// 一旦 prune 掉，那个 worktree 的 HEAD 会变成未出生分支，下一次提交
+		// 就成了孤儿根提交，PR 会因“没有共同祖先”被 GitHub 拒绝。
 		_ = out
 	}
 
