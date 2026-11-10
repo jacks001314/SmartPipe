@@ -1,11 +1,8 @@
 package adminapi
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -17,6 +14,7 @@ import (
 	"smartpipe/backend/internal/bridge"
 	"smartpipe/backend/internal/gate"
 	"smartpipe/backend/internal/github"
+	"smartpipe/backend/internal/patch"
 	"smartpipe/backend/internal/store"
 )
 
@@ -50,11 +48,6 @@ type commitResult struct {
 }
 
 func (a *API) createCommit(c iris.Context) {
-	if strings.TrimSpace(a.verifyURL) == "" {
-		c.StatusCode(http.StatusServiceUnavailable)
-		_ = c.JSON(envelope{Err: &apiError{Code: "verifier_not_configured", Message: "未配置 SMARTPIPE_VERIFY_URL，无法提交"}})
-		return
-	}
 	var in commitRequest
 	if err := decodeBody(c, &in); err != nil {
 		a.badRequest(c, "请求体不是合法 JSON")
@@ -96,17 +89,21 @@ func (a *API) createCommit(c iris.Context) {
 	if message == "" {
 		message = "fix: " + strings.TrimSpace(in.IssueRef)
 	}
-	payload := map[string]any{
-		"repo": in.Repo, "base_commit": in.BaseCommit, "branch": branch, "patch": in.Patch,
-		"message": message, "author_name": in.AuthorName, "author_email": in.AuthorEmail,
-		"target_branch": strings.TrimSpace(in.TargetBranch),
-	}
-	res := &commitResult{}
-	if err := a.callVerifier(c.Request().Context(), "/commit", payload, 10*time.Minute, res); err != nil {
+	merged, err := (&patch.Verifier{}).CommitAndMerge(c.Request().Context(), patch.MergeRequest{
+		Repo: in.Repo, BaseCommit: in.BaseCommit, Branch: branch, Patch: in.Patch,
+		Message: message, AuthorName: in.AuthorName, AuthorEmail: in.AuthorEmail,
+		TargetBranch: strings.TrimSpace(in.TargetBranch),
+	})
+	if err != nil {
 		a.audit(c.Request().Context(), c, "repo.commit", "issue", in.IssueRef, projectID, "error", map[string]any{"error": err.Error()})
 		c.StatusCode(http.StatusBadGateway)
 		_ = c.JSON(envelope{Err: &apiError{Code: "commit_failed", Message: err.Error()}})
 		return
+	}
+	res := &commitResult{
+		OK: merged.OK, Branch: merged.Branch, Commit: merged.Commit,
+		TargetBranch: merged.TargetBranch, TargetHead: merged.TargetHead,
+		Message: merged.Message, Error: merged.Error,
 	}
 	status := "ok"
 	if !res.OK {
@@ -147,11 +144,6 @@ type pushResult struct {
 }
 
 func (a *API) createPush(c iris.Context) {
-	if strings.TrimSpace(a.verifyURL) == "" {
-		c.StatusCode(http.StatusServiceUnavailable)
-		_ = c.JSON(envelope{Err: &apiError{Code: "verifier_not_configured", Message: "未配置 SMARTPIPE_VERIFY_URL，无法推送"}})
-		return
-	}
 	var in pushRequest
 	if err := decodeBody(c, &in); err != nil {
 		a.badRequest(c, "请求体不是合法 JSON")
@@ -173,6 +165,17 @@ func (a *API) createPush(c iris.Context) {
 		v := p.ID
 		projectID = &v
 	}
+	// 复杂 Issue 未批准时不允许把分支推到远端。
+	if strings.TrimSpace(in.IssueRef) != "" {
+		state, gerr := gate.Check(c.Request().Context(), a.store, project, in.IssueRef)
+		if gerr == nil && !state.OK {
+			a.audit(c.Request().Context(), c, "repo.push", "issue", in.IssueRef, projectID, "blocked",
+				map[string]any{"reason": state.Reason, "version": state.Version})
+			c.StatusCode(http.StatusForbidden)
+			_ = c.JSON(envelope{Err: &apiError{Code: "approval_required", Message: state.Reason}})
+			return
+		}
+	}
 	// 远端地址与凭据只由服务端解析：Agent 传什么都会被忽略。
 	remoteURL, err := a.resolvePushRemote(c.Request().Context(), project, in.Repo)
 	if err != nil {
@@ -180,14 +183,17 @@ func (a *API) createPush(c iris.Context) {
 		_ = c.JSON(envelope{Err: &apiError{Code: "git_credential_unavailable", Message: err.Error()}})
 		return
 	}
-	payload := map[string]any{"repo": in.Repo, "branch": in.Branch, "remote": in.Remote, "remote_url": remoteURL}
-	res := &pushResult{}
-	if err := a.callVerifier(c.Request().Context(), "/push", payload, 10*time.Minute, res); err != nil {
+	pushed, err := (&patch.Verifier{}).Push(c.Request().Context(), patch.PushRequest{
+		Repo: in.Repo, Branch: in.Branch, Remote: in.Remote, RemoteURL: remoteURL,
+	})
+	if err != nil {
 		a.audit(c.Request().Context(), c, "repo.push", "issue", in.IssueRef, projectID, "error", map[string]any{"error": err.Error()})
 		c.StatusCode(http.StatusBadGateway)
 		_ = c.JSON(envelope{Err: &apiError{Code: "push_failed", Message: err.Error()}})
 		return
 	}
+	res := &pushResult{OK: pushed.OK, Branch: pushed.Branch, Remote: pushed.Remote,
+		Before: pushed.Before, After: pushed.After, Commit: pushed.Commit, Error: pushed.Error}
 	status := "ok"
 	if !res.OK {
 		status = "rejected"
@@ -215,34 +221,6 @@ func (a *API) listRepoOps(c iris.Context) {
 		return
 	}
 	_ = c.JSON(envelope{Data: items})
-}
-
-// callVerifier 调用 patch-verifier 并将结果解到 out。
-func (a *API) callVerifier(ctx context.Context, path string, payload any, timeout time.Duration, out any) error {
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(a.verifyURL, "/")+path, bytes.NewReader(raw))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if a.verifyToken != "" {
-		req.Header.Set("X-Verify-Token", a.verifyToken)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if resp.StatusCode >= 500 {
-		return fmt.Errorf("verifier HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	return json.Unmarshal(body, out)
 }
 
 // resolvePushRemote 用项目配置的仓库地址 + 服务端凭据拼出带 token 的远端，token 不出进程。

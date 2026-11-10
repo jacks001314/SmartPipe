@@ -1,7 +1,12 @@
-# SmartPipe 容器部署：五个服务共用 Dockerfile 产出的同一个镜像。
+# SmartPipe 两容器部署：同一个镜像，两个运行角色，共用一个 /data 卷。
+#
+#   app     admin-api + bot + bridge   （控制台、蓝信、GitHub Webhook）
+#   worker  scheduler + Codex + 构建工具链，另带 patch-verifier（只用于发版构建）
+#
+# 数据库沿用已有的 postgres 容器（默认 172.17.0.1:5432），不在这里管理。
 #
 # 首次部署：
-#   cp deploy/.env.example deploy/.env   # 填写数据库、蓝信和随机令牌
+#   cp deploy/.env.example deploy/.env
 #   chmod 600 deploy/.env
 #   sudo ./scripts/install.sh --mode docker
 #
@@ -9,7 +14,7 @@
 #   sudo ./scripts/deploy.sh
 name: smartpipe
 
-x-service: &service
+x-runtime: &runtime
   build:
     context: ..
     dockerfile: Dockerfile
@@ -22,6 +27,8 @@ x-service: &service
   env_file:
     - .env
   init: true
+  # 两个容器用同一 uid 写同一个数据卷，commit/push 不需要任何路径映射。
+  user: "10001:10001"
   dns:
     - ${SMARTPIPE_DNS_PRIMARY:-192.168.1.1}
     - ${SMARTPIPE_DNS_SECONDARY:-223.5.5.5}
@@ -37,41 +44,39 @@ x-service: &service
     options:
       max-size: "20m"
       max-file: "3"
+  volumes:
+    - ./data:/data
 
 services:
-  admin-api:
-    <<: *service
-    command: ["admin-api"]
-    # 提交/推送在宿主机创建的 worktree 上执行：沿用宿主机用户名下的文件，
-    # 因此以 root 运行并显式放开 git 的属主检查。
-    user: "0:0"
+  app:
+    <<: *runtime
+    command: ["supervise", "admin-api", "bot", "bridge"]
     environment:
-      GIT_CONFIG_COUNT: "1"
-      GIT_CONFIG_KEY_0: "safe.directory"
-      GIT_CONFIG_VALUE_0: "*"
       SMARTPIPE_ADMIN_ADDR: ":8092"
       SMARTPIPE_WEB_DIST: /app/web
-      # 服务端自动读取 Codex 配置的位置；宿主目录用 SMARTPIPE_CODEX_HOME 覆盖。
-      SMARTPIPE_CODEX_CONFIG: /config/codex/config.toml
-      SMARTPIPE_VERIFY_URL: http://patch-verifier:8095
-      SMARTPIPE_RELEASE_URL: http://patch-verifier:8095
-      SMARTPIPE_BOT_ADDR: http://bot:8093
-      SMARTPIPE_SCHEDULER_URL: http://scheduler:8098
-      SMARTPIPE_SCHEDULER_TOKEN: ${SCHEDULER_TOKEN}
+      # 服务端读取 Codex 配置的位置（与 worker 共用同一个 codex-home）。
+      SMARTPIPE_CODEX_CONFIG: /data/codex-home/config.toml
       # 仓库 clone 根目录；项目创建时选择这里克隆出来的本地库。
       SMARTPIPE_CLONE_ROOT: /data/repos
-      # 仅用于在 GitHub 配置页展示 token 是否已配置；真实隧道用的是 bridge 那一份。
-      SMARTPIPE_FRP_TOKEN: ${SMARTPIPE_FRP_TOKEN:-}
+      # 三个进程在同一个容器内，互相走回环地址。
+      SMARTPIPE_ADMIN_URL: http://127.0.0.1:8092
+      SMARTPIPE_BOT_ADDR: http://127.0.0.1:8093
+      SMARTPIPE_BRIDGE_ADDR: ":8090"
+      BOT_HTTP_ADDR: ":8093"
+      BRIDGE_URL: http://127.0.0.1:8090
+      CRASH_INGEST_URL: http://127.0.0.1:8090/ingest/crash
+      SMARTPIPE_SCHEDULER_URL: http://worker:8098
+      SMARTPIPE_SCHEDULER_TOKEN: ${SCHEDULER_TOKEN}
+      SCHEDULER_URL: http://worker:8098
+      SCHEDULER_TOKEN: ${SCHEDULER_TOKEN}
+      # 手动验证与发版构建仍由 worker 里的 patch-verifier 承担；
+      # Issue 修复链路不再调用它。
+      SMARTPIPE_VERIFY_URL: http://worker:8095
+      SMARTPIPE_RELEASE_URL: http://worker:8095
     ports:
+      - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_BRIDGE_PORT:-8090}:8090"
       - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_ADMIN_PORT:-8092}:8092"
-    volumes:
-      # 与宿主机同路径，调度器传来的 worktree 绝对路径在容器内可用。
-      - ./data:/opt/smartpipe-v05/deploy/data
-      - ./data/repos:/data/repos
-      - ${SMARTPIPE_CODEX_HOME:-/home/jacks/.codex}:/config/codex:ro
-    depends_on:
-      patch-verifier:
-        condition: service_healthy
+      - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_BOT_PORT:-8093}:8093"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8092/healthz"]
       interval: 15s
@@ -79,109 +84,27 @@ services:
       retries: 12
       start_period: 15s
 
-  bridge:
-    <<: *service
-    command: ["bridge"]
+  worker:
+    <<: *runtime
+    command: ["supervise", "scheduler", "patch-verifier"]
     environment:
-      SMARTPIPE_BRIDGE_ADDR: ":8090"
-      SMARTPIPE_ADMIN_URL: http://admin-api:8092
-      SMARTPIPE_BOT_ADDR: http://bot:8093
-      SMARTPIPE_SCHEDULER_URL: http://host.docker.internal:8098
+      SCHEDULER_HTTP_ADDR: ":8098"
       SCHEDULER_TOKEN: ${SCHEDULER_TOKEN}
-      # 内嵌 frpc：填了 SMARTPIPE_FRP_SERVER 就由 bridge 自己连 frps，
-      # 把 8090 暴露成公网 Webhook 入口，不需要额外进程或配置文件。
-      SMARTPIPE_FRP_SERVER: ${SMARTPIPE_FRP_SERVER:-}
-      SMARTPIPE_FRP_SERVER_PORT: ${SMARTPIPE_FRP_SERVER_PORT:-7000}
-      SMARTPIPE_FRP_TOKEN: ${SMARTPIPE_FRP_TOKEN:-}
-      SMARTPIPE_FRP_REMOTE_PORT: ${SMARTPIPE_FRP_REMOTE_PORT:-18090}
-      SMARTPIPE_FRP_PROXY_NAME: ${SMARTPIPE_FRP_PROXY_NAME:-smartpipe-webhook}
-    ports:
-      - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_BRIDGE_PORT:-8090}:8090"
-    depends_on:
-      admin-api:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/healthz"]
-      interval: 15s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-
-  patch-verifier:
-    <<: *service
-    command: ["patch-verifier"]
-    environment:
+      SCHEDULER_WORKSPACE_ROOT: /data/workspaces
+      SCHEDULER_REPO_CACHE: /data/scheduler-repos
+      SCHEDULER_OUTPUT_DIR: /data/scheduler-outputs
+      SMARTPIPE_ADMIN_URL: http://app:8092
+      BOT_ADDR: http://app:8093
+      INTERNAL_TOKEN: ${SMARTPIPE_BOT_INTERNAL_TOKEN}
+      CODEX_PATH: /usr/local/bin/codex
+      SMARTPIPE_CODEX_HOME: /data/codex-home
+      HOME: /data/codex-home
+      # patch-verifier 在 worker 里只承担发版构建和手动验证。
       SMARTPIPE_VERIFY_ADDR: ":8095"
       SMARTPIPE_VERIFY_WORK_ROOT: /data/verify/work
       SMARTPIPE_WORKSPACE_ROOT: /data/verify/workspaces
       SMARTPIPE_RELEASE_WORK_ROOT: /data/verify/releases
       SMARTPIPE_RELEASE_OUTPUT_ROOT: /data/releases
-    ports:
-      - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_VERIFY_PORT:-8095}:8095"
-    volumes:
-      # 验证器按项目里记录的 /data/repos/... 路径 clone 源仓库，必须能看到同一份数据。
-      - ./data/repos:/data/repos
-      - ./data/verify:/data/verify
-      - ./data/releases:/data/releases
-      - ./data/go:/data/go
-      - ./data/go-cache:/data/go-cache
-      - ./data/npm:/data/npm
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8095/healthz"]
-      interval: 15s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-
-  bot:
-    <<: *service
-    command: ["bot"]
-    environment:
-      BOT_HTTP_ADDR: ":8093"
-      BRIDGE_URL: http://bridge:8090
-      SCHEDULER_URL: http://host.docker.internal:8098
-      SCHEDULER_TOKEN: ${SCHEDULER_TOKEN}
-      CRASH_INGEST_URL: http://bridge:8090/ingest/crash
-      SMARTPIPE_ADMIN_URL: http://admin-api:8092
-    ports:
-      - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_BOT_PORT:-8093}:8093"
-    depends_on:
-      admin-api:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8093/healthz"]
-      interval: 15s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-
-  # 需要镜像内自带 codex CLI 时才启用：docker compose --profile with-scheduler up -d
-  scheduler:
-    profiles: ["with-scheduler"]
-    <<: *service
-    command: ["scheduler"]
-    environment:
-      SCHEDULER_HTTP_ADDR: ":8098"
-      SCHEDULER_TOKEN: ${SCHEDULER_TOKEN}
-      SCHEDULER_WORKSPACE_ROOT: /data/workspaces
-      SCHEDULER_OUTPUT_DIR: /data/scheduler-outputs
-      SCHEDULER_MAX_GLOBAL: ${SCHEDULER_MAX_GLOBAL:-3}
-      SCHEDULER_MAX_PER_PROJECT: ${SCHEDULER_MAX_PER_PROJECT:-2}
-      SCHEDULER_VERIFY_ATTEMPTS: ${SCHEDULER_VERIFY_ATTEMPTS:-2}
-      SCHEDULER_TURN_TIMEOUT_MIN: ${SCHEDULER_TURN_TIMEOUT_MIN:-30}
-      SMARTPIPE_ADMIN_URL: http://admin-api:8092
-      BOT_ADDR: http://bot:8093
-      INTERNAL_TOKEN: ${SMARTPIPE_BOT_INTERNAL_TOKEN}
-    ports:
-      - "${SMARTPIPE_BIND_ADDR:-0.0.0.0}:${SMARTPIPE_SCHEDULER_PORT:-8098}:8098"
-    volumes:
-      - ./data/repos:/data/repos
-      - ./data/workspaces:/data/workspaces
-      - ./data/scheduler-outputs:/data/scheduler-outputs
-      - ${SMARTPIPE_CODEX_HOME:-/home/jacks/.codex}:/config/codex:ro
-    depends_on:
-      admin-api:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8098/healthz"]
       interval: 15s

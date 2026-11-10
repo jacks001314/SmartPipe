@@ -217,42 +217,27 @@ func (f *fakeWorkspace) issueSeen() int {
 	return f.lastIssue
 }
 
-type fakeVerifier struct {
-	mu      sync.Mutex
-	results []bool
-	reports []string
-	calls   int
-}
-
-func (f *fakeVerifier) Verify(ctx context.Context, p *Project, workdir, patch string) (bool, string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.calls++
-	if len(f.reports) > 0 {
-		report := f.reports[0]
-		f.reports = f.reports[1:]
-		return false, report, nil
-	}
-	if len(f.results) == 0 {
-		return true, `{"ok":true}`, nil
-	}
-	ok := f.results[0]
-	f.results = f.results[1:]
-	if ok {
-		return true, `{"ok":true}`, nil
-	}
-	return false, `{"ok":false,"error":"build failed"}`, nil
-}
-
-type fakeVCS struct {
+type fakeCommitter struct {
 	mu      sync.Mutex
 	commits int
 }
 
-func (f *fakeVCS) CommitPush(ctx context.Context, p *Project, w *Worker, message, patch string) (string, error) {
+func (f *fakeCommitter) Commit(ctx context.Context, dir, message string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.commits++
+	return "abcdef1234567890", nil
+}
+
+type fakeVCS struct {
+	mu     sync.Mutex
+	pushes int
+}
+
+func (f *fakeVCS) Push(ctx context.Context, p *Project, w *Worker) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pushes++
 	return "abcdef1234567890", nil
 }
 
@@ -273,26 +258,26 @@ func (r fixedResolver) ByID(ctx context.Context, projectID string) (*Project, er
 }
 
 type harness struct {
-	s        *Scheduler
-	repo     *MemoryRepo
-	runner   *fakeRunner
-	tracker  *fakeTracker
-	notifier *fakeNotifier
-	ws       *fakeWorkspace
-	verifier *fakeVerifier
-	vcs      *fakeVCS
+	s         *Scheduler
+	repo      *MemoryRepo
+	runner    *fakeRunner
+	tracker   *fakeTracker
+	notifier  *fakeNotifier
+	ws        *fakeWorkspace
+	committer *fakeCommitter
+	vcs       *fakeVCS
 }
 
 func newHarness(t *testing.T, cfg Config) *harness {
 	t.Helper()
 	h := &harness{
-		repo:     NewMemoryRepo(),
-		runner:   &fakeRunner{},
-		tracker:  newFakeTracker(),
-		notifier: &fakeNotifier{},
-		ws:       &fakeWorkspace{},
-		verifier: &fakeVerifier{},
-		vcs:      &fakeVCS{},
+		repo:      NewMemoryRepo(),
+		runner:    &fakeRunner{},
+		tracker:   newFakeTracker(),
+		notifier:  &fakeNotifier{},
+		ws:        &fakeWorkspace{},
+		committer: &fakeCommitter{},
+		vcs:       &fakeVCS{},
 	}
 	project := &Project{ID: "prj-1", Name: "core", Repo: "acme/core", DefaultBase: "main", LocalPath: "/tmp/repo"}
 	s, err := New(cfg, Deps{
@@ -300,7 +285,7 @@ func newHarness(t *testing.T, cfg Config) *harness {
 			return "diff --git a/x b/x\n+fix", nil
 		}),
 		Tracker: h.tracker, Notifier: h.notifier, Resolver: fixedResolver{project: project},
-		Workspace: h.ws, Verifier: h.verifier, VCS: h.vcs,
+		Workspace: h.ws, Committer: h.committer, VCS: h.vcs,
 	})
 	if err != nil {
 		t.Fatalf("new: %v", err)
@@ -364,8 +349,8 @@ func TestChatCreatesIssueAndFixWorkerProducesPR(t *testing.T) {
 	if w.State != StateAwaitingReview {
 		t.Fatalf("want awaiting_review, got %s (%s)", w.State, w.LastError)
 	}
-	if h.tracker.prCount() != 1 || h.vcs.commits != 1 {
-		t.Fatalf("pr=%d commits=%d", h.tracker.prCount(), h.vcs.commits)
+	if h.tracker.prCount() != 1 || h.vcs.pushes != 1 {
+		t.Fatalf("pr=%d pushes=%d", h.tracker.prCount(), h.vcs.pushes)
 	}
 	if h.runner.last().BaseInstructions != FixSystemPrompt {
 		t.Fatal("fix worker must use FixSystemPrompt")
@@ -419,69 +404,6 @@ func TestDuplicateIssueReusesExisting(t *testing.T) {
 	}
 	if !strings.Contains(h.notifier.all()[0], "Issue #7") {
 		t.Fatalf("reply: %#v", h.notifier.all())
-	}
-}
-
-func TestVerificationRetryThenSuccess(t *testing.T) {
-	h := newHarness(t, Config{VerifyAttempts: 2})
-	h.verifier.results = []bool{false, true}
-	w := &Worker{ProjectID: "prj-1", Issue: 3, State: StateQueued, ChatID: "group-1"}
-	if _, err := h.repo.CreateWorker(context.Background(), w); err != nil {
-		t.Fatal(err)
-	}
-	h.runner.fixReply = "第二次修好了。"
-	if err := h.s.DispatchOnce(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	h.s.Wait()
-	w, _ = h.repo.GetWorker(context.Background(), w.ID)
-	if w.State != StateAwaitingReview {
-		t.Fatalf("want awaiting_review, got %s", w.State)
-	}
-	if h.runner.count("fix") != 2 {
-		t.Fatalf("want 2 fix runs, got %d", h.runner.count("fix"))
-	}
-	if h.verifier.calls != 2 {
-		t.Fatalf("want 2 verify calls, got %d", h.verifier.calls)
-	}
-}
-
-func TestEnvironmentVerificationErrorBlocksWithoutRetry(t *testing.T) {
-	h := newHarness(t, Config{VerifyAttempts: 2})
-	h.verifier.reports = []string{`{"ok":false,"environment_error":true,"error":"clone failed: repository '/data/repos/x' does not exist"}`}
-	w := &Worker{ProjectID: "prj-1", Issue: 5, State: StateQueued, ChatID: "group-1"}
-	_, _ = h.repo.CreateWorker(context.Background(), w)
-	if err := h.s.DispatchOnce(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	h.s.Wait()
-	w, _ = h.repo.GetWorker(context.Background(), w.ID)
-	if w.State != StateBlocked {
-		t.Fatalf("want blocked, got %s", w.State)
-	}
-	if h.runner.count("fix") != 1 {
-		t.Fatalf("environment error must not re-run codex, fix runs = %d", h.runner.count("fix"))
-	}
-	if h.verifier.calls != 1 {
-		t.Fatalf("want 1 verify call, got %d", h.verifier.calls)
-	}
-}
-
-func TestVerificationFailuresBlock(t *testing.T) {
-	h := newHarness(t, Config{VerifyAttempts: 2})
-	h.verifier.results = []bool{false, false}
-	w := &Worker{ProjectID: "prj-1", Issue: 4, State: StateQueued, ChatID: "group-1"}
-	_, _ = h.repo.CreateWorker(context.Background(), w)
-	if err := h.s.DispatchOnce(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	h.s.Wait()
-	w, _ = h.repo.GetWorker(context.Background(), w.ID)
-	if w.State != StateBlocked {
-		t.Fatalf("want blocked, got %s", w.State)
-	}
-	if h.tracker.prCount() != 0 || h.vcs.commits != 0 {
-		t.Fatal("must not push when verification fails")
 	}
 }
 
@@ -804,7 +726,7 @@ func TestPauseWorkerCancelsActiveTurn(t *testing.T) {
 	if fresh.State != StatePaused {
 		t.Fatalf("pause must survive turn cancellation, got %s (%s)", fresh.State, fresh.LastError)
 	}
-	if h.tracker.prCount() != 0 || h.vcs.commits != 0 {
+	if h.tracker.prCount() != 0 || h.vcs.pushes != 0 {
 		t.Fatal("paused worker must not push or create a PR")
 	}
 }
@@ -842,7 +764,7 @@ func TestStopWorkerCancelsAndCloses(t *testing.T) {
 	if fresh.State != StateClosed {
 		t.Fatalf("stop must stay closed, got %s", fresh.State)
 	}
-	if h.tracker.prCount() != 0 || h.vcs.commits != 0 {
+	if h.tracker.prCount() != 0 || h.vcs.pushes != 0 {
 		t.Fatal("stopped worker must not push or create a PR")
 	}
 }
