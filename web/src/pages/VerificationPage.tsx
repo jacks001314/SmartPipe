@@ -88,9 +88,11 @@ export function VerificationPage({ notify }: { notify: Notify }) {
       <div className="notice">
         <span>i</span>
         <div>
-          <strong>没有 GitHub Actions 时的合并门禁：</strong>执行器回传 <span className="mono">base_commit + unified diff</span>，
+          <strong>手动补丁验证：</strong>在此提交 <span className="mono">base_commit + unified diff</span>，
           verifier 克隆干净副本、校验路径/大小/密钥、<span className="mono">git apply</span> 后执行仓库
-          <span className="mono"> smartpipe.yaml </span>声明的命令。只有全部通过才允许提交。
+          <span className="mono"> smartpipe.yaml </span>声明的验证命令，并保存历史验证记录。
+          本页仅用于手动验证和查看历史记录；patch-verifier 仍保留在 worker 中，负责手动验证与发版构建，
+          不再作为 Issue 修复的合并门禁——Issue 修复由 Codex 在 worker 内自测后提交。
         </div>
       </div>
 
@@ -103,12 +105,12 @@ export function VerificationPage({ notify }: { notify: Notify }) {
         <div className="stat">
           <div className="stat-label">通过</div>
           <div className="stat-value">{passed}</div>
-          <div className="stat-foot">可进入合并</div>
+          <div className="stat-foot">命令全部通过</div>
         </div>
         <div className="stat">
           <div className="stat-label">未通过</div>
           <div className="stat-value">{records.length - passed}</div>
-          <div className="stat-foot">退回 dev 修复</div>
+          <div className="stat-foot">命令未全部通过</div>
         </div>
         <div className="stat">
           <div className="stat-label">最近耗时</div>
@@ -180,7 +182,7 @@ export function VerificationPage({ notify }: { notify: Notify }) {
           ) : records.length === 0 ? (
             <div className="empty">
               <h3>还没有验证记录</h3>
-              <div className="tiny">提交一个补丁，verifier 会在临时目录克隆仓库并执行 smartpipe.yaml。</div>
+              <div className="tiny">提交一个补丁，verifier 会在临时目录克隆仓库、应用补丁并执行 smartpipe.yaml 声明的验证命令。</div>
             </div>
           ) : (
             <table className="table">
@@ -227,8 +229,8 @@ export function VerificationPage({ notify }: { notify: Notify }) {
       <div className="card">
         <div className="card-head">
           <div>
-            <div className="card-title">提交与合并</div>
-            <div className="card-sub">通过 repo.commit / repo.push 落地；远端地址与 Git 凭据由服务端注入</div>
+            <div className="card-title">提交与推送记录</div>
+            <div className="card-sub">仅展示 repo.commit / repo.push 历史；手动验证不会自动提交或合并，远端地址与 Git 凭据由服务端注入</div>
           </div>
           <button className="btn" onClick={() => void load()}>刷新</button>
         </div>
@@ -294,7 +296,7 @@ export function VerificationPage({ notify }: { notify: Notify }) {
             )}
           </div>
           <div className="modal-foot">
-            <div className="tiny">证据保存在 patch_verifications 表，补丁指纹用于合并前复核。</div>
+            <div className="tiny">证据保存在 patch_verifications 表，补丁指纹用于核对本次验证的补丁内容是否一致。</div>
             <button className="btn" onClick={() => setDetail(null)}>关闭</button>
           </div>
         </div>
