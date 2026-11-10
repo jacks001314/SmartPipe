@@ -9,6 +9,7 @@ import (
 
 	"github.com/kataras/iris/v12"
 
+	"smartpipe/backend/internal/bridge"
 	"smartpipe/backend/internal/github"
 	"smartpipe/backend/internal/store"
 )
@@ -81,6 +82,8 @@ func (a *API) saveGitHubPAT(c iris.Context) {
 		a.fail(c, err)
 		return
 	}
+	// 令牌刚变过，之前缓存的仓库可见性判断不再可信。
+	bridge.ResetCredentialCache()
 	a.audit(ctx, c, "github.pat.save", "credential", cred.ID, nil, "ok", map[string]any{"login": login, "private": privateCount})
 	view := githubPATView{
 		Configured: true, Login: login, Scope: scope,
@@ -108,6 +111,7 @@ func (a *API) deleteGitHubPAT(c iris.Context) {
 		c.StatusCode(http.StatusNoContent)
 		return
 	}
+	bridge.ResetCredentialCache()
 	_ = c.JSON(envelope{Data: iris.Map{"deleted": deleted}})
 }
 

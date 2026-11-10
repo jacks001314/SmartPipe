@@ -331,7 +331,7 @@ func (a *API) commentIssueQuiet(ctx context.Context, projectID, issueRef, body s
 	if repo == "" {
 		return
 	}
-	client, err := bridge.ClientFromCredentials(ctx, a.store, &project.ID)
+	client, err := bridge.ClientForRepo(ctx, a.store, &project.ID, repo)
 	if err != nil {
 		return
 	}

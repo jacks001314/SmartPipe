@@ -115,7 +115,7 @@ func (a *API) executeReleaseRun(ctx context.Context, project *store.Project, in 
 			}
 		}
 	}
-	client, err := bridge.ClientFromCredentials(ctx, a.store, &project.ID)
+	client, err := bridge.ClientForRepo(ctx, a.store, &project.ID, repo)
 	if err != nil {
 		return nil, nil, err
 	}

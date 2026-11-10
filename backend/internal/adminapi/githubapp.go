@@ -15,6 +15,7 @@ import (
 
 	"github.com/kataras/iris/v12"
 
+	"smartpipe/backend/internal/bridge"
 	"smartpipe/backend/internal/store"
 )
 
@@ -308,6 +309,7 @@ func exchangeGitHubAppManifest(ctx context.Context, code string) (*manifestConve
 }
 
 func (a *API) upsertManagedGitHubApp(ctx context.Context, pemValue string, meta map[string]any) (*store.Credential, error) {
+	defer bridge.ResetCredentialCache()
 	items, err := a.store.ListCredentials(ctx, nil)
 	if err != nil {
 		return nil, err

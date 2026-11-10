@@ -60,7 +60,7 @@ func (a *API) getIssue(c iris.Context) {
 	if !ok {
 		return
 	}
-	client, err := bridge.ClientFromCredentials(c.Request().Context(), a.store, &project.ID)
+	client, err := bridge.ClientForRepo(c.Request().Context(), a.store, &project.ID, repo)
 	if err != nil {
 		c.StatusCode(http.StatusServiceUnavailable)
 		_ = c.JSON(envelope{Err: &apiError{Code: "github_unavailable", Message: err.Error()}})
@@ -92,7 +92,7 @@ func (a *API) commentIssue(c iris.Context) {
 		a.badRequest(c, "body 必填")
 		return
 	}
-	client, err := bridge.ClientFromCredentials(c.Request().Context(), a.store, &project.ID)
+	client, err := bridge.ClientForRepo(c.Request().Context(), a.store, &project.ID, repo)
 	if err != nil {
 		c.StatusCode(http.StatusServiceUnavailable)
 		_ = c.JSON(envelope{Err: &apiError{Code: "github_unavailable", Message: err.Error()}})
@@ -124,7 +124,7 @@ func (a *API) addIssueLabels(c iris.Context) {
 		a.badRequest(c, "labels 必填")
 		return
 	}
-	client, err := bridge.ClientFromCredentials(c.Request().Context(), a.store, &project.ID)
+	client, err := bridge.ClientForRepo(c.Request().Context(), a.store, &project.ID, repo)
 	if err != nil {
 		c.StatusCode(http.StatusServiceUnavailable)
 		_ = c.JSON(envelope{Err: &apiError{Code: "github_unavailable", Message: err.Error()}})
@@ -204,7 +204,7 @@ func (a *API) createIssue(c iris.Context) {
 		a.badRequest(c, "项目未配置 GitHub 仓库")
 		return
 	}
-	client, err := bridge.ClientFromCredentials(c.Request().Context(), a.store, &project.ID)
+	client, err := bridge.ClientForRepo(c.Request().Context(), a.store, &project.ID, repo)
 	if err != nil {
 		c.StatusCode(http.StatusServiceUnavailable)
 		_ = c.JSON(envelope{Err: &apiError{Code: "github_unavailable", Message: err.Error()}})
@@ -236,7 +236,7 @@ func (a *API) searchIssues(c iris.Context) {
 		return
 	}
 	repo := projectRepo(project)
-	client, err := bridge.ClientFromCredentials(c.Request().Context(), a.store, &project.ID)
+	client, err := bridge.ClientForRepo(c.Request().Context(), a.store, &project.ID, repo)
 	if err != nil {
 		c.StatusCode(http.StatusServiceUnavailable)
 		_ = c.JSON(envelope{Err: &apiError{Code: "github_unavailable", Message: err.Error()}})
@@ -260,7 +260,7 @@ func (a *API) listIssueComments(c iris.Context) {
 	if !ok {
 		return
 	}
-	client, err := bridge.ClientFromCredentials(c.Request().Context(), a.store, &project.ID)
+	client, err := bridge.ClientForRepo(c.Request().Context(), a.store, &project.ID, repo)
 	if err != nil {
 		c.StatusCode(http.StatusServiceUnavailable)
 		_ = c.JSON(envelope{Err: &apiError{Code: "github_unavailable", Message: err.Error()}})
@@ -305,7 +305,7 @@ func (a *API) createIssuePull(c iris.Context) {
 	if base == "" {
 		base = firstNonEmpty(project.GitHubDefaultBranch, "main")
 	}
-	client, err := bridge.ClientFromCredentials(c.Request().Context(), a.store, &project.ID)
+	client, err := bridge.ClientForRepo(c.Request().Context(), a.store, &project.ID, repo)
 	if err != nil {
 		c.StatusCode(http.StatusServiceUnavailable)
 		_ = c.JSON(envelope{Err: &apiError{Code: "github_unavailable", Message: err.Error()}})

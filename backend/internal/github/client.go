@@ -263,6 +263,17 @@ func (c *Client) GetIssue(ctx context.Context, repo string, number int) (*Issue,
 	return toIssue(issue), nil
 }
 
+// CanAccessRepo 用一次 GET /repos/{owner}/{name} 确认当前凭据能访问仓库。
+// GitHub App 未安装到仓库所属账号时返回 404，调用方据此回退到其它凭据。
+func (c *Client) CanAccessRepo(ctx context.Context, repo string) error {
+	owner, name, err := SplitRepo(repo)
+	if err != nil {
+		return err
+	}
+	_, _, err = c.gh.Repositories.Get(ctx, owner, name)
+	return wrapErr(err)
+}
+
 // SplitRepo 把 "owner/repo" 拆开，也接受完整 URL。
 func SplitRepo(repo string) (string, string, error) {
 	trimmed := strings.TrimSpace(repo)
