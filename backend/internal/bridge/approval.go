@@ -201,13 +201,14 @@ func (s *ApprovalService) clientForRepo(ctx context.Context, repo string) (*gith
 	if project == nil {
 		return nil, nil, fmt.Errorf("bridge: no project configured for %s", repo)
 	}
-	clientFor := s.ClientFor
-	if clientFor == nil {
-		clientFor = func(ctx context.Context, projectID *string) (*github.Client, error) {
-			return ClientFromCredentials(ctx, s.Store, projectID)
+	if s.ClientFor == nil {
+		client, err := ClientForRepo(ctx, s.Store, &project.ID, repo)
+		if err != nil {
+			return nil, project, err
 		}
+		return client, project, nil
 	}
-	client, err := clientFor(ctx, &project.ID)
+	client, err := s.ClientFor(ctx, &project.ID)
 	if err != nil {
 		return nil, project, err
 	}

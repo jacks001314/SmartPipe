@@ -117,7 +117,7 @@ func (a *API) listReleaseCandidates(c iris.Context) {
 		return
 	}
 	ready, _ := a.releaseLabels(project, c.URLParam("label"))
-	client, err := bridge.ClientFromCredentials(c.Request().Context(), a.store, &project.ID)
+	client, err := bridge.ClientForRepo(c.Request().Context(), a.store, &project.ID, repo)
 	if err != nil {
 		c.StatusCode(http.StatusServiceUnavailable)
 		_ = c.JSON(envelope{Err: &apiError{Code: "github_unavailable", Message: err.Error()}})
@@ -214,7 +214,7 @@ func (a *API) rollbackReleaseRun(c iris.Context) {
 	if repo == "" {
 		repo = strings.TrimSpace(project.GitHubIssueRepo)
 	}
-	client, err := bridge.ClientFromCredentials(ctx, a.store, &project.ID)
+	client, err := bridge.ClientForRepo(ctx, a.store, &project.ID, repo)
 	if err != nil {
 		c.StatusCode(http.StatusServiceUnavailable)
 		_ = c.JSON(envelope{Err: &apiError{Code: "github_unavailable", Message: err.Error()}})

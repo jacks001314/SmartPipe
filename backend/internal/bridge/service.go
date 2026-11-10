@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
 
 	"smartpipe/backend/internal/github"
 	"smartpipe/backend/internal/store"
@@ -35,15 +37,15 @@ var ErrInvalidMessage = errors.New("bridge: invalid message")
 // Service 编排去重与建单。
 type Service struct {
 	store     *store.Store
-	clientFor func(ctx context.Context, projectID *string) (*github.Client, error)
+	clientFor func(ctx context.Context, projectID *string, repo string) (*github.Client, error)
 	notifier  Notifier
 }
 
 // NewService 构造桥接服务；clientFor 为 nil 时使用凭据库解析。
-func NewService(st *store.Store, clientFor func(context.Context, *string) (*github.Client, error)) *Service {
+func NewService(st *store.Store, clientFor func(context.Context, *string, string) (*github.Client, error)) *Service {
 	if clientFor == nil {
-		clientFor = func(ctx context.Context, projectID *string) (*github.Client, error) {
-			return ClientFromCredentials(ctx, st, projectID)
+		clientFor = func(ctx context.Context, projectID *string, repo string) (*github.Client, error) {
+			return ClientForRepo(ctx, st, projectID, repo)
 		}
 	}
 	return &Service{store: st, clientFor: clientFor}
@@ -85,7 +87,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg Message) (*store.Bridge
 		return nil, false, err
 	}
 
-	client, err := s.clientFor(ctx, projectID)
+	client, err := s.clientFor(ctx, projectID, repo)
 	if err != nil {
 		return nil, false, err
 	}
@@ -209,6 +211,44 @@ func normalizeRepoRef(raw string) string {
 // ClientFromCredentials 从凭据库解析可用的 GitHub 客户端：
 // 优先项目级 github_app → 项目级 github_pat → 全局 github_app → 全局 github_pat。
 func ClientFromCredentials(ctx context.Context, st *store.Store, projectID *string) (*github.Client, error) {
+	return ClientForRepo(ctx, st, projectID, "")
+}
+
+// ClientForRepo 在 ClientFromCredentials 的基础上确认凭据真能访问 repo。
+// GitHub App 只安装在部分账号上，安装范围之外的仓库一律返回 404（即使仓库
+// 本身对用户可见）。此时按候选顺序回退到下一份凭据（通常是用户 PAT），
+// 避免整个项目因为优先级最高的凭据看不到仓库而整条链路报错。
+func ClientForRepo(ctx context.Context, st *store.Store, projectID *string, repo string) (*github.Client, error) {
+	candidates, err := githubCredentialCandidates(ctx, st, projectID)
+	if err != nil {
+		return nil, err
+	}
+	repo = normalizeRepoRef(repo)
+	// 只有一个候选时没有回退余地，省掉一次探测请求。
+	probe := repo != "" && len(candidates) > 1
+
+	var lastErr error
+	for _, c := range candidates {
+		client, err := clientFromCredential(ctx, st, c)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if !probe {
+			return client, nil
+		}
+		if err := repoAccessible(ctx, projectID, c.ID, repo, client); err != nil {
+			lastErr = fmt.Errorf("credential %s cannot access %s: %w", c.Name, repo, err)
+			continue
+		}
+		return client, nil
+	}
+	return nil, fmt.Errorf("bridge: no usable GitHub credential: %w", lastErr)
+}
+
+// githubCredentialCandidates 按优先级列出可用的 GitHub 凭据：
+// 项目级 github_app → 项目级 github_pat → 全局 github_app → 全局 github_pat。
+func githubCredentialCandidates(ctx context.Context, st *store.Store, projectID *string) ([]store.Credential, error) {
 	all, err := st.ListCredentials(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -241,32 +281,110 @@ func ClientFromCredentials(ctx context.Context, st *store.Store, projectID *stri
 	if len(candidates) == 0 {
 		return nil, errors.New("bridge: no enabled GitHub credential (github_app or github_pat)")
 	}
+	return candidates, nil
+}
 
-	var lastErr error
-	for _, c := range candidates {
-		kind, secret, meta, err := st.GetSecret(ctx, c.ID)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		apiBase := metaString(meta, "api_base", github.DefaultAPIBase)
-		if kind == store.CredentialGitHubPAT {
-			return github.New(apiBase, secret), nil
-		}
-		appID := metaString(meta, "app_id", "")
-		installID := metaString(meta, "installation_id", "")
-		if appID == "" || installID == "" {
-			lastErr = errors.New("bridge: github_app credential missing app_id/installation_id metadata")
-			continue
-		}
-		token, _, err := github.InstallationToken(ctx, apiBase, appID, installID, secret, nowFunc())
-		if err != nil {
-			lastErr = err
-			continue
-		}
+// clientFromCredential 把一条凭据解析成 GitHub 客户端；App 凭据会换取安装令牌，
+// 令牌在有效期内复用，避免每次调用都多打一次 GitHub 接口。
+func clientFromCredential(ctx context.Context, st *store.Store, c store.Credential) (*github.Client, error) {
+	kind, secret, meta, err := st.GetSecret(ctx, c.ID)
+	if err != nil {
+		return nil, err
+	}
+	apiBase := metaString(meta, "api_base", github.DefaultAPIBase)
+	if kind == store.CredentialGitHubPAT {
+		return github.New(apiBase, secret), nil
+	}
+	appID := metaString(meta, "app_id", "")
+	installID := metaString(meta, "installation_id", "")
+	if appID == "" || installID == "" {
+		return nil, errors.New("bridge: github_app credential missing app_id/installation_id metadata")
+	}
+	if token, ok := cachedInstallationToken(c.ID); ok {
 		return github.New(apiBase, token), nil
 	}
-	return nil, fmt.Errorf("bridge: no usable GitHub credential: %w", lastErr)
+	token, expires, err := github.InstallationToken(ctx, apiBase, appID, installID, secret, nowFunc())
+	if err != nil {
+		return nil, err
+	}
+	rememberInstallationToken(c.ID, token, expires)
+	return github.New(apiBase, token), nil
+}
+
+type repoAccessEntry struct {
+	err     error
+	expires time.Time
+}
+
+// repoAccessCache 记住某条凭据对某个仓库的可见性，避免每次调用都探测。
+var repoAccessCache sync.Map
+
+// repoAccessible 检查凭据能否访问仓库；成功缓存 10 分钟，失败缓存 1 分钟。
+func repoAccessible(ctx context.Context, projectID *string, credID, repo string, client *github.Client) error {
+	key := credentialRepoKey(projectID, credID, repo)
+	if v, ok := repoAccessCache.Load(key); ok {
+		if e, ok := v.(repoAccessEntry); ok && nowFunc().Before(e.expires) {
+			return e.err
+		}
+	}
+	err := client.CanAccessRepo(ctx, repo)
+	ttl := 10 * time.Minute
+	if err != nil {
+		ttl = time.Minute
+	}
+	repoAccessCache.Store(key, repoAccessEntry{err: err, expires: nowFunc().Add(ttl)})
+	return err
+}
+
+func credentialRepoKey(projectID *string, credID, repo string) string {
+	project := ""
+	if projectID != nil {
+		project = *projectID
+	}
+	return project + "|" + credID + "|" + strings.ToLower(repo)
+}
+
+// ResetCredentialCache 清空凭据相关的内存缓存，凭据变更后立即生效。
+func ResetCredentialCache() {
+	repoAccessCache.Range(func(k, _ any) bool {
+		repoAccessCache.Delete(k)
+		return true
+	})
+	installationTokenCache.Range(func(k, _ any) bool {
+		installationTokenCache.Delete(k)
+		return true
+	})
+}
+
+type installationTokenEntry struct {
+	token   string
+	expires time.Time
+}
+
+var installationTokenCache sync.Map
+
+func cachedInstallationToken(credID string) (string, bool) {
+	v, ok := installationTokenCache.Load(credID)
+	if !ok {
+		return "", false
+	}
+	entry, ok := v.(installationTokenEntry)
+	if !ok {
+		return "", false
+	}
+	// 过期前 5 分钟续签，留出请求耗时的余量。
+	if !entry.expires.IsZero() && nowFunc().Add(5*time.Minute).After(entry.expires) {
+		installationTokenCache.Delete(credID)
+		return "", false
+	}
+	return entry.token, true
+}
+
+func rememberInstallationToken(credID, token string, expires time.Time) {
+	if strings.TrimSpace(token) == "" {
+		return
+	}
+	installationTokenCache.Store(credID, installationTokenEntry{token: token, expires: expires})
 }
 
 func metaString(meta map[string]any, key, fallback string) string {
