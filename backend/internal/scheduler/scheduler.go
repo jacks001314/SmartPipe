@@ -62,6 +62,12 @@ type Tracker interface {
 	CreatePR(ctx context.Context, projectID string, issue int, head, base, title, body string) (PullRequest, error)
 }
 
+// RepoSyncer 是可选能力：开跑前把项目本地 clone 拉到远端最新。
+// Tracker 实现它就启用；测试里的假 tracker 不实现也不影响。
+type RepoSyncer interface {
+	SyncRepo(ctx context.Context, projectID string) error
+}
+
 // Notifier 把文本发回蓝信群。
 type Notifier interface {
 	SendGroup(ctx context.Context, botID, chatID, replyTo, text string) error
@@ -1040,6 +1046,12 @@ func (s *Scheduler) execute(ctx context.Context, w *Worker, trigger string) erro
 	}
 	if s.workspace == nil || s.committer == nil || s.vcs == nil {
 		return errors.New("scheduler: workspace/committer/vcs not configured")
+	}
+	if syncer, ok := s.tracker.(RepoSyncer); ok {
+		// 每次开跑前同步一次：agents 改动必须基于当前 main，而不是克隆那天的代码。
+		if err := syncer.SyncRepo(ctx, p.ID); err != nil {
+			log.Printf("[scheduler] sync repo before issue %d failed, using existing refs: %v", w.Issue, err)
+		}
 	}
 	dir, branch, err := s.workspace.Prepare(ctx, p, w.Issue, w.PRNumber > 0)
 	if err != nil {

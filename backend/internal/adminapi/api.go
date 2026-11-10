@@ -148,6 +148,7 @@ func (a *API) Register(app *iris.Application) {
 
 	party.Get("/audit", a.listAudit)
 	party.Get("/attempts", a.listAttempts)
+	a.registerRepoSync(party)
 
 	a.registerVerification(party)
 	a.registerMerges(party)
