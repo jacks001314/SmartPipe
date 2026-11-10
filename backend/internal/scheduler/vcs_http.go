@@ -73,6 +73,8 @@ func (v *HTTPVCS) Push(ctx context.Context, p *Project, w *Worker) (string, erro
 	if err := v.do(ctx, "/admin/pushes", map[string]any{
 		"project_id": p.ID, "issue_ref": fmt.Sprintf("#%d", w.Issue),
 		"repo": w.Worktree, "branch": w.Branch,
+		// 还没有 PR 说明这条分支是失败尝试的残留，允许按 lease 覆盖。
+		"force_with_lease": w.PRNumber == 0,
 	}, &out); err != nil {
 		return "", err
 	}

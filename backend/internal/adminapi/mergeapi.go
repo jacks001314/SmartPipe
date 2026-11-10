@@ -126,11 +126,12 @@ func (a *API) createCommit(c iris.Context) {
 }
 
 type pushRequest struct {
-	ProjectID string `json:"project_id"`
-	IssueRef  string `json:"issue_ref"`
-	Repo      string `json:"repo"`
-	Branch    string `json:"branch"`
-	Remote    string `json:"remote"`
+	ProjectID      string `json:"project_id"`
+	IssueRef       string `json:"issue_ref"`
+	Repo           string `json:"repo"`
+	Branch         string `json:"branch"`
+	Remote         string `json:"remote"`
+	ForceWithLease bool   `json:"force_with_lease"`
 }
 
 type pushResult struct {
@@ -185,6 +186,7 @@ func (a *API) createPush(c iris.Context) {
 	}
 	pushed, err := (&patch.Verifier{}).Push(c.Request().Context(), patch.PushRequest{
 		Repo: in.Repo, Branch: in.Branch, Remote: in.Remote, RemoteURL: remoteURL,
+		ForceWithLease: in.ForceWithLease,
 	})
 	if err != nil {
 		a.audit(c.Request().Context(), c, "repo.push", "issue", in.IssueRef, projectID, "error", map[string]any{"error": err.Error()})

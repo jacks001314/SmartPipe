@@ -70,8 +70,9 @@ func (g *GitWorkspace) run(ctx context.Context, dir string, args ...string) (str
 	return strings.TrimSpace(string(out)), nil
 }
 
-// Prepare 幂等地创建 worktree；已存在直接返回。
-func (g *GitWorkspace) Prepare(ctx context.Context, p *Project, issue int) (string, string, error) {
+// Prepare 幂等地创建 worktree。preserve=true 表示继续已有的 PR 分支，
+// 保留 worktree 里的历史提交；否则回到基线，避免把失败尝试的提交叠加进来。
+func (g *GitWorkspace) Prepare(ctx context.Context, p *Project, issue int, preserve bool) (string, string, error) {
 	if strings.TrimSpace(p.LocalPath) == "" {
 		return "", "", fmt.Errorf("scheduler: project %s has no local repo", p.ID)
 	}
@@ -81,8 +82,10 @@ func (g *GitWorkspace) Prepare(ctx context.Context, p *Project, issue int) (stri
 	branch := g.Branch(issue)
 	dir := g.Dir(p, issue)
 	if st, err := os.Stat(filepath.Join(dir, ".git")); err == nil && st != nil {
-		// 复用工作区时先回到基线：上一轮失败可能留下本地提交，
-		// 验证器克隆的项目仓库里没有这些提交，会导致 checkout 基线失败。
+		if preserve {
+			// 已有 PR 的追问：保留分支历史，新提交才能快进推上去。
+			return dir, branch, nil
+		}
 		if err := g.resetExisting(ctx, p, dir, branch); err != nil {
 			return "", "", err
 		}
