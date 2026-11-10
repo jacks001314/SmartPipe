@@ -90,7 +90,7 @@ export function VerificationPage({ notify }: { notify: Notify }) {
         <div>
           <strong>手动验证：</strong>本页仅用于在干净副本上手动执行仓库
           <span className="mono">smartpipe.yaml</span> 声明的验证命令，并查看历史验证记录。
-          提交 <span className="mono">base_commit + unified diff</span> 后，verifier 会克隆干净副本、
+          在下方填写 <span className="mono">base_commit + unified diff</span> 并开始验证后，verifier 会克隆干净副本、
           校验路径/大小/密钥，<span className="mono">git apply</span> 后执行验证命令。
           补丁验证不再作为 Issue 修复的合并门禁：Issue 修复由 Codex 在 worker 内自测后提交；
           patch-verifier 仍保留在 worker 中，用于手动验证与发版构建。
