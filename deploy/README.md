@@ -1,15 +1,18 @@
 # SmartPipe 构建、安装与部署
 
-SmartPipe 有五个常驻服务：
+SmartPipe 在生产上跑两个容器，共用同一个镜像和同一个 `/data` 卷：
 
-| 服务 | 端口 | 作用 |
-|---|---:|---|
-| `admin-api` | 8092 | 管理接口、Web 控制台、数据库迁移 |
-| `bridge` | 8090 | 蓝信消息与 GitHub Webhook 入口 |
-| `patch-verifier` | 8095 | 干净副本补丁验证、制品构建 |
-| `bot` | 8093 | 蓝信 WebSocket、群回复、崩溃上报 |
+| 容器 | 进程 | 端口 | 作用 |
+|---|---|---:|---|
+| `app` | `admin-api` | 8092 | 管理接口、Web 控制台、数据库迁移 |
+| `app` | `bridge` | 8090 | 蓝信消息与 GitHub Webhook 入口 |
+| `app` | `bot` | 8093 | 蓝信 WebSocket、群回复、崩溃上报 |
+| `worker` | `scheduler` | 8098（仅容器内） | 队列、worktree、Codex、提交、推送、开 PR |
+| `worker` | `patch-verifier` | 8095（仅容器内） | 发版构建与手动验证 |
 
-所有服务共用 `Dockerfile` 产出的同一个镜像。镜像内带 Git、Go 和 Node，`patch-verifier` 可以在隔离容器中执行仓库 `smartpipe.yaml` 声明的构建命令。
+镜像内带 Git、Go 1.26、Node 22 和 Codex CLI。Issue 修复链路由 Codex 在 worker 容器里改代码并
+自行执行 `smartpipe.yaml` 的必过命令，调度器提交后经 admin-api 推送，不再经过独立验证容器。
+`patch-verifier` 只保留给发版构建和配置台的手动验证。
 
 ## 1. 构建 Windows 产物
 

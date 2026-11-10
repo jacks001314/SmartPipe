@@ -7,22 +7,21 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os/exec"
 	"strings"
 	"time"
 )
 
-// HTTPVCS 走 admin-api 的 /admin/commits 与 /admin/pushes 门禁。
+// HTTPVCS 走 admin-api 的 /admin/pushes 门禁推送分支。
 type HTTPVCS struct {
 	BaseURL string
 	Token   string
 	Client  *http.Client
-	GitBin  string
 }
 
-// NewHTTPVCS 构造提交/推送客户端。
+// NewHTTPVCS 构造推送客户端。
 func NewHTTPVCS(baseURL, token string) *HTTPVCS {
-	return &HTTPVCS{BaseURL: strings.TrimRight(baseURL, "/"), Token: token, Client: &http.Client{Timeout: 10 * time.Minute}, GitBin: "git"}
+	return &HTTPVCS{BaseURL: strings.TrimRight(baseURL, "/"), Token: token,
+		Client: &http.Client{Timeout: 10 * time.Minute}}
 }
 
 func (v *HTTPVCS) do(ctx context.Context, path string, payload any, out any) error {
@@ -64,61 +63,21 @@ func (v *HTTPVCS) do(ctx context.Context, path string, payload any, out any) err
 	return nil
 }
 
-// CommitPush 先把 worktree 复位，再让 admin-api 应用补丁并推送分支。
-func (v *HTTPVCS) CommitPush(ctx context.Context, p *Project, w *Worker, message, patch string) (string, error) {
-	if strings.TrimSpace(patch) == "" {
-		return "", fmt.Errorf("scheduler: empty patch")
-	}
-	base, err := v.git(ctx, w.Worktree, "rev-parse", "HEAD")
-	if err != nil {
-		return "", err
-	}
-	if _, err := v.git(ctx, w.Worktree, "reset", "--hard", "HEAD"); err != nil {
-		return "", err
-	}
-	if _, err := v.git(ctx, w.Worktree, "clean", "-fd"); err != nil {
-		return "", err
-	}
-	var commitOut struct {
-		OK     bool   `json:"ok"`
-		Commit string `json:"commit"`
-		Error  string `json:"error"`
-	}
-	if err := v.do(ctx, "/admin/commits", map[string]any{
-		"project_id": p.ID, "issue_ref": fmt.Sprintf("#%d", w.Issue), "repo": w.Worktree,
-		"base_commit": base, "branch": w.Branch, "patch": patch, "message": message,
-		"author_name": "SmartPipe Codex", "author_email": "codex@smartpipe.local",
-	}, &commitOut); err != nil {
-		return "", err
-	}
-	if !commitOut.OK {
-		return "", fmt.Errorf("提交被拒绝: %s", commitOut.Error)
-	}
-	var pushOut struct {
-		OK   bool   `json:"ok"`
-		Head string `json:"head"`
+// Push 把调度器已经提交好的分支推送到远端，远端地址与凭据由 admin-api 解析。
+func (v *HTTPVCS) Push(ctx context.Context, p *Project, w *Worker) (string, error) {
+	var out struct {
+		OK    bool   `json:"ok"`
+		Head  string `json:"commit"`
+		Error string `json:"error"`
 	}
 	if err := v.do(ctx, "/admin/pushes", map[string]any{
-		"project_id": p.ID, "issue_ref": fmt.Sprintf("#%d", w.Issue), "repo": w.Worktree, "branch": w.Branch,
-	}, &pushOut); err != nil {
+		"project_id": p.ID, "issue_ref": fmt.Sprintf("#%d", w.Issue),
+		"repo": w.Worktree, "branch": w.Branch,
+	}, &out); err != nil {
 		return "", err
 	}
-	if !pushOut.OK {
-		return "", fmt.Errorf("推送失败")
+	if !out.OK {
+		return "", fmt.Errorf("推送被拒绝: %s", out.Error)
 	}
-	return commitOut.Commit, nil
-}
-
-func (v *HTTPVCS) git(ctx context.Context, dir string, args ...string) (string, error) {
-	bin := v.GitBin
-	if bin == "" {
-		bin = "git"
-	}
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return strings.TrimSpace(string(out)), nil
+	return out.Head, nil
 }

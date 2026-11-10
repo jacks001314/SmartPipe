@@ -152,7 +152,6 @@ func main() {
 	cfg := scheduler.Config{
 		MaxGlobal:      envInt("SCHEDULER_MAX_GLOBAL", 3),
 		MaxPerProject:  envInt("SCHEDULER_MAX_PER_PROJECT", 2),
-		VerifyAttempts: envInt("SCHEDULER_VERIFY_ATTEMPTS", 2),
 		MaxAttempts:    envInt("SCHEDULER_MAX_ATTEMPTS", 3),
 		TurnTimeout:    time.Duration(envInt("SCHEDULER_TURN_TIMEOUT_MIN", 30)) * time.Minute,
 		PollInterval:   2 * time.Second,
@@ -168,7 +167,7 @@ func main() {
 		Notifier:  scheduler.NewHTTPNotifier(botURL, internalToken),
 		Resolver:  storeResolver{st: st},
 		Workspace: scheduler.NewGitWorkspace(workspaceRoot, repoCache, "git"),
-		Verifier:  scheduler.NewHTTPVerifier(adminURL, adminToken),
+		Committer: scheduler.GitCommitter{GitBin: "git"},
 		VCS:       scheduler.NewHTTPVCS(adminURL, adminToken),
 		ModelEnv:  modelEnvFetcher(adminURL, adminToken),
 	})

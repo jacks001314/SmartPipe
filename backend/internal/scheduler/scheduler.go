@@ -72,14 +72,14 @@ type Workspace interface {
 	Cleanup(ctx context.Context, p *Project, issue int) error
 }
 
-// Verifier 在干净副本上验证补丁；workdir 用于取其基线提交。
-type Verifier interface {
-	Verify(ctx context.Context, p *Project, workdir, patch string) (ok bool, report string, err error)
+// Committer 把工作区里已暂存的改动提交成一次本地 commit。
+type Committer interface {
+	Commit(ctx context.Context, workDir, message string) (commit string, err error)
 }
 
-// VCS 通过 admin-api 门禁提交并推送分支。
+// VCS 通过 admin-api 门禁推送分支。
 type VCS interface {
-	CommitPush(ctx context.Context, p *Project, w *Worker, message, patch string) (commit string, err error)
+	Push(ctx context.Context, p *Project, w *Worker) (head string, err error)
 }
 
 // Config 是调度器运行参数。
@@ -88,7 +88,6 @@ type Config struct {
 	MaxPerProject   int
 	TurnTimeout     time.Duration
 	PollInterval    time.Duration
-	VerifyAttempts  int
 	MaxAttempts     int
 	Model           string
 	Effort          string
@@ -107,7 +106,7 @@ type Deps struct {
 	Notifier  Notifier
 	Resolver  Resolver
 	Workspace Workspace
-	Verifier  Verifier
+	Committer Committer
 	VCS       VCS
 	// ModelEnv 可选：按项目供应商返回 OPENAI_BASE_URL / OPENAI_API_KEY 等环境变量。
 	ModelEnv func(ctx context.Context, projectID, providerID string) ([]string, error)
@@ -124,7 +123,7 @@ type Scheduler struct {
 	notifier  Notifier
 	resolver  Resolver
 	workspace Workspace
-	verifier  Verifier
+	committer Committer
 	vcs       VCS
 	modelEnv  func(ctx context.Context, projectID, providerID string) ([]string, error)
 
@@ -152,9 +151,6 @@ func New(cfg Config, deps Deps) (*Scheduler, error) {
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 2 * time.Second
 	}
-	if cfg.VerifyAttempts <= 0 {
-		cfg.VerifyAttempts = 2
-	}
 	if cfg.MaxAttempts <= 0 {
 		cfg.MaxAttempts = 3
 	}
@@ -173,7 +169,7 @@ func New(cfg Config, deps Deps) (*Scheduler, error) {
 		notifier:  deps.Notifier,
 		resolver:  deps.Resolver,
 		workspace: deps.Workspace,
-		verifier:  deps.Verifier,
+		committer: deps.Committer,
 		vcs:       deps.VCS,
 		modelEnv:  deps.ModelEnv,
 		wake:      make(chan struct{}, 1),
@@ -558,14 +554,14 @@ func (s *Scheduler) resume(w *Worker, trigger string) {
 	}()
 }
 
-// execute 跑一轮完整修复：worktree → codex → 验证 → 提交推送 → PR。
+// execute 跑一轮完整修复：worktree → codex → 提交 → 推送 → PR。
 func (s *Scheduler) execute(ctx context.Context, w *Worker, trigger string) error {
 	p, err := s.resolver.ByID(ctx, w.ProjectID)
 	if err != nil {
 		return err
 	}
-	if s.workspace == nil || s.verifier == nil || s.vcs == nil {
-		return errors.New("scheduler: workspace/verifier/vcs not configured")
+	if s.workspace == nil || s.committer == nil || s.vcs == nil {
+		return errors.New("scheduler: workspace/committer/vcs not configured")
 	}
 	dir, branch, err := s.workspace.Prepare(ctx, p, w.Issue)
 	if err != nil {
@@ -582,76 +578,50 @@ func (s *Scheduler) execute(ctx context.Context, w *Worker, trigger string) erro
 	}
 	comments, _ := s.tracker.ListComments(ctx, p.ID, w.Issue)
 
-	var report, patch string
-	ok := false
-	for attempt := 0; attempt < s.cfg.VerifyAttempts; attempt++ {
-		w.State = StateCoding
-		if err := s.repo.UpdateWorker(ctx, w); err != nil {
-			return err
-		}
-		res, err := s.runner.Run(ctx, codexrunner.Spec{
-			WorkDir:          dir,
-			Env:              s.resolveModelEnv(ctx, p),
-			Prompt:           buildFixPrompt(p, issue, comments, trigger, report),
-			CodexPath:        s.cfg.CodexPath,
-			Model:            firstNonEmpty(p.Model, s.cfg.Model),
-			Effort:           firstNonEmpty(p.Effort, s.cfg.Effort),
-			BaseInstructions: FixSystemPrompt,
-			Timeout:          s.cfg.TurnTimeout,
-			KeepResponse:     true,
-		})
-		if err != nil {
-			return fmt.Errorf("codex: %w", err)
-		}
-		patch, err = s.differ.Diff(ctx, dir, "")
-		if err != nil {
-			return fmt.Errorf("diff: %w", err)
-		}
-		if strings.TrimSpace(patch) == "" {
-			w.State = StateAwaitingInput
-			w.LastError = ""
-			_ = s.repo.UpdateWorker(ctx, w)
-			_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment(
-				"这一轮没有产生代码改动。需要补充信息或确认方案：\n\n"+clamp(res.FinalResponse, 3000)))
-			s.notifyIssue(ctx, p, w, "需要你补充信息："+clamp(res.FinalResponse, 300))
-			return nil
-		}
-		w.State = StateVerifying
-		_ = s.repo.UpdateWorker(ctx, w)
-		ok, report, err = s.verifier.Verify(ctx, p, dir, patch)
-		if err != nil {
-			return fmt.Errorf("verify: %w", err)
-		}
-		if ok {
-			break
-		}
-		if verificationEnvironmentError(report) {
-			// 环境类错误（仓库缺失、checkout 失败）重跑模型只会浪费一轮，
-			// 直接暂停并提示人工修复。
-			w.State = StateBlocked
-			w.LastError = "verification environment error"
-			_ = s.repo.UpdateWorker(ctx, w)
-			_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment(
-				"验证环境异常，已暂停（未消耗模型重试次数）：\n\n```\n"+clamp(report, 3000)+"\n```\n修复环境后发送 `/retry` 重新尝试。"))
-			s.notifyIssue(ctx, p, w, "验证环境异常，需要人工处理。")
-			return nil
-		}
-		_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment("验证未通过，正在带日志重试：\n\n```\n"+clamp(report, 3000)+"\n```"))
+	w.State = StateCoding
+	if err := s.repo.UpdateWorker(ctx, w); err != nil {
+		return err
 	}
-	if !ok {
-		w.State = StateBlocked
-		w.LastError = "verification failed"
+	res, err := s.runner.Run(ctx, codexrunner.Spec{
+		WorkDir:          dir,
+		Env:              s.resolveModelEnv(ctx, p),
+		Prompt:           buildFixPrompt(p, issue, comments, trigger, ""),
+		CodexPath:        s.cfg.CodexPath,
+		Model:            firstNonEmpty(p.Model, s.cfg.Model),
+		Effort:           firstNonEmpty(p.Effort, s.cfg.Effort),
+		BaseInstructions: FixSystemPrompt,
+		Timeout:          s.cfg.TurnTimeout,
+		KeepResponse:     true,
+	})
+	if err != nil {
+		return fmt.Errorf("codex: %w", err)
+	}
+	patch, err := s.differ.Diff(ctx, dir, "")
+	if err != nil {
+		return fmt.Errorf("diff: %w", err)
+	}
+	if strings.TrimSpace(patch) == "" {
+		w.State = StateAwaitingInput
+		w.LastError = ""
 		_ = s.repo.UpdateWorker(ctx, w)
-		_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment("连续验证失败，已暂停。\n\n```\n"+clamp(report, 4000)+"\n```"))
-		s.notifyIssue(ctx, p, w, "验证连续失败，需要人工确认。")
+		_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment(
+			"这一轮没有产生代码改动。需要补充信息或确认方案：\n\n"+clamp(res.FinalResponse, 3000)))
+		s.notifyIssue(ctx, p, w, "需要你补充信息："+clamp(res.FinalResponse, 300))
 		return nil
 	}
 
+	commit, err := s.committer.Commit(ctx, dir, commitMessage(issue))
+	if err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
 	w.State = StatePushing
 	_ = s.repo.UpdateWorker(ctx, w)
-	commit, err := s.vcs.CommitPush(ctx, p, w, commitMessage(issue), patch)
+	head, err := s.vcs.Push(ctx, p, w)
 	if err != nil {
-		return fmt.Errorf("commit/push: %w", err)
+		return fmt.Errorf("push: %w", err)
+	}
+	if head != "" && !strings.HasPrefix(head, commit) {
+		log.Printf("[scheduler] push head %s != commit %s (issue %d)", shortSHA(head), shortSHA(commit), w.Issue)
 	}
 	if w.PRNumber == 0 {
 		pr, err := s.tracker.CreatePR(ctx, p.ID, w.Issue, branch, firstNonEmpty(p.DefaultBase, "main"),
@@ -661,7 +631,7 @@ func (s *Scheduler) execute(ctx context.Context, w *Worker, trigger string) erro
 		}
 		w.PRNumber = pr.Number
 		_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment(fmt.Sprintf(
-			"已提交 `%s` 并创建 PR #%d（验证通过）。\n%s", shortSHA(commit), pr.Number, pr.URL)))
+			"已提交 `%s` 并创建 PR #%d。\n%s", shortSHA(commit), pr.Number, pr.URL)))
 		s.notifyIssue(ctx, p, w, fmt.Sprintf("修复完成，PR #%d 等待 review：%s", pr.Number, pr.URL))
 	} else {
 		_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment(fmt.Sprintf(
@@ -682,7 +652,7 @@ func prTitle(issue Issue) string {
 }
 
 func prBody(issue Issue, commit string) string {
-	return fmt.Sprintf("## 变更说明\n\n自动修复 Issue #%d：%s\n\n- 提交：`%s`\n- 验证：patch-verifier 通过\n\nFixes #%d",
+	return fmt.Sprintf("## 变更说明\n\n自动修复 Issue #%d：%s\n\n- 提交：`%s`\n- 验证：Codex 自测（smartpipe.yaml）\n\nFixes #%d",
 		issue.Number, issue.Title, shortSHA(commit), issue.Number)
 }
 
@@ -915,22 +885,4 @@ func extensionForMime(mimeType string) string {
 		return ".json"
 	}
 	return ""
-}
-
-// verificationEnvironmentError 判断验证报告是否属于环境问题。
-// 新版验证器会在报告里带 environment_error=true；旧版只返回文本，按已知前缀兜底。
-func verificationEnvironmentError(report string) bool {
-	if strings.Contains(report, `"environment_error":true`) {
-		return true
-	}
-	for _, mark := range []string{
-		"clone failed:",
-		"checkout base commit failed:",
-		"base commit mismatch:",
-	} {
-		if strings.Contains(report, mark) {
-			return true
-		}
-	}
-	return false
 }
