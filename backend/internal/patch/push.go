@@ -13,6 +13,9 @@ type PushRequest struct {
 	Branch    string `json:"branch"`
 	Remote    string `json:"remote"`
 	RemoteURL string `json:"remote_url"`
+	// ForceWithLease 只用于机器人自己的分支：当远端已有上一次失败尝试留下的
+	// 同名分支、而本地提交不是它的后代时，按刚才读到的 ref 覆盖。
+	ForceWithLease bool `json:"force_with_lease"`
 }
 
 // PushResult 是推送结果与两端 ref 证据。
@@ -74,6 +77,9 @@ func (v *Verifier) Push(ctx context.Context, req PushRequest) (*PushResult, erro
 		args = append(args, remoteURL)
 	} else {
 		args = append(args, res.Remote)
+	}
+	if req.ForceWithLease && res.Before != "" {
+		args = append(args, "--force-with-lease=refs/heads/"+res.Branch+":"+res.Before)
 	}
 	args = append(args, res.Branch+":"+res.Branch)
 	out, err := v.git(ctx, repo, args...)

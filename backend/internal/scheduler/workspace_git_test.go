@@ -39,7 +39,7 @@ func TestGitWorkspacePrepareDiffCleanup(t *testing.T) {
 
 	ws := NewGitWorkspace(filepath.Join(root, "wt"), filepath.Join(root, "mirrors"), "git")
 	p := &Project{ID: "prj", Name: "demo", Repo: "demo/repo", DefaultBase: "main", LocalPath: src}
-	dir, branch, err := ws.Prepare(context.Background(), p, 7)
+	dir, branch, err := ws.Prepare(context.Background(), p, 7, false)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestGitWorkspacePrepareDiffCleanup(t *testing.T) {
 		t.Fatalf("worktree content: %q err=%v", data, err)
 	}
 	// 第二个 Issue 应该是另一个独立目录。
-	dir2, _, err := ws.Prepare(context.Background(), p, 8)
+	dir2, _, err := ws.Prepare(context.Background(), p, 8, false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -190,7 +190,7 @@ type fakeWorkspace struct {
 	lastIssue int
 }
 
-func (f *fakeWorkspace) Prepare(ctx context.Context, p *Project, issue int) (string, string, error) {
+func (f *fakeWorkspace) Prepare(ctx context.Context, p *Project, issue int, preserve bool) (string, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.prepared++

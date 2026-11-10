@@ -75,7 +75,7 @@ type Resolver interface {
 
 // Workspace 管理每个 Issue 的 git worktree。
 type Workspace interface {
-	Prepare(ctx context.Context, p *Project, issue int) (dir, branch string, err error)
+	Prepare(ctx context.Context, p *Project, issue int, preserve bool) (dir, branch string, err error)
 	Cleanup(ctx context.Context, p *Project, issue int) error
 }
 
@@ -1041,7 +1041,7 @@ func (s *Scheduler) execute(ctx context.Context, w *Worker, trigger string) erro
 	if s.workspace == nil || s.committer == nil || s.vcs == nil {
 		return errors.New("scheduler: workspace/committer/vcs not configured")
 	}
-	dir, branch, err := s.workspace.Prepare(ctx, p, w.Issue)
+	dir, branch, err := s.workspace.Prepare(ctx, p, w.Issue, w.PRNumber > 0)
 	if err != nil {
 		return fmt.Errorf("prepare workspace: %w", err)
 	}
