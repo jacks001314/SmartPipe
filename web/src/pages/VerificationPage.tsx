@@ -91,8 +91,9 @@ export function VerificationPage({ notify }: { notify: Notify }) {
           <strong>手动补丁验证：</strong>在此提交 <span className="mono">base_commit + unified diff</span>，
           verifier 克隆干净副本、校验路径/大小/密钥、<span className="mono">git apply</span> 后执行仓库
           <span className="mono"> smartpipe.yaml </span>声明的验证命令，并保存历史验证记录。
-          本页仅用于手动验证和查看历史记录；patch-verifier 仍保留在 worker 中，负责手动验证与发版构建，
-          不再作为 Issue 修复的合并门禁——Issue 修复由 Codex 在 worker 内自测后提交。
+          本页仅用于在干净副本上手动执行 smartpipe.yaml 声明的验证命令并查看历史验证记录；
+          patch-verifier 仍保留在 worker 中负责手动验证与发版构建，但不再作为 Issue 修复的合并门禁——
+          Issue 修复由 Codex 在 worker 内自测后提交。
         </div>
       </div>
 
