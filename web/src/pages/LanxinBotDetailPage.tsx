@@ -21,6 +21,10 @@ const statusLabel = (status: string) => ({
 
 const messageStatus = (status: string) => ({
   issue_created: "已建单",
+  issue_updated: "已补充",
+  answered: "已回答",
+  need_info: "待补充",
+  processing: "处理中",
   filtered: "已过滤",
   unbound: "未绑定项目",
   failed: "处理失败",

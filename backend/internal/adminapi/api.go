@@ -22,16 +22,18 @@ import (
 
 // Config 是管理 API 的依赖注入配置。
 type Config struct {
-	Store        *store.Store
-	Checker      *conncheck.Checker
-	AdminToken   string
-	AllowOrigins []string
-	VerifyURL    string
-	VerifyToken  string
-	ReleaseURL   string
-	ReleaseToken string
-	BotAddr      string
-	BotToken     string
+	Store          *store.Store
+	Checker        *conncheck.Checker
+	AdminToken     string
+	AllowOrigins   []string
+	VerifyURL      string
+	VerifyToken    string
+	ReleaseURL     string
+	ReleaseToken   string
+	BotAddr        string
+	BotToken       string
+	SchedulerURL   string
+	SchedulerToken string
 	// CrashRetentionDays 原始崩溃包保留天数（0 表示用默认 30 天）。
 	CrashRetentionDays int
 	// RejectedRetentionDays 被拒绝上报的保留天数（0 表示默认 7 天）。
@@ -61,6 +63,8 @@ type API struct {
 	releaseToken          string
 	botAddr               string
 	botToken              string
+	schedulerURL          string
+	schedulerToken        string
 	githubHTTPMu          sync.RWMutex
 	githubHTTP            *http.Client
 	crashRetentionDays    int
@@ -95,6 +99,8 @@ func New(cfg Config) *API {
 		releaseToken:          strings.TrimSpace(cfg.ReleaseToken),
 		botAddr:               strings.TrimSpace(cfg.BotAddr),
 		botToken:              strings.TrimSpace(cfg.BotToken),
+		schedulerURL:          strings.TrimSpace(cfg.SchedulerURL),
+		schedulerToken:        strings.TrimSpace(cfg.SchedulerToken),
 		crashRetentionDays:    cfg.CrashRetentionDays,
 		rejectedRetentionDays: cfg.RejectedRetentionDays,
 		loginEnabled:          strings.TrimSpace(cfg.AdminPassword) != "",
@@ -151,6 +157,7 @@ func (a *API) Register(app *iris.Application) {
 	a.registerIdentities(party)
 	a.registerModels(party)
 	a.registerLanxin(party)
+	a.registerScheduler(party)
 	a.registerGitHubOAuth(party)
 	a.registerGitHubApp(party)
 	a.registerGitHubClone(party)

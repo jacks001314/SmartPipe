@@ -66,6 +66,7 @@ services:
       BRIDGE_URL: http://127.0.0.1:8090
       CRASH_INGEST_URL: http://127.0.0.1:8090/ingest/crash
       SMARTPIPE_SCHEDULER_URL: http://worker:8098
+      SMARTPIPE_SCHEDULER_TOKEN: ${SCHEDULER_TOKEN}
       SCHEDULER_URL: http://worker:8098
       SCHEDULER_TOKEN: ${SCHEDULER_TOKEN}
       # 手动验证与发版构建仍由 worker 里的 patch-verifier 承担；
@@ -91,6 +92,7 @@ services:
       SCHEDULER_TOKEN: ${SCHEDULER_TOKEN}
       SCHEDULER_WORKSPACE_ROOT: /data/workspaces
       SCHEDULER_REPO_CACHE: /data/scheduler-repos
+      SCHEDULER_OUTPUT_DIR: /data/scheduler-outputs
       SMARTPIPE_ADMIN_URL: http://app:8092
       BOT_ADDR: http://app:8093
       INTERNAL_TOKEN: ${SMARTPIPE_BOT_INTERNAL_TOKEN}

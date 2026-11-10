@@ -148,6 +148,7 @@ func main() {
 	internalToken := os.Getenv("INTERNAL_TOKEN")
 	workspaceRoot := firstNonEmpty(os.Getenv("SCHEDULER_WORKSPACE_ROOT"), "/data/workspaces")
 	repoCache := firstNonEmpty(os.Getenv("SCHEDULER_REPO_CACHE"), "/data/scheduler-repos")
+	outputRoot := firstNonEmpty(os.Getenv("SCHEDULER_OUTPUT_DIR"), "/data/scheduler-outputs")
 
 	cfg := scheduler.Config{
 		MaxGlobal:      envInt("SCHEDULER_MAX_GLOBAL", 3),
@@ -158,6 +159,7 @@ func main() {
 		Model:          os.Getenv("SMARTPIPE_MODEL"),
 		Effort:         os.Getenv("SMARTPIPE_MODEL_EFFORT"),
 		CodexPath:      os.Getenv("CODEX_PATH"),
+		OutputDir:      outputRoot,
 	}
 	s, err := scheduler.New(cfg, scheduler.Deps{
 		Repo:      scheduler.NewPgRepo(st.DB()),
@@ -185,7 +187,7 @@ func main() {
 		Addr:  firstNonEmpty(os.Getenv("SCHEDULER_HTTP_ADDR"), ":8098"),
 		Token: os.Getenv("SCHEDULER_TOKEN"),
 	}, s)
-	log.Printf("[scheduler] listening on %s (workspace=%s, max=%d/%d)", firstNonEmpty(os.Getenv("SCHEDULER_HTTP_ADDR"), ":8098"), workspaceRoot, cfg.MaxGlobal, cfg.MaxPerProject)
+	log.Printf("[scheduler] listening on %s (workspace=%s, outputs=%s, max=%d/%d)", firstNonEmpty(os.Getenv("SCHEDULER_HTTP_ADDR"), ":8098"), workspaceRoot, outputRoot, cfg.MaxGlobal, cfg.MaxPerProject)
 	if err := app.Listen(firstNonEmpty(os.Getenv("SCHEDULER_HTTP_ADDR"), ":8098")); err != nil {
 		log.Fatalf("[scheduler] http: %v", err)
 	}

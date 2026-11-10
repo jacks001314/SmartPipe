@@ -555,3 +555,118 @@ export type CrashRetention = {
   rejected_deleted?: number;
   ran_at?: string;
 };
+
+export type SchedulerWorker = {
+  id: string;
+  project_id: string;
+  project_name?: string;
+  issue_number: number;
+  issue_title: string;
+  issue_url: string;
+  chat_id: string;
+  state: string;
+  branch: string;
+  worktree: string;
+  pr_number: number;
+  pr_url: string;
+  attempts: number;
+  last_error: string;
+  blocked_reason: string;
+  priority: number;
+  round: number;
+  model: string;
+  provider_id: string;
+  queued_at: string;
+  started_at?: string | null;
+  state_changed_at: string;
+  heartbeat_at?: string | null;
+  finished_at?: string | null;
+  running: boolean;
+  allowed_actions?: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type SchedulerEvent = {
+  id: number;
+  worker_id: string;
+  project_id: string;
+  issue_number: number;
+  at: string;
+  kind: string;
+  state_from?: string;
+  state_to?: string;
+  actor: string;
+  summary: string;
+  detail?: Record<string, unknown>;
+};
+
+export type SchedulerOverview = {
+  service: string;
+  started_at: string;
+  max_global: number;
+  max_per_project: number;
+  counts: Record<string, number>;
+  workers: SchedulerWorker[];
+};
+
+export type SchedulerWorkerDetail = {
+  worker: SchedulerWorker;
+  events: SchedulerEvent[];
+};
+
+export type SchedulerOutput = {
+  worker_id: string;
+  item_id: string;
+  round: number;
+  turn_id: string;
+  kind: "agent_message" | "plan" | "reasoning_summary" | "command" | "file_change" | "tool" | "system" | "token_usage" | string;
+  status: string;
+  title: string;
+  content?: string;
+  output?: string;
+  metadata?: Record<string, unknown>;
+  bytes: number;
+  truncated: boolean;
+  blob_ref?: string;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SchedulerOutputFrame = {
+  cursor: number;
+  items: SchedulerOutput[];
+  running: boolean;
+};
+
+export type SchedulerOutputRawPage = {
+  data: string;
+  offset: number;
+  next_offset: number;
+  total_bytes: number;
+  has_more: boolean;
+  missing?: boolean;
+};
+
+export type SchedulerMessage = {
+  id: number;
+  platform_message_id: string;
+  bot_id: string;
+  bot_name: string;
+  chat_type: string;
+  chat_id: string;
+  user_id: string;
+  sender_name: string;
+  group_name: string;
+  msg_type: string;
+  text: string;
+  is_at_me: boolean;
+  project_id: string | null;
+  status: string;
+  reason: string;
+  issue_number: number;
+  issue_url: string;
+  created_at: string;
+  updated_at: string;
+};

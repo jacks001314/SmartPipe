@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
 	"strconv"
 	"sync"
@@ -10,12 +11,16 @@ import (
 
 // MemoryRepo 是进程内实现，供单元测试与单实例试用；语义与 Postgres 实现保持一致。
 type MemoryRepo struct {
-	mu      sync.Mutex
-	links   map[string]Link
-	chat    []ChatMessage
-	workers map[string]*Worker
-	nextID  int
-	now     func() time.Time
+	mu           sync.Mutex
+	links        map[string]Link
+	chat         []ChatMessage
+	workers      map[string]*Worker
+	events       []WorkerEvent
+	messages     []MessageRecord
+	outputs      map[string]map[string]WorkerOutput
+	nextID       int
+	nextOutputID int64
+	now          func() time.Time
 }
 
 // NewMemoryRepo 构造内存仓储。
@@ -23,6 +28,7 @@ func NewMemoryRepo() *MemoryRepo {
 	return &MemoryRepo{
 		links:   map[string]Link{},
 		workers: map[string]*Worker{},
+		outputs: map[string]map[string]WorkerOutput{},
 		now:     time.Now,
 	}
 }
@@ -91,6 +97,54 @@ func (r *MemoryRepo) RecentChat(ctx context.Context, chatID string, limit int) (
 	return out, nil
 }
 
+func (r *MemoryRepo) RecordMessage(ctx context.Context, m MessageRecord) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := r.clock()
+	for i := range r.messages {
+		if r.messages[i].PlatformMessageID == m.PlatformMessageID {
+			r.messages[i] = m
+			r.messages[i].UpdatedAt = now
+			return nil
+		}
+	}
+	m.ID = int64(len(r.messages) + 1)
+	if m.CreatedAt.IsZero() {
+		m.CreatedAt = now
+	}
+	m.UpdatedAt = now
+	r.messages = append(r.messages, m)
+	return nil
+}
+
+func (r *MemoryRepo) MarkMessage(ctx context.Context, platformMessageID, status, reason string, issue int, issueURL string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range r.messages {
+		if r.messages[i].PlatformMessageID == platformMessageID {
+			r.messages[i].Status = status
+			r.messages[i].Reason = reason
+			r.messages[i].Issue = issue
+			r.messages[i].IssueURL = issueURL
+			r.messages[i].UpdatedAt = r.clock()
+			return nil
+		}
+	}
+	return nil
+}
+
+func (r *MemoryRepo) ListMessages(ctx context.Context, limit int) ([]MessageRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]MessageRecord, len(r.messages))
+	copy(out, r.messages)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 func (r *MemoryRepo) CreateWorker(ctx context.Context, w *Worker) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -107,6 +161,12 @@ func (r *MemoryRepo) CreateWorker(ctx context.Context, w *Worker) (bool, error) 
 	now := r.clock()
 	if cp.CreatedAt.IsZero() {
 		cp.CreatedAt = now
+	}
+	if cp.QueuedAt.IsZero() {
+		cp.QueuedAt = now
+	}
+	if cp.StateChangedAt.IsZero() {
+		cp.StateChangedAt = now
 	}
 	cp.UpdatedAt = now
 	if cp.State == "" {
@@ -145,10 +205,109 @@ func (r *MemoryRepo) UpdateWorker(ctx context.Context, w *Worker) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	cp := copyWorker(w)
-	cp.UpdatedAt = r.clock()
+	now := r.clock()
+	if cp.StateChangedAt.IsZero() {
+		cp.StateChangedAt = now
+	}
+	cp.UpdatedAt = now
 	r.workers[cp.ID] = cp
 	*w = *cp
 	return nil
+}
+
+func (r *MemoryRepo) TouchWorker(ctx context.Context, id string, at time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	w, ok := r.workers[id]
+	if !ok {
+		return nil
+	}
+	if at.IsZero() {
+		at = r.clock()
+	}
+	w.HeartbeatAt = &at
+	w.UpdatedAt = at
+	return nil
+}
+
+func (r *MemoryRepo) AppendWorkerEvent(ctx context.Context, ev WorkerEvent) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if ev.At.IsZero() {
+		ev.At = r.clock()
+	}
+	ev.ID = int64(len(r.events) + 1)
+	r.events = append(r.events, ev)
+	return nil
+}
+
+func (r *MemoryRepo) ListWorkerEvents(ctx context.Context, workerID string, limit int) ([]WorkerEvent, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]WorkerEvent, 0)
+	for _, ev := range r.events {
+		if ev.WorkerID == workerID {
+			out = append(out, ev)
+		}
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return out, nil
+}
+
+func (r *MemoryRepo) UpsertWorkerOutput(ctx context.Context, out *WorkerOutput) error {
+	if out == nil || out.WorkerID == "" || out.ItemID == "" {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := r.clock()
+	r.nextOutputID++
+	if out.CreatedAt.IsZero() {
+		out.CreatedAt = now
+	}
+	out.UpdatedAt = now
+	out.Revision = r.nextOutputID
+	if r.outputs[out.WorkerID] == nil {
+		r.outputs[out.WorkerID] = map[string]WorkerOutput{}
+	}
+	if old, ok := r.outputs[out.WorkerID][out.ItemID]; ok && !old.CreatedAt.IsZero() {
+		out.CreatedAt = old.CreatedAt
+	}
+	r.outputs[out.WorkerID][out.ItemID] = *out
+	return nil
+}
+
+func (r *MemoryRepo) ListWorkerOutputs(ctx context.Context, workerID string, afterRevision int64, limit int) ([]WorkerOutput, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
+	}
+	out := make([]WorkerOutput, 0)
+	for _, item := range r.outputs[workerID] {
+		if item.Revision > afterRevision {
+			out = append(out, item)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Revision < out[j].Revision })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (r *MemoryRepo) GetWorkerOutput(ctx context.Context, workerID, itemID string) (*WorkerOutput, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	item, ok := r.outputs[workerID][itemID]
+	if !ok {
+		return nil, nil
+	}
+	cp := item
+	cp.Metadata = append(json.RawMessage(nil), item.Metadata...)
+	return &cp, nil
 }
 
 func (r *MemoryRepo) ListWorkers(ctx context.Context) ([]*Worker, error) {
@@ -187,7 +346,15 @@ func (r *MemoryRepo) ClaimNext(ctx context.Context, maxGlobal, maxPerProject int
 			queued = append(queued, w)
 		}
 	}
-	sort.Slice(queued, func(i, j int) bool { return queued[i].CreatedAt.Before(queued[j].CreatedAt) })
+	sort.SliceStable(queued, func(i, j int) bool {
+		if queued[i].Priority != queued[j].Priority {
+			return queued[i].Priority > queued[j].Priority
+		}
+		if !queued[i].QueuedAt.Equal(queued[j].QueuedAt) {
+			return queued[i].QueuedAt.Before(queued[j].QueuedAt)
+		}
+		return queued[i].CreatedAt.Before(queued[j].CreatedAt)
+	})
 	for _, w := range queued {
 		if maxPerProject > 0 && perProject[w.ProjectID] >= maxPerProject {
 			continue

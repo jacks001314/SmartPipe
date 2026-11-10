@@ -1,4 +1,4 @@
-import type { AuditEntry, AuthConfig, AuthSession, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Health, IssueAttempt, Project, ReleaseCandidate, ReleaseRecord, ReleaseRun, RepoOp, TestResult, UserIdentity, VerificationRecord, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubTunnelView, GitHubPATView, GitHubRepoCatalog, GitHubRepo } from "./types";
+import type { AuditEntry, AuthConfig, AuthSession, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Health, IssueAttempt, Project, ReleaseCandidate, ReleaseRecord, ReleaseRun, RepoOp, TestResult, UserIdentity, VerificationRecord, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubTunnelView, GitHubPATView, GitHubRepoCatalog, GitHubRepo, SchedulerOverview, SchedulerWorkerDetail, SchedulerWorker, SchedulerMessage, SchedulerOutputFrame, SchedulerOutputRawPage } from "./types";
 
 const TOKEN_KEY = "smartpipe.adminToken";
 
@@ -77,6 +77,15 @@ export const api = {
   login: (username: string, password: string) =>
     request<AuthSession>("/login", { method: "POST", body: { username, password } }),
   logout: () => request<void>("/logout", { method: "POST" }),
+  schedulerOverview: () => request<SchedulerOverview>("/scheduler/overview"),
+  schedulerMessages: (limit = 100) => request<SchedulerMessage[]>("/scheduler/messages?limit=" + limit),
+  getSchedulerWorker: (id: string) => request<SchedulerWorkerDetail>("/scheduler/workers/" + encodeURIComponent(id)),
+  schedulerOutput: (id: string, after = 0, limit = 500) =>
+    request<SchedulerOutputFrame>("/scheduler/workers/" + encodeURIComponent(id) + "/output?after=" + after + "&limit=" + limit),
+  schedulerOutputRaw: (id: string, itemId: string, offset = 0, limit = 256 * 1024) =>
+    request<SchedulerOutputRawPage>("/scheduler/workers/" + encodeURIComponent(id) + "/output/" + encodeURIComponent(itemId) + "/raw?offset=" + offset + "&limit=" + limit),
+  schedulerWorkerAction: (id: string, action: "pause" | "resume" | "retry" | "stop") =>
+    request<{ worker: SchedulerWorker }>("/scheduler/workers/" + encodeURIComponent(id) + "/action", { method: "POST", body: { action } }),
   listProjects: () => request<Project[]>("/projects"),
   createProject: (body: Partial<Project>) => request<Project>("/projects", { method: "POST", body }),
   updateProject: (id: string, body: Partial<Project>) => request<Project>("/projects/" + id, { method: "PATCH", body }),
