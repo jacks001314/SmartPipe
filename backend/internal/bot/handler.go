@@ -16,19 +16,27 @@ import (
 
 // Handler 消费蓝信 WebSocket 事件：归一化 -> 幂等去重 -> 会话命令 -> 分发。
 type Handler struct {
-	cfg   Config
-	snd   Sender
-	disp  Dispatcher
-	crash *CrashIntake
-	inbox InboxReporter
-	media MediaDownloader
+	cfg       Config
+	snd       Sender
+	disp      Dispatcher
+	crash     *CrashIntake
+	inbox     InboxReporter
+	media     MediaDownloader
+	directory Directory
 
 	seenMu sync.Mutex
 	seen   map[string]time.Time // msgId -> first seen，幂等键
+
+	dirMu       sync.Mutex
+	memberCache map[string]memberNameCache
+	groupCache  map[string]groupNameCache
 }
 
 func NewHandler(cfg Config, snd Sender, disp Dispatcher) *Handler {
-	return &Handler{cfg: cfg, snd: snd, disp: disp, seen: map[string]time.Time{}}
+	return &Handler{
+		cfg: cfg, snd: snd, disp: disp, seen: map[string]time.Time{},
+		memberCache: map[string]memberNameCache{}, groupCache: map[string]groupNameCache{},
+	}
 }
 
 // WithCrash 挂上"一键上报"：带附件的消息走崩溃上报而不是普通派单。
@@ -43,9 +51,31 @@ func (h *Handler) WithMedia(m MediaDownloader) *Handler {
 	return h
 }
 
+// WithDirectory 挂上通讯录查询，消息缺少 senderName 时按 staffId 补真实姓名。
+func (h *Handler) WithDirectory(d Directory) *Handler {
+	h.directory = d
+	return h
+}
+
 // MediaDownloader 按蓝信 mediaId 取回文件内容。
 type MediaDownloader interface {
 	DownloadMedia(ctx context.Context, mediaID string) ([]byte, error)
+}
+
+// Directory 用于把 staffId / groupId 补成真实姓名和群名。
+type Directory interface {
+	GroupInfo(ctx context.Context, groupID string) (*lanxin.GroupInfo, error)
+	GroupMembers(ctx context.Context, groupID string, offset, limit int) ([]lanxin.GroupMember, error)
+}
+
+type memberNameCache struct {
+	names map[string]string
+	at    time.Time
+}
+
+type groupNameCache struct {
+	name string
+	at   time.Time
 }
 
 // WithInbox 挂上收件箱上报；未挂载时只影响记录，不影响原有处理逻辑。
@@ -72,6 +102,85 @@ func (h *Handler) reportInbox(ctx context.Context, m *lanxin.InboundMessage, rea
 	if err != nil {
 		log.Printf("[bot] inbox report failed msgId=%s: %v", m.MsgID, err)
 	}
+}
+
+const directoryCacheTTL = 10 * time.Minute
+
+// resolveMessageNames 补全蓝信事件里缺失的群名和发送人姓名。
+// 真实网关偶尔只给 staffId/groupId，不补的话 Issue 正文只能显示一串 ID。
+func (h *Handler) resolveMessageNames(ctx context.Context, m *lanxin.InboundMessage) {
+	if h.directory == nil || m == nil || strings.TrimSpace(m.GroupID) == "" {
+		return
+	}
+	if strings.TrimSpace(m.GroupName) == "" {
+		if name := h.cachedGroupName(ctx, m.GroupID); name != "" {
+			m.GroupName = name
+		}
+	}
+	if strings.TrimSpace(m.SenderName) == "" && strings.TrimSpace(m.From) != "" {
+		if name := h.cachedMemberName(ctx, m.GroupID, m.From); name != "" {
+			m.SenderName = name
+		}
+	}
+}
+
+func (h *Handler) cachedGroupName(ctx context.Context, groupID string) string {
+	h.dirMu.Lock()
+	cached, ok := h.groupCache[groupID]
+	h.dirMu.Unlock()
+	if ok && time.Since(cached.at) < directoryCacheTTL {
+		return cached.name
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	info, err := h.directory.GroupInfo(callCtx, groupID)
+	name := ""
+	if err != nil {
+		log.Printf("[bot] resolve group name %s failed: %v", groupID, err)
+	} else if info != nil {
+		name = strings.TrimSpace(info.Name)
+	}
+	h.dirMu.Lock()
+	if h.groupCache == nil {
+		h.groupCache = map[string]groupNameCache{}
+	}
+	h.groupCache[groupID] = groupNameCache{name: name, at: time.Now()}
+	h.dirMu.Unlock()
+	return name
+}
+
+func (h *Handler) cachedMemberName(ctx context.Context, groupID, staffID string) string {
+	h.dirMu.Lock()
+	cached, ok := h.memberCache[groupID]
+	h.dirMu.Unlock()
+	if ok && time.Since(cached.at) < directoryCacheTTL {
+		return cached.names[staffID]
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	names := map[string]string{}
+	for offset := 0; offset < 1000; offset += 100 {
+		page, err := h.directory.GroupMembers(callCtx, groupID, offset, 100)
+		if err != nil {
+			log.Printf("[bot] resolve group members %s failed: %v", groupID, err)
+			break
+		}
+		for _, member := range page {
+			if name := strings.TrimSpace(member.Name); member.StaffID != "" && name != "" {
+				names[member.StaffID] = name
+			}
+		}
+		if len(page) < 100 {
+			break
+		}
+	}
+	h.dirMu.Lock()
+	if h.memberCache == nil {
+		h.memberCache = map[string]memberNameCache{}
+	}
+	h.memberCache[groupID] = memberNameCache{names: names, at: time.Now()}
+	h.dirMu.Unlock()
+	return names[staffID]
 }
 
 const crashHelp = "发送一个 crash_bundle.json 文件（≤256KB），我会自动建单并回执 Issue 链接。\n" +
@@ -138,6 +247,9 @@ func (h *Handler) HandleEvent(ctx context.Context, ev lanxin.Event) error {
 func (h *Handler) handleMessage(ctx context.Context, m *lanxin.InboundMessage) error {
 	if m.MsgID == "" || h.seenID(m.MsgID) {
 		return nil // 幂等：重连/补发场景
+	}
+	if m.ChatType == "group" && (!h.cfg.RequireAtMe || (m.Reminder != nil && m.Reminder.IsAtMe)) {
+		h.resolveMessageNames(ctx, m)
 	}
 
 	text := m.TextContent()

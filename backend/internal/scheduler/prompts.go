@@ -18,6 +18,9 @@ const ChatSystemPrompt = `你是 SmartPipe 的蓝信助手（chat worker），�
 
 硬性约束：
 - 你没有写权限：不得修改文件、不得执行会产生副作用的命令、不得提交或推送；
+- 你不需要直接派发 worker：调度器会在你输出 issue 或 issue_update 后自动建单/补充并排队 fix worker。不要在回复中声称自己不能派发 worker；
+- 群内 /status、/pause、/resume、/retry、/stop、/fix 由调度器直接执行；用户问怎么控制进度时，直接给出这些命令；
+- 当上下文给出“Issue #N 调度状态”时，以它为准回答“有没有派发 worker / 修复进度 / PR 状态”；没有状态信息时，让用户带上 #编号，不要猜测；
 - 不要臆测代码行为，结论要基于实际读到的代码；不确定就说明不确定；
 - 不要新建重复 Issue：系统会按标题和错误特征查重；
 - 群回复要简短（3 行以内），细节写进 Issue。
@@ -96,7 +99,7 @@ func ParseChatDecision(raw string) (*ChatDecision, error) {
 	return &d, nil
 }
 
-func buildChatPrompt(p *Project, history []ChatMessage, msg Inbound, referenced int) string {
+func buildChatPrompt(p *Project, history []ChatMessage, msg Inbound, referenced int, activeWorker *Worker) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "项目：%s（仓库 %s，默认分支 %s）\n", p.Name, p.Repo, p.DefaultBase)
 	if p.LocalPath != "" {
@@ -104,6 +107,7 @@ func buildChatPrompt(p *Project, history []ChatMessage, msg Inbound, referenced 
 	}
 	if referenced > 0 {
 		fmt.Fprintf(&b, "这条消息引用了 Issue #%d，请优先按 issue_update 处理。\n", referenced)
+		fmt.Fprintf(&b, "调度器状态：%s\n", workerPromptStatus(referenced, activeWorker))
 	}
 	if len(history) > 0 {
 		b.WriteString("\n最近会话：\n")
@@ -120,12 +124,33 @@ func buildChatPrompt(p *Project, history []ChatMessage, msg Inbound, referenced 
 		text = "（这条消息只带了附件，没有文字说明，请按附件内容理解意图）"
 	}
 	fmt.Fprintf(&b, "\n群：%s\n发言人：%s\n消息：%s\n\n请按系统提示词输出一个 JSON 对象。",
-		msg.GroupName, msg.SenderName, text)
+		firstNonEmpty(msg.GroupName, "未知群"), firstNonEmpty(msg.SenderName, "同事"), text)
 	return b.String()
 }
 
+// workerPromptStatus 把调度器已知的 worker 状态交给聊天模型，避免模型凭感觉回答“没有派发”。
+func workerPromptStatus(issue int, w *Worker) string {
+	if w == nil {
+		return fmt.Sprintf("Issue #%d 当前没有进行中的 worker", issue)
+	}
+	parts := []string{fmt.Sprintf("Issue #%d 当前 worker 状态=%s", issue, workerStateLabel(w.State))}
+	if w.Branch != "" {
+		parts = append(parts, "分支="+w.Branch)
+	}
+	if w.PRNumber > 0 {
+		parts = append(parts, fmt.Sprintf("PR=#%d", w.PRNumber))
+	}
+	if w.BlockedReason != "" {
+		parts = append(parts, "阻塞原因="+clamp(w.BlockedReason, 200))
+	}
+	if w.LastError != "" {
+		parts = append(parts, "最近错误="+clamp(w.LastError, 200))
+	}
+	return strings.Join(parts, "，")
+}
+
 func buildIssueReply(msg Inbound, issue Issue) string {
-	return fmt.Sprintf("已创建 Issue #%d：%s\n%s\n来源：%s", issue.Number, issue.Title, issue.URL, msg.SenderName)
+	return fmt.Sprintf("已创建 Issue #%d：%s\n%s\n来源：%s", issue.Number, issue.Title, issue.URL, firstNonEmpty(msg.SenderName, "同事"))
 }
 
 func buildFixPrompt(p *Project, issue Issue, comments []Comment, trigger string, prevFailure string) string {

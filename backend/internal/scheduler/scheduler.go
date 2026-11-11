@@ -369,7 +369,18 @@ func (s *Scheduler) HandleMessage(ctx context.Context, msg Inbound) error {
 	referenced := referencedIssue(msg.Text)
 	_ = s.repo.AppendChat(ctx, ChatMessage{ChatID: msg.ChatID(), ProjectID: p.ID, Role: "user", Body: msg.Text})
 
-	decision, runErr := s.runChat(ctx, p, history, msg, referenced)
+	if handled, controlErr := s.answerWorkerControl(ctx, p, msg, history); handled {
+		return controlErr
+	}
+	if handled, statusErr := s.answerWorkerStatus(ctx, p, msg, history); handled {
+		return statusErr
+	}
+	var activeWorker *Worker
+	if referenced > 0 {
+		activeWorker, _ = s.repo.ActiveWorker(ctx, p.ID, referenced)
+	}
+
+	decision, runErr := s.runChat(ctx, p, history, msg, referenced, activeWorker)
 	if runErr != nil {
 		log.Printf("[scheduler] chat worker failed project=%s chat=%s: %v", p.ID, msg.ChatID(), runErr)
 		_ = s.repo.MarkMessage(ctx, msg.PlatformMessageID, "failed", clamp(runErr.Error(), 1000), 0, "")
@@ -385,7 +396,7 @@ func (s *Scheduler) HandleMessage(ctx context.Context, msg Inbound) error {
 		return err
 	}
 	_ = s.repo.MarkMessage(ctx, msg.PlatformMessageID, outcome.Status, outcome.Reason, outcome.Issue, outcome.IssueURL)
-	_ = s.repo.AppendChat(ctx, ChatMessage{ChatID: msg.ChatID(), ProjectID: p.ID, Role: "assistant", Body: decisionSummary(decision)})
+	_ = s.repo.AppendChat(ctx, ChatMessage{ChatID: msg.ChatID(), ProjectID: p.ID, Role: "assistant", Body: decisionSummary(decision, outcome)})
 	_ = s.repo.PutLink(ctx, Link{PlatformMessageID: msg.PlatformMessageID, ProjectID: p.ID, Issue: outcome.Issue, ChatID: msg.ChatID()})
 	return nil
 }
@@ -399,18 +410,29 @@ func messageRecord(msg Inbound, projectID, status, reason string) MessageRecord 
 	}
 }
 
-func decisionSummary(d *ChatDecision) string {
-	if d.Action == "issue" {
+func decisionSummary(d *ChatDecision, outcome messageOutcome) string {
+	switch d.Action {
+	case "issue":
+		if outcome.Status == "issue_updated" {
+			return fmt.Sprintf("已补充到已有 Issue #%d：%s", outcome.Issue, d.Title)
+		}
+		if outcome.Issue > 0 {
+			return fmt.Sprintf("已建单 #%d：%s", outcome.Issue, d.Title)
+		}
 		return "已建单：" + d.Title
+	case "issue_update":
+		issue := outcome.Issue
+		if issue == 0 {
+			issue = d.Issue
+		}
+		return fmt.Sprintf("已补充到 Issue #%d", issue)
+	default:
+		return d.Reply
 	}
-	if d.Action == "issue_update" {
-		return fmt.Sprintf("已补充到 Issue #%d", d.Issue)
-	}
-	return d.Reply
 }
 
-func (s *Scheduler) runChat(ctx context.Context, p *Project, history []ChatMessage, msg Inbound, referenced int) (*ChatDecision, error) {
-	prompt := buildChatPrompt(p, history, msg, referenced)
+func (s *Scheduler) runChat(ctx context.Context, p *Project, history []ChatMessage, msg Inbound, referenced int, activeWorker *Worker) (*ChatDecision, error) {
+	prompt := buildChatPrompt(p, history, msg, referenced, activeWorker)
 	images, listing, cleanup, err := saveChatAttachments(msg)
 	if err != nil {
 		return nil, err
@@ -540,10 +562,20 @@ func buildIssueBody(msg Inbound, d *ChatDecision) string {
 	var b strings.Builder
 	b.WriteString(d.Body)
 	b.WriteString("\n\n---\n")
-	fmt.Fprintf(&b, "- 来源：蓝信 / %s\n- 群：%s（%s）\n- 发言人：%s（%s）\n- 消息 ID：%s\n",
-		msg.BotName, msg.GroupName, msg.ChatID(), msg.SenderName, msg.SenderID, msg.PlatformMessageID)
+	fmt.Fprintf(&b, "- 来源：蓝信 / %s\n- 群：%s\n- 发言人：%s\n",
+		firstNonEmpty(strings.TrimSpace(msg.BotName), "蓝信机器人"),
+		firstNonEmpty(strings.TrimSpace(msg.GroupName), "未知群"),
+		firstNonEmpty(strings.TrimSpace(msg.SenderName), "未知成员"))
+	b.WriteString(fmt.Sprintf("\n<!-- 蓝信元数据：会话ID=%s；发言人ID=%s；消息ID=%s -->\n",
+		safeComment(msg.ChatID()), safeComment(msg.SenderID), safeComment(msg.PlatformMessageID)))
 	b.WriteString("\n原始消息：\n\n> " + strings.ReplaceAll(msg.Text, "\n", "\n> "))
 	return b.String()
+}
+
+func safeComment(s string) string {
+	s = strings.ReplaceAll(s, "--", "- -")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return s
 }
 
 func (s *Scheduler) findDuplicate(ctx context.Context, projectID, title string) (*Issue, error) {

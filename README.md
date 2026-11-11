@@ -79,6 +79,8 @@ Docker 部署五个常驻服务：`admin-api`、`bridge`、`patch-verifier`、`b
 
 ## 文档
 
+- [蓝信机器人使用说明（群成员版）](docs/蓝信机器人使用说明.md)
+- [Electron 跨平台发版设计](docs/Electron跨平台发版设计.md)
 - [主设计方案 v0.7.2](docs/自动化开发-测试-发版管道设计方案.md)
 - [复杂 Issue 讨论与确认流程](docs/复杂Issue讨论与确认流程.md)
 - [无 GitHub Actions 的 Agent 开发测试方案](docs/无GitHub-Actions的Agent开发测试方案.md)
