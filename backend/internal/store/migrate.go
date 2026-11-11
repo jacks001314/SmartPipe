@@ -14,6 +14,41 @@ type migration struct {
 
 var migrations = []migration{
 	{
+		version: 34,
+		name:    "lanxin_group_response_policies",
+		sql: `
+ALTER TABLE lanxin_groups ADD COLUMN IF NOT EXISTS response_mode TEXT NOT NULL DEFAULT 'smart';
+ALTER TABLE lanxin_groups ADD COLUMN IF NOT EXISTS shadow_mode BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE lanxin_groups ADD COLUMN IF NOT EXISTS reply_cooldown_seconds INTEGER NOT NULL DEFAULT 30;
+ALTER TABLE lanxin_groups ADD COLUMN IF NOT EXISTS hourly_reply_limit INTEGER NOT NULL DEFAULT 6;
+ALTER TABLE lanxin_groups ADD COLUMN IF NOT EXISTS auto_issue_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE lanxin_groups ADD COLUMN IF NOT EXISTS auto_issue_confidence DOUBLE PRECISION NOT NULL DEFAULT 0.85;
+ALTER TABLE lanxin_groups ADD COLUMN IF NOT EXISTS daily_auto_issue_limit INTEGER NOT NULL DEFAULT 3;
+ALTER TABLE lanxin_groups ADD COLUMN IF NOT EXISTS answer_confidence DOUBLE PRECISION NOT NULL DEFAULT 0.55;
+CREATE INDEX IF NOT EXISTS lanxin_groups_group_idx ON lanxin_groups (group_id, active);
+
+CREATE TABLE IF NOT EXISTS scheduler_message_claims (
+  platform_message_id TEXT PRIMARY KEY,
+  bot_id              TEXT NOT NULL DEFAULT '',
+  claimed_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at          TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS scheduler_message_claims_expiry_idx
+  ON scheduler_message_claims (expires_at);
+
+CREATE TABLE IF NOT EXISTS scheduler_chat_replies (
+  id          BIGSERIAL PRIMARY KEY,
+  chat_id     TEXT NOT NULL,
+  bot_id      TEXT NOT NULL DEFAULT '',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS scheduler_chat_replies_chat_idx
+  ON scheduler_chat_replies (chat_id, created_at DESC);
+
+ALTER TABLE scheduler_issue_drafts ADD COLUMN IF NOT EXISTS auto BOOLEAN NOT NULL DEFAULT FALSE;
+`,
+	},
+	{
 		version: 33,
 		name:    "issue_drafts_shared_sources",
 		sql: `

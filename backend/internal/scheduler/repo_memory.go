@@ -18,6 +18,8 @@ type MemoryRepo struct {
 	events       []WorkerEvent
 	messages     []MessageRecord
 	drafts       map[string]*IssueDraft
+	claims       map[string]time.Time
+	replies      []chatReplyRecord
 	outputs      map[string]map[string]WorkerOutput
 	nextID       int
 	nextOutputID int64
@@ -30,6 +32,7 @@ func NewMemoryRepo() *MemoryRepo {
 		links:   map[string]Link{},
 		workers: map[string]*Worker{},
 		drafts:  map[string]*IssueDraft{},
+		claims:  map[string]time.Time{},
 		outputs: map[string]map[string]WorkerOutput{},
 		now:     time.Now,
 	}
@@ -479,4 +482,56 @@ func (r *MemoryRepo) ReleaseIssueDraft(ctx context.Context, id string, now time.
 // MarkIssueDraftSource 在内存仓储里无需回写外部事实；PostgreSQL 实现会更新崩溃上报状态。
 func (r *MemoryRepo) MarkIssueDraftSource(ctx context.Context, d *IssueDraft, status string, issue int, issueURL string) error {
 	return nil
+}
+
+type chatReplyRecord struct {
+	chatID string
+	botID  string
+	at     time.Time
+}
+
+func (r *MemoryRepo) ClaimMessage(ctx context.Context, messageID, botID string, now time.Time, ttl time.Duration) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if until, ok := r.claims[messageID]; ok && until.After(now) {
+		return false, nil
+	}
+	r.claims[messageID] = now.Add(ttl)
+	return true, nil
+}
+
+func (r *MemoryRepo) RecordChatReply(ctx context.Context, chatID, botID string, at time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.replies = append(r.replies, chatReplyRecord{chatID: chatID, botID: botID, at: at})
+	return nil
+}
+
+func (r *MemoryRepo) RecentChatReplies(ctx context.Context, chatID string, since time.Time) (int, time.Time, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	count := 0
+	var last time.Time
+	for _, item := range r.replies {
+		if item.chatID != chatID || item.at.Before(since) {
+			continue
+		}
+		count++
+		if item.at.After(last) {
+			last = item.at
+		}
+	}
+	return count, last, nil
+}
+
+func (r *MemoryRepo) CountAutoIssueDrafts(ctx context.Context, projectID, chatID string, since time.Time) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	count := 0
+	for _, d := range r.drafts {
+		if d.ProjectID == projectID && d.ChatID == chatID && d.Auto && !d.CreatedAt.Before(since) {
+			count++
+		}
+	}
+	return count, nil
 }

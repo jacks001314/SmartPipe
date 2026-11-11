@@ -57,6 +57,7 @@ type Draft struct {
 	RefID           string    `json:"ref_id"`
 	Repo            string    `json:"repo"`
 	Labels          []string  `json:"labels"`
+	Auto            bool      `json:"auto"`
 	Status          string    `json:"status"`
 	Issue           int       `json:"issue_number"`
 	IssueURL        string    `json:"issue_url"`
@@ -96,7 +97,7 @@ func ParseCommand(text string) (action, draftID string, ok bool) {
 	switch {
 	case strings.HasPrefix(command, "确认建单"):
 		action = "confirm"
-	case strings.HasPrefix(command, "取消建单"):
+	case strings.HasPrefix(command, "取消建单"), strings.HasPrefix(command, "撤回建单"), strings.HasPrefix(command, "撤销建单"):
 		action = "cancel"
 	default:
 		return "", "", false

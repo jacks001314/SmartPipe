@@ -36,13 +36,13 @@ func (f *fakeSender) SendGroupMessage(ctx context.Context, groupID string, msg *
 
 func groupEvent(msgID, content string, atMe bool) lanxin.Event {
 	data := map[string]any{
-		"msgType": "text",
-		"msgData": map[string]any{"text": map[string]any{"content": content}},
-		"chatType": "group",
-		"from":     "staff-1",
+		"msgType":    "text",
+		"msgData":    map[string]any{"text": map[string]any{"content": content}},
+		"chatType":   "group",
+		"from":       "staff-1",
 		"senderName": "张三",
-		"groupId":  "g-1",
-		"msgId":    msgID,
+		"groupId":    "g-1",
+		"msgId":      msgID,
 	}
 	if atMe {
 		data["reminder"] = map[string]any{"isAtMe": true}
@@ -53,12 +53,12 @@ func groupEvent(msgID, content string, atMe bool) lanxin.Event {
 
 func p2pEvent(msgID, content string) lanxin.Event {
 	raw, _ := json.Marshal(map[string]any{
-		"msgType": "text",
-		"msgData": map[string]any{"text": map[string]any{"content": content}},
-		"chatType": "p2p",
-		"from":     "staff-9",
+		"msgType":    "text",
+		"msgData":    map[string]any{"text": map[string]any{"content": content}},
+		"chatType":   "p2p",
+		"from":       "staff-9",
 		"senderName": "李四",
-		"msgId":    msgID,
+		"msgId":      msgID,
 	})
 	return lanxin.Event{Type: lanxin.EventP2PMessage, Data: raw}
 }
@@ -129,5 +129,38 @@ func TestFormatTextFallback(t *testing.T) {
 	}
 	if fs.p2ps[0].MsgType != lanxin.MsgTypeFormatText || fs.p2ps[1].MsgType != lanxin.MsgTypeText {
 		t.Fatalf("回退顺序错误: %s -> %s", fs.p2ps[0].MsgType, fs.p2ps[1].MsgType)
+	}
+}
+
+func TestGroupNonAtMessagesForwardedWhenSchedulerConfigured(t *testing.T) {
+	disp := &recordingDispatcher{}
+	h := NewHandler(Config{RequireAtMe: true, SchedulerURL: "http://scheduler.local"}, &fakeSender{}, disp)
+	if err := h.HandleEvent(context.Background(), groupEvent("m-observe", "导出偶发报错", false)); err != nil {
+		t.Fatal(err)
+	}
+	if len(disp.got) != 1 || disp.got[0].IsAtMe || disp.got[0].ReplyToBot {
+		t.Fatalf("non-at message should be observed: %+v", disp.got)
+	}
+
+	disp.got = nil
+	if err := h.HandleEvent(context.Background(), groupEvent("m-command", "/status #12", false)); err != nil {
+		t.Fatal(err)
+	}
+	if len(disp.got) != 1 {
+		t.Fatalf("explicit command should be forwarded: %+v", disp.got)
+	}
+
+	disp.got = nil
+	raw, _ := json.Marshal(map[string]any{
+		"msgType": "text", "chatType": "group", "from": "staff-1", "senderName": "张三",
+		"groupId": "g-1", "msgId": "m-reply-bot",
+		"msgData":      map[string]any{"text": map[string]any{"content": "这个怎么处理"}},
+		"referenceMsg": map[string]any{"from": "bot", "fromType": 1, "msgId": "bot-msg"},
+	})
+	if err := h.HandleEvent(context.Background(), lanxin.Event{Type: lanxin.EventGroupMessage, Data: raw}); err != nil {
+		t.Fatal(err)
+	}
+	if len(disp.got) != 1 || !disp.got[0].ReplyToBot {
+		t.Fatalf("reply-to-bot should be prioritized: %+v", disp.got)
 	}
 }

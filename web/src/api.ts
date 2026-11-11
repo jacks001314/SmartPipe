@@ -191,6 +191,17 @@ export const api = {
   bindLanxinGroup: (groupId: string, projectId: string, botId = "") =>
     request<{ group_id: string; project_id: string }>("/lanxin/groups/bind", { method: "POST", body: { group_id: groupId, project_id: projectId, bot_id: botId } }),
   unbindLanxinGroup: (groupId: string) => request<void>("/lanxin/groups/" + encodeURIComponent(groupId), { method: "DELETE" }),
+  updateLanxinGroupPolicy: (body: {
+    group_id: string;
+    response_mode?: "at_only" | "smart" | "all";
+    shadow_mode?: boolean;
+    reply_cooldown_seconds?: number;
+    hourly_reply_limit?: number;
+    auto_issue_enabled?: boolean;
+    auto_issue_confidence?: number;
+    daily_auto_issue_limit?: number;
+    answer_confidence?: number;
+  }) => request<LanxinGroup>("/lanxin/groups/policy", { method: "POST", body }),
   listLanxinMessages: (limit = 100, botId = "") =>
     request<LanxinMessage[]>("/lanxin/messages?limit=" + limit + (botId ? "&bot_id=" + encodeURIComponent(botId) : "")),
   listAudit: (limit = 100, action = "") =>

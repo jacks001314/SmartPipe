@@ -275,6 +275,14 @@ export type LanxinGroup = {
   synced_at: string;
   project_id?: string | null;
   project_name?: string;
+  response_mode: "at_only" | "smart" | "all";
+  shadow_mode: boolean;
+  reply_cooldown_seconds: number;
+  hourly_reply_limit: number;
+  auto_issue_enabled: boolean;
+  auto_issue_confidence: number;
+  daily_auto_issue_limit: number;
+  answer_confidence: number;
 };
 
 export type LanxinBotDetail = {

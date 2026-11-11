@@ -30,6 +30,7 @@ func (a *API) registerLanxin(party iris.Party) {
 	party.Post("/lanxin/bots/{id}/sync-groups", a.syncOneLanxinBot)
 	party.Get("/lanxin/bots/{id}/messages", a.listLanxinBotMessages)
 	party.Get("/lanxin/groups", a.listLanxinGroups)
+	party.Post("/lanxin/groups/policy", a.updateLanxinGroupPolicy)
 	party.Get("/lanxin/messages", a.listLanxinMessages)
 
 	// 兼容旧接口：绑定已经从蓝信页移到项目创建/编辑；这些接口保留给已有自动化调用。
@@ -781,4 +782,71 @@ func truthy(raw string) bool {
 	default:
 		return false
 	}
+}
+
+type lanxinGroupPolicyInput struct {
+	GroupID              string   `json:"group_id"`
+	ResponseMode         *string  `json:"response_mode"`
+	ShadowMode           *bool    `json:"shadow_mode"`
+	ReplyCooldownSeconds *int     `json:"reply_cooldown_seconds"`
+	HourlyReplyLimit     *int     `json:"hourly_reply_limit"`
+	AutoIssueEnabled     *bool    `json:"auto_issue_enabled"`
+	AutoIssueConfidence  *float64 `json:"auto_issue_confidence"`
+	DailyAutoIssueLimit  *int     `json:"daily_auto_issue_limit"`
+	AnswerConfidence     *float64 `json:"answer_confidence"`
+}
+
+func (a *API) updateLanxinGroupPolicy(c iris.Context) {
+	var in lanxinGroupPolicyInput
+	if err := decodeBody(c, &in); err != nil {
+		a.badRequest(c, "请求体不是合法 JSON")
+		return
+	}
+	in.GroupID = strings.TrimSpace(in.GroupID)
+	if in.GroupID == "" {
+		a.badRequest(c, "group_id 必填")
+		return
+	}
+	ctx := c.Request().Context()
+	g, err := a.store.GetLanxinGroupPolicy(ctx, in.GroupID)
+	if err != nil {
+		a.fail(c, err)
+		return
+	}
+	if in.ResponseMode != nil {
+		g.ResponseMode = strings.ToLower(strings.TrimSpace(*in.ResponseMode))
+	}
+	if in.ShadowMode != nil {
+		g.ShadowMode = *in.ShadowMode
+	}
+	if in.ReplyCooldownSeconds != nil {
+		g.ReplyCooldownSeconds = *in.ReplyCooldownSeconds
+	}
+	if in.HourlyReplyLimit != nil {
+		g.HourlyReplyLimit = *in.HourlyReplyLimit
+	}
+	if in.AutoIssueEnabled != nil {
+		g.AutoIssueEnabled = *in.AutoIssueEnabled
+	}
+	if in.AutoIssueConfidence != nil {
+		g.AutoIssueConfidence = *in.AutoIssueConfidence
+	}
+	if in.DailyAutoIssueLimit != nil {
+		g.DailyAutoIssueLimit = *in.DailyAutoIssueLimit
+	}
+	if in.AnswerConfidence != nil {
+		g.AnswerConfidence = *in.AnswerConfidence
+	}
+	updated, err := a.store.UpdateLanxinGroupPolicy(ctx, *g)
+	if err != nil {
+		a.fail(c, err)
+		return
+	}
+	a.audit(ctx, c, "lanxin.group.policy", "lanxin_group", in.GroupID, nil, "ok", map[string]any{
+		"mode": updated.ResponseMode, "shadow": updated.ShadowMode,
+		"hourly_limit": updated.HourlyReplyLimit, "cooldown_seconds": updated.ReplyCooldownSeconds,
+		"auto_issue": updated.AutoIssueEnabled, "auto_confidence": updated.AutoIssueConfidence,
+		"daily_auto_limit": updated.DailyAutoIssueLimit, "answer_confidence": updated.AnswerConfidence,
+	})
+	_ = c.JSON(envelope{Data: updated})
 }

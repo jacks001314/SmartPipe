@@ -13,7 +13,7 @@ import (
 )
 
 const issueDraftColumns = `id, kind, project_id, chat_id, source_message_id, bot_id, bot_name,
-    group_id, group_name, sender_id, sender_name, source_text, title, body, severity, ref_id, repo, labels,
+    group_id, group_name, sender_id, sender_name, source_text, title, body, severity, ref_id, repo, labels, auto,
     status, issue_number, issue_url, confirmed_by_id, confirmed_by_name, created_at, updated_at, expires_at`
 
 func scanIssueDraft(row interface{ Scan(...any) error }) (*issuedraft.Draft, error) {
@@ -23,7 +23,7 @@ func scanIssueDraft(row interface{ Scan(...any) error }) (*issuedraft.Draft, err
 	)
 	err := row.Scan(&d.ID, &d.Kind, &d.ProjectID, &d.ChatID, &d.SourceMessageID, &d.BotID, &d.BotName,
 		&d.GroupID, &d.GroupName, &d.SenderID, &d.SenderName, &d.SourceText, &d.Title, &d.Body,
-		&d.Severity, &d.RefID, &d.Repo, &labels, &d.Status, &d.Issue, &d.IssueURL,
+		&d.Severity, &d.RefID, &d.Repo, &labels, &d.Auto, &d.Status, &d.Issue, &d.IssueURL,
 		&d.ConfirmedByID, &d.ConfirmedByName, &d.CreatedAt, &d.UpdatedAt, &d.ExpiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -62,14 +62,14 @@ func (s *Store) CreateIssueDraft(ctx context.Context, d *issuedraft.Draft) (bool
 	row := tx.QueryRowContext(ctx, `
 INSERT INTO scheduler_issue_drafts
  (id, kind, project_id, chat_id, source_message_id, bot_id, bot_name, group_id, group_name,
-  sender_id, sender_name, source_text, title, body, severity, ref_id, repo, labels,
+  sender_id, sender_name, source_text, title, body, severity, ref_id, repo, labels, auto,
   status, created_at, updated_at, expires_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
 ON CONFLICT (source_message_id) WHERE source_message_id <> '' DO NOTHING
 RETURNING `+issueDraftColumns,
 		d.ID, d.Kind, d.ProjectID, d.ChatID, d.SourceMessageID, d.BotID, d.BotName, d.GroupID, d.GroupName,
 		d.SenderID, d.SenderName, d.SourceText, d.Title, d.Body, d.Severity, d.RefID, d.Repo, string(labels),
-		d.Status, d.CreatedAt, d.UpdatedAt, d.ExpiresAt)
+		d.Auto, d.Status, d.CreatedAt, d.UpdatedAt, d.ExpiresAt)
 	got, err := scanIssueDraft(row)
 	if err != nil {
 		return false, fmt.Errorf("store: create issue draft: %w", err)

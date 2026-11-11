@@ -412,7 +412,7 @@ WHERE id = (
 }
 
 const issueDraftColumns = `id, kind, project_id, chat_id, source_message_id, bot_id, bot_name,
-    group_id, group_name, sender_id, sender_name, source_text, title, body, severity, ref_id, repo, labels,
+    group_id, group_name, sender_id, sender_name, source_text, title, body, severity, ref_id, repo, labels, auto,
     status, issue_number, issue_url, confirmed_by_id, confirmed_by_name, created_at, updated_at, expires_at`
 
 func scanIssueDraft(row interface{ Scan(...any) error }) (*IssueDraft, error) {
@@ -422,7 +422,7 @@ func scanIssueDraft(row interface{ Scan(...any) error }) (*IssueDraft, error) {
 	)
 	err := row.Scan(&d.ID, &d.Kind, &d.ProjectID, &d.ChatID, &d.SourceMessageID, &d.BotID, &d.BotName,
 		&d.GroupID, &d.GroupName, &d.SenderID, &d.SenderName, &d.SourceText, &d.Title, &d.Body,
-		&d.Severity, &d.RefID, &d.Repo, &labels, &d.Status, &d.Issue, &d.IssueURL,
+		&d.Severity, &d.RefID, &d.Repo, &labels, &d.Auto, &d.Status, &d.Issue, &d.IssueURL,
 		&d.ConfirmedByID, &d.ConfirmedByName, &d.CreatedAt, &d.UpdatedAt, &d.ExpiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -457,14 +457,14 @@ func (r *PgRepo) CreateIssueDraft(ctx context.Context, d *IssueDraft) (bool, err
 	row := tx.QueryRowContext(ctx, `
 INSERT INTO scheduler_issue_drafts
  (id, kind, project_id, chat_id, source_message_id, bot_id, bot_name, group_id, group_name,
-  sender_id, sender_name, source_text, title, body, severity, ref_id, repo, labels,
+  sender_id, sender_name, source_text, title, body, severity, ref_id, repo, labels, auto,
   status, created_at, updated_at, expires_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
 ON CONFLICT (source_message_id) WHERE source_message_id <> '' DO NOTHING
 RETURNING `+issueDraftColumns,
 		d.ID, d.Kind, d.ProjectID, d.ChatID, d.SourceMessageID, d.BotID, d.BotName, d.GroupID, d.GroupName,
 		d.SenderID, d.SenderName, d.SourceText, d.Title, d.Body, d.Severity, d.RefID, d.Repo, string(labels),
-		d.Status, d.CreatedAt, d.UpdatedAt, d.ExpiresAt)
+		d.Auto, d.Status, d.CreatedAt, d.UpdatedAt, d.ExpiresAt)
 	got, err := scanIssueDraft(row)
 	if err != nil {
 		return false, fmt.Errorf("scheduler: create issue draft: %w", err)
@@ -551,4 +551,55 @@ func (r *PgRepo) MarkIssueDraftSource(ctx context.Context, d *IssueDraft, status
 SET issue_number=$2, issue_url=$3, status=$4, updated_at=now() WHERE id=$1`,
 		reportID, issue, issueURL, crashStatus)
 	return err
+}
+
+func (r *PgRepo) ClaimMessage(ctx context.Context, messageID, botID string, now time.Time, ttl time.Duration) (bool, error) {
+	var claimed string
+	err := r.db.QueryRowContext(ctx, `INSERT INTO scheduler_message_claims
+(platform_message_id, bot_id, claimed_at, expires_at)
+VALUES ($1,$2,$3,$4)
+ON CONFLICT (platform_message_id) DO UPDATE SET
+  bot_id=EXCLUDED.bot_id, claimed_at=EXCLUDED.claimed_at, expires_at=EXCLUDED.expires_at
+WHERE scheduler_message_claims.expires_at <= $3
+RETURNING platform_message_id`, messageID, botID, now, now.Add(ttl)).Scan(&claimed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("scheduler: claim message: %w", err)
+	}
+	return claimed != "", nil
+}
+
+func (r *PgRepo) RecordChatReply(ctx context.Context, chatID, botID string, at time.Time) error {
+	_, err := r.db.ExecContext(ctx, `INSERT INTO scheduler_chat_replies (chat_id, bot_id, created_at)
+VALUES ($1,$2,$3)`, chatID, botID, at)
+	if err != nil {
+		return fmt.Errorf("scheduler: record chat reply: %w", err)
+	}
+	return nil
+}
+
+func (r *PgRepo) RecentChatReplies(ctx context.Context, chatID string, since time.Time) (int, time.Time, error) {
+	var count int
+	var last sql.NullTime
+	err := r.db.QueryRowContext(ctx, `SELECT count(*), max(created_at)
+FROM scheduler_chat_replies WHERE chat_id=$1 AND created_at >= $2`, chatID, since).Scan(&count, &last)
+	if err != nil {
+		return 0, time.Time{}, fmt.Errorf("scheduler: recent chat replies: %w", err)
+	}
+	if last.Valid {
+		return count, last.Time, nil
+	}
+	return count, time.Time{}, nil
+}
+
+func (r *PgRepo) CountAutoIssueDrafts(ctx context.Context, projectID, chatID string, since time.Time) (int, error) {
+	var count int
+	err := r.db.QueryRowContext(ctx, `SELECT count(*) FROM scheduler_issue_drafts
+WHERE project_id=$1 AND chat_id=$2 AND auto=true AND created_at >= $3`, projectID, chatID, since).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("scheduler: count auto issue drafts: %w", err)
+	}
+	return count, nil
 }

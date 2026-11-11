@@ -58,7 +58,11 @@ type Inbound struct {
 	MsgType           string       `json:"msgType"`
 	Text              string       `json:"text"`
 	IsAtMe            bool         `json:"isAtMe"`
+	ReplyToBot        bool         `json:"replyToBot,omitempty"`
 	Attachments       []Attachment `json:"attachments,omitempty"`
+
+	// Auto 标记这条消息由非 @ 观察路径触发，仅用于自动建单日限额统计。
+	Auto bool `json:"-"`
 }
 
 // Attachment 是随消息一起送来的附件；数据以 base64 放在 JSON 里传输。
@@ -88,6 +92,20 @@ type Project struct {
 	Effort      string
 	ProviderID  string
 	GroupIDs    []string
+	Policy      ChatPolicy
+}
+
+// ChatPolicy 是群级响应策略。Mode=at_only 时仅处理 @、回复机器人或明确命令；
+// smart 观察所有消息并按置信度响应；all 让所有消息进入完整 chat agent。
+type ChatPolicy struct {
+	Mode                string
+	Shadow              bool
+	ReplyCooldown       time.Duration
+	HourlyReplyLimit    int
+	AutoIssueEnabled    bool
+	AutoIssueConfidence float64
+	DailyAutoIssueLimit int
+	AnswerConfidence    float64
 }
 
 // Worker 是一个绑定 Issue 的 Codex 执行单元。

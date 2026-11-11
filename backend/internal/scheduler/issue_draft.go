@@ -64,7 +64,7 @@ func (s *Scheduler) newIssueDraft(ctx context.Context, p *Project, msg Inbound, 
 		ProjectID: p.ID, ChatID: msg.ChatID(), SourceMessageID: msg.PlatformMessageID,
 		BotID: msg.BotID, BotName: msg.BotName, GroupID: msg.GroupID, GroupName: msg.GroupName,
 		SenderID: msg.SenderID, SenderName: msg.SenderName, SourceText: msg.Text,
-		Title: d.Title, Body: d.Body, Severity: d.Severity,
+		Title: d.Title, Body: d.Body, Severity: d.Severity, Auto: msg.Auto,
 		Status: IssueDraftPending, CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(issueDraftTTL),
 	}
 	created, err := s.repo.CreateIssueDraft(ctx, draft)

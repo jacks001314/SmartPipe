@@ -46,6 +46,16 @@ type LanxinGroup struct {
 	SyncedAt      time.Time `json:"synced_at"`
 	ProjectID     *string   `json:"project_id,omitempty"`
 	ProjectName   string    `json:"project_name,omitempty"`
+
+	// ResponseMode 是群响应策略：at_only / smart / all。
+	ResponseMode         string  `json:"response_mode"`
+	ShadowMode           bool    `json:"shadow_mode"`
+	ReplyCooldownSeconds int     `json:"reply_cooldown_seconds"`
+	HourlyReplyLimit     int     `json:"hourly_reply_limit"`
+	AutoIssueEnabled     bool    `json:"auto_issue_enabled"`
+	AutoIssueConfidence  float64 `json:"auto_issue_confidence"`
+	DailyAutoIssueLimit  int     `json:"daily_auto_issue_limit"`
+	AnswerConfidence     float64 `json:"answer_confidence"`
 }
 
 const lanxinBotColumns = `b.id, b.name, b.credential_id, b.app_id, b.api_base,
@@ -256,7 +266,9 @@ func (s *Store) ListLanxinGroups(ctx context.Context, botID string, includeInact
 		where += " AND g.active=true"
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT g.id,g.bot_id,b.name,g.group_id,g.name,g.avatar_url,
-        g.description,g.owner_id,g.owner_name,g.member_count,g.send_msg_status,g.active,g.synced_at
+        g.description,g.owner_id,g.owner_name,g.member_count,g.send_msg_status,g.active,g.synced_at,
+        g.response_mode,g.shadow_mode,g.reply_cooldown_seconds,g.hourly_reply_limit,
+        g.auto_issue_enabled,g.auto_issue_confidence,g.daily_auto_issue_limit,g.answer_confidence
       FROM lanxin_groups g JOIN lanxin_bots b ON b.id=g.bot_id `+where+`
       ORDER BY b.name, g.name, g.group_id`, args...)
 	if err != nil {
@@ -268,10 +280,76 @@ func (s *Store) ListLanxinGroups(ctx context.Context, botID string, includeInact
 		var g LanxinGroup
 		if err := rows.Scan(&g.ID, &g.BotID, &g.BotName, &g.GroupID, &g.Name, &g.AvatarURL,
 			&g.Description, &g.OwnerID, &g.OwnerName, &g.MemberCount, &g.SendMsgStatus,
-			&g.Active, &g.SyncedAt); err != nil {
+			&g.Active, &g.SyncedAt, &g.ResponseMode, &g.ShadowMode, &g.ReplyCooldownSeconds,
+			&g.HourlyReplyLimit, &g.AutoIssueEnabled, &g.AutoIssueConfidence,
+			&g.DailyAutoIssueLimit, &g.AnswerConfidence); err != nil {
 			return nil, err
 		}
 		out = append(out, g)
 	}
 	return out, rows.Err()
+}
+
+// GetLanxinGroupPolicy 返回某个群最新的响应策略。同一个群被多个机器人加入时，
+// 以最近更新的那行配置为准。
+func (s *Store) GetLanxinGroupPolicy(ctx context.Context, groupID string) (*LanxinGroup, error) {
+	g, err := s.scanLanxinGroupRow(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	return g, nil
+}
+
+func (s *Store) scanLanxinGroupRow(ctx context.Context, groupID string) (*LanxinGroup, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT g.id,g.bot_id,b.name,g.group_id,g.name,g.avatar_url,
+        g.description,g.owner_id,g.owner_name,g.member_count,g.send_msg_status,g.active,g.synced_at,
+        g.response_mode,g.shadow_mode,g.reply_cooldown_seconds,g.hourly_reply_limit,
+        g.auto_issue_enabled,g.auto_issue_confidence,g.daily_auto_issue_limit,g.answer_confidence
+      FROM lanxin_groups g JOIN lanxin_bots b ON b.id=g.bot_id
+      WHERE g.group_id=$1 ORDER BY g.updated_at DESC LIMIT 1`, strings.TrimSpace(groupID))
+	var g LanxinGroup
+	err := row.Scan(&g.ID, &g.BotID, &g.BotName, &g.GroupID, &g.Name, &g.AvatarURL,
+		&g.Description, &g.OwnerID, &g.OwnerName, &g.MemberCount, &g.SendMsgStatus,
+		&g.Active, &g.SyncedAt, &g.ResponseMode, &g.ShadowMode, &g.ReplyCooldownSeconds,
+		&g.HourlyReplyLimit, &g.AutoIssueEnabled, &g.AutoIssueConfidence,
+		&g.DailyAutoIssueLimit, &g.AnswerConfidence)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: get lanxin group policy: %w", err)
+	}
+	return &g, nil
+}
+
+// UpdateLanxinGroupPolicy 更新同一个群下所有机器人的策略，避免多机器人响应不一致。
+func (s *Store) UpdateLanxinGroupPolicy(ctx context.Context, g LanxinGroup) (*LanxinGroup, error) {
+	mode := strings.TrimSpace(strings.ToLower(g.ResponseMode))
+	switch mode {
+	case "at_only", "smart", "all":
+	default:
+		return nil, errors.New("store: response_mode must be at_only, smart or all")
+	}
+	if g.ReplyCooldownSeconds < 0 || g.HourlyReplyLimit < 0 || g.DailyAutoIssueLimit < 0 {
+		return nil, errors.New("store: policy limits must not be negative")
+	}
+	if g.AutoIssueConfidence <= 0 || g.AutoIssueConfidence > 1 {
+		g.AutoIssueConfidence = 0.85
+	}
+	if g.AnswerConfidence <= 0 || g.AnswerConfidence > 1 {
+		g.AnswerConfidence = 0.55
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE lanxin_groups SET
+        response_mode=$2, shadow_mode=$3, reply_cooldown_seconds=$4, hourly_reply_limit=$5,
+        auto_issue_enabled=$6, auto_issue_confidence=$7, daily_auto_issue_limit=$8,
+        answer_confidence=$9, updated_at=now()
+      WHERE group_id=$1`, strings.TrimSpace(g.GroupID), mode, g.ShadowMode, g.ReplyCooldownSeconds,
+		g.HourlyReplyLimit, g.AutoIssueEnabled, g.AutoIssueConfidence, g.DailyAutoIssueLimit, g.AnswerConfidence)
+	if err != nil {
+		return nil, fmt.Errorf("store: update lanxin group policy: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, ErrNotFound
+	}
+	return s.GetLanxinGroupPolicy(ctx, g.GroupID)
 }

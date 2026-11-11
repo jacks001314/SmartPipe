@@ -25,8 +25,8 @@ import (
 
 type storeResolver struct{ st *store.Store }
 
-func toProject(p *store.Project) *scheduler.Project {
-	return &scheduler.Project{
+func toProject(p *store.Project, group *store.LanxinGroup) *scheduler.Project {
+	out := &scheduler.Project{
 		ID: p.ID, Name: p.Name,
 		Repo:        firstNonEmpty(p.GitHubRepoURL, p.GitHubIssueRepo),
 		IssueRepo:   p.GitHubIssueRepo,
@@ -36,6 +36,22 @@ func toProject(p *store.Project) *scheduler.Project {
 		Effort:      p.CodexReasoningEffort,
 		ProviderID:  p.CodexModelProvider,
 	}
+	if group != nil {
+		seconds := group.ReplyCooldownSeconds
+		if seconds <= 0 {
+			seconds = 30
+		}
+		out.Policy = scheduler.ChatPolicy{
+			Mode: group.ResponseMode, Shadow: group.ShadowMode,
+			ReplyCooldown:       time.Duration(seconds) * time.Second,
+			HourlyReplyLimit:    group.HourlyReplyLimit,
+			AutoIssueEnabled:    group.AutoIssueEnabled,
+			AutoIssueConfidence: group.AutoIssueConfidence,
+			DailyAutoIssueLimit: group.DailyAutoIssueLimit,
+			AnswerConfidence:    group.AnswerConfidence,
+		}
+	}
+	return out
 }
 
 func (r storeResolver) ByID(ctx context.Context, projectID string) (*scheduler.Project, error) {
@@ -43,7 +59,7 @@ func (r storeResolver) ByID(ctx context.Context, projectID string) (*scheduler.P
 	if err != nil {
 		return nil, err
 	}
-	return toProject(p), nil
+	return toProject(p, nil), nil
 }
 
 func (r storeResolver) ByChat(ctx context.Context, chatID string) (*scheduler.Project, error) {
@@ -58,7 +74,8 @@ func (r storeResolver) ByChat(ctx context.Context, chatID string) (*scheduler.Pr
 		}
 		for _, g := range strings.Split(p.BluexGroupIDs, ",") {
 			if strings.TrimSpace(g) == chatID && chatID != "" {
-				return toProject(p), nil
+				group, _ := r.st.GetLanxinGroupPolicy(ctx, chatID)
+				return toProject(p, group), nil
 			}
 		}
 	}

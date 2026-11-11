@@ -31,6 +31,84 @@ const ChatSystemPrompt = `你是 SmartPipe 的蓝信助手（chat worker），�
 {"action":"need_info","reply":"需要补充什么信息"}
 {"action":"issue_update","issue":123,"reply":"要追加到该 Issue 的评论"}`
 
+// ObserveSystemPrompt 用于非 @ 群消息的轻量观察。默认沉默，只有明确指向机器人、
+// 项目或当前 Issue，或者描述具体缺陷/需求时才回答或 triage。
+const ObserveSystemPrompt = `你是 SmartPipe 蓝信群的观察者，负责判断一条没有 @ 机器人的群消息是否需要介入。
+
+默认输出 silent。只有满足下面任一条件时才不要沉默：
+1. 消息明确在问机器人、SmartPipe 项目、当前 Issue、worker 或 PR；
+2. 消息描述了具体、可复现的产品缺陷或明确需求；
+3. 消息是在补充正在讨论的 Issue，或追问修复进度。
+
+规则：
+- 不要回答团队内部闲聊、打招呼、与项目无关的讨论；
+- 不要猜测代码行为；不确定就 silent；
+- 即使回答，也要短（3 行以内）；
+- triage 只用于确实值得进入建单/补 Issue 流程的内容，并给出 0 到 1 的 confidence；
+- confidence 必须反映真实把握，不要一律写 1。
+
+只输出一个 JSON 对象，不要 markdown，不要多余文字：
+{"action":"silent","reason":"为什么沉默","confidence":0.2}
+{"action":"answer","reply":"给群里的回复","reason":"为什么回答","confidence":0.7}
+{"action":"triage","issue":123,"reply":"追加到 Issue 的补充","reason":"为什么建单","confidence":0.9}
+{"action":"triage","title":"不超过 60 字","body":"现象/复现/影响/期望","severity":"low|medium|high|critical","reason":"为什么建单","confidence":0.9}`
+
+// TriageDecision 是观察步骤的结构化输出。
+type TriageDecision struct {
+	Action     string  `json:"action"`
+	Reply      string  `json:"reply"`
+	Title      string  `json:"title"`
+	Body       string  `json:"body"`
+	Severity   string  `json:"severity"`
+	Issue      int     `json:"issue"`
+	Reason     string  `json:"reason"`
+	Confidence float64 `json:"confidence"`
+}
+
+func ParseTriageDecision(raw string) (*TriageDecision, error) {
+	text := strings.TrimSpace(raw)
+	start := strings.Index(text, "{")
+	end := strings.LastIndex(text, "}")
+	if start < 0 || end <= start {
+		return nil, fmt.Errorf("scheduler: no json object in triage decision")
+	}
+	var d TriageDecision
+	if err := json.Unmarshal([]byte(text[start:end+1]), &d); err != nil {
+		return nil, fmt.Errorf("scheduler: parse triage decision: %w", err)
+	}
+	d.Action = strings.ToLower(strings.TrimSpace(d.Action))
+	switch d.Action {
+	case "silent", "answer", "triage":
+	default:
+		return nil, fmt.Errorf("scheduler: unknown triage action %q", d.Action)
+	}
+	if d.Confidence < 0 {
+		d.Confidence = 0
+	}
+	if d.Confidence > 1 {
+		d.Confidence = 1
+	}
+	if d.Action == "answer" && strings.TrimSpace(d.Reply) == "" {
+		return nil, fmt.Errorf("scheduler: answer action requires reply")
+	}
+	if d.Action == "triage" {
+		d.Title = strings.TrimSpace(d.Title)
+		d.Reply = strings.TrimSpace(d.Reply)
+		if d.Issue <= 0 && d.Title == "" {
+			return nil, fmt.Errorf("scheduler: triage action requires issue or title")
+		}
+		if d.Issue <= 0 {
+			if d.Body == "" {
+				d.Body = d.Title
+			}
+			if d.Severity == "" {
+				d.Severity = "medium"
+			}
+		}
+	}
+	return &d, nil
+}
+
 // FixSystemPrompt 是 fix worker 的系统提示词：只在自己的 worktree 里改代码。
 const FixSystemPrompt = `你是 SmartPipe 的修复工程师（fix worker），只负责一个 GitHub Issue。
 
@@ -113,8 +191,11 @@ func buildChatPrompt(p *Project, history []ChatMessage, msg Inbound, referenced 
 		b.WriteString("\n最近会话：\n")
 		for _, h := range history {
 			role := "同事"
-			if h.Role == "assistant" {
+			switch h.Role {
+			case "assistant":
 				role = "你"
+			case "observer":
+				role = "系统判断"
 			}
 			fmt.Fprintf(&b, "- %s：%s\n", role, clamp(h.Body, 600))
 		}
@@ -124,6 +205,31 @@ func buildChatPrompt(p *Project, history []ChatMessage, msg Inbound, referenced 
 		text = "（这条消息只带了附件，没有文字说明，请按附件内容理解意图）"
 	}
 	fmt.Fprintf(&b, "\n群：%s\n发言人：%s\n消息：%s\n\n请按系统提示词输出一个 JSON 对象。",
+		firstNonEmpty(msg.GroupName, "未知群"), firstNonEmpty(msg.SenderName, "同事"), text)
+	return b.String()
+}
+
+func buildObservePrompt(p *Project, history []ChatMessage, msg Inbound) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "项目：%s（仓库 %s）\n", p.Name, p.Repo)
+	if len(history) > 0 {
+		b.WriteString("\n最近群聊：\n")
+		for _, h := range history {
+			role := "同事"
+			switch h.Role {
+			case "assistant":
+				role = "机器人"
+			case "observer":
+				role = "系统判断"
+			}
+			fmt.Fprintf(&b, "- %s：%s\n", role, clamp(h.Body, 500))
+		}
+	}
+	text := clamp(msg.Text, 4000)
+	if strings.TrimSpace(text) == "" {
+		text = "（只有附件，没有文字）"
+	}
+	fmt.Fprintf(&b, "\n群：%s\n发言人：%s\n未 @ 机器人的消息：%s\n\n请判断是否应该 silent、answer 或 triage，并输出 JSON。",
 		firstNonEmpty(msg.GroupName, "未知群"), firstNonEmpty(msg.SenderName, "同事"), text)
 	return b.String()
 }

@@ -233,6 +233,10 @@ func (s *Scheduler) answerWorkerControl(ctx context.Context, p *Project, msg Inb
 	if action == "" || action == "status" {
 		return false, nil
 	}
+	if !msg.IsAtMe && !msg.ReplyToBot && !explicit {
+		_ = s.repo.MarkMessage(ctx, msg.PlatformMessageID, "control_blocked", "副作用命令必须 @ 机器人或使用明确命令", 0, "")
+		return false, nil
+	}
 	issue := referencedIssue(msg.Text)
 	if issue <= 0 {
 		issue = recentIssueFromHistory(history)

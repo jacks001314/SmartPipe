@@ -171,7 +171,7 @@ export function LanxinPage({ notify }: { notify: Notify }) {
               <div className="field"><label>App ID</label><input value={form.app_id} onChange={(e) => setForm((p) => ({ ...p, app_id: e.target.value }))} placeholder="orgId-appId" /></div>
               <div className="field full"><label>App Secret</label><input type="password" value={form.app_secret} onChange={(e) => setForm((p) => ({ ...p, app_secret: e.target.value }))} placeholder="粘贴机器人 App Secret" /></div>
               <div className="field full"><label>API Base</label><input value={form.api_base} onChange={(e) => setForm((p) => ({ ...p, api_base: e.target.value }))} placeholder="https://apigw.lx.qianxin.com" /><div className="tiny">无需填写 /v1；系统会自动读取群列表和群详情。</div></div>
-              <div className="field full"><label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 400 }}><input type="checkbox" checked={form.require_at_me} onChange={(e) => setForm((p) => ({ ...p, require_at_me: e.target.checked }))} />群聊仅响应 @机器人 的消息</label></div>
+              <div className="field full"><label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 400 }}><input type="checkbox" checked={form.require_at_me} onChange={(e) => setForm((p) => ({ ...p, require_at_me: e.target.checked }))} />未配置 Scheduler 时的兜底：仅响应 @机器人（启用后按群策略）</label></div>
             </div>
           </div>
           <div className="modal-foot"><div className="tiny">群 ID 由系统自动同步，用户无需填写。</div><div><button className="btn" onClick={() => setCreateOpen(false)}>取消</button>{" "}<button className="btn primary" disabled={saving} onClick={() => void create()}>{saving ? "添加中…" : "添加机器人"}</button></div></div>

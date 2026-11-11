@@ -189,7 +189,7 @@ func New(cfg Config, deps Deps) (*Scheduler, error) {
 		cfg.MaxAttempts = 3
 	}
 	if cfg.ChatHistorySize <= 0 {
-		cfg.ChatHistorySize = 12
+		cfg.ChatHistorySize = 20
 	}
 	if cfg.ReconcileInterval <= 0 {
 		cfg.ReconcileInterval = 5 * time.Minute
@@ -358,17 +358,38 @@ func (s *Scheduler) HandleMessage(ctx context.Context, msg Inbound) error {
 		if link, err := s.repo.GetLink(ctx, msg.PlatformMessageID); err == nil && link != nil {
 			return nil // 幂等：同一条消息只处理一次
 		}
+		if claimed, err := s.repo.ClaimMessage(ctx, msg.PlatformMessageID, msg.BotID, s.now(), messageClaimTTL); err != nil {
+			log.Printf("[scheduler] claim message %s: %v", msg.PlatformMessageID, err)
+		} else if !claimed {
+			log.Printf("[scheduler] message %s already claimed by another bot", msg.PlatformMessageID)
+			return nil
+		}
 	}
 	p, err := s.resolver.ByChat(ctx, msg.ChatID())
 	if err != nil {
 		_ = s.repo.RecordMessage(ctx, messageRecord(msg, "", "unbound", "群未绑定项目"))
-		_ = s.notify(ctx, "", msg.ChatID(), "", "这个群还没有绑定项目，请管理员在配置台完成绑定。")
+		if isDirectMessage(msg) {
+			_ = s.notify(ctx, "", msg.ChatID(), "", "这个群还没有绑定项目，请管理员在配置台完成绑定。")
+		}
 		return ErrUnbound
 	}
 	_ = s.repo.RecordMessage(ctx, messageRecord(msg, p.ID, "processing", ""))
 	history, _ := s.repo.RecentChat(ctx, msg.ChatID(), s.cfg.ChatHistorySize)
 	referenced := referencedIssue(msg.Text)
 	_ = s.repo.AppendChat(ctx, ChatMessage{ChatID: msg.ChatID(), ProjectID: p.ID, Role: "user", Body: msg.Text})
+
+	if msg.ChatType == "group" && !isDirectMessage(msg) {
+		policy := normalizeChatPolicy(p.Policy)
+		switch policy.Mode {
+		case "smart":
+			return s.handleObserved(ctx, p, msg, history, false)
+		case "all":
+			return s.handleObserved(ctx, p, msg, history, true)
+		default:
+			_ = s.repo.MarkMessage(ctx, msg.PlatformMessageID, "ignored", "at_only：未 @ 机器人，也不是明确命令", 0, "")
+			return nil
+		}
+	}
 
 	if handled, draftErr := s.answerIssueDraft(ctx, p, msg); handled {
 		return draftErr
@@ -1288,7 +1309,11 @@ func (s *Scheduler) notify(ctx context.Context, botID, chatID, replyTo, text str
 	if s.notifier == nil {
 		return nil
 	}
-	return s.notifier.SendGroup(ctx, botID, chatID, replyTo, text)
+	if err := s.notifier.SendGroup(ctx, botID, chatID, replyTo, text); err != nil {
+		return err
+	}
+	_ = s.repo.RecordChatReply(ctx, chatID, botID, s.now())
+	return nil
 }
 
 func (s *Scheduler) notifyIssue(ctx context.Context, p *Project, w *Worker, text string) {

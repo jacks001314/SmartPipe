@@ -30,6 +30,7 @@ type Inbound struct {
 	MsgType           string       `json:"msgType"` // 原始 msgType
 	Text              string       `json:"text"`    // 归一化文本（text/format 均提取）
 	IsAtMe            bool         `json:"isAtMe"`
+	ReplyToBot        bool         `json:"replyToBot,omitempty"`
 	Attachments       []Attachment `json:"attachments,omitempty"`
 
 	// Reply 回复该消息的便捷函数（由 Handler 注入；不参与 JSON 序列化）。

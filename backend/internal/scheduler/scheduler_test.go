@@ -13,12 +13,14 @@ import (
 )
 
 type fakeRunner struct {
-	mu        sync.Mutex
-	specs     []codexrunner.Spec
-	chatReply string
-	fixReply  string
-	chatErr   error
-	fixErr    error
+	mu          sync.Mutex
+	specs       []codexrunner.Spec
+	chatReply   string
+	triageReply string
+	fixReply    string
+	chatErr     error
+	triageErr   error
+	fixErr      error
 }
 
 func (f *fakeRunner) Run(ctx context.Context, spec codexrunner.Spec) (*codexrunner.Result, error) {
@@ -26,6 +28,12 @@ func (f *fakeRunner) Run(ctx context.Context, spec codexrunner.Spec) (*codexrunn
 	f.specs = append(f.specs, spec)
 	f.mu.Unlock()
 	if spec.Sandbox == "read-only" {
+		if spec.BaseInstructions == ObserveSystemPrompt {
+			if f.triageErr != nil {
+				return nil, f.triageErr
+			}
+			return &codexrunner.Result{Status: "completed", FinalResponse: f.triageReply}, nil
+		}
 		if f.chatErr != nil {
 			return nil, f.chatErr
 		}
@@ -259,6 +267,7 @@ func (r fixedResolver) ByID(ctx context.Context, projectID string) (*Project, er
 
 type harness struct {
 	s         *Scheduler
+	project   *Project
 	repo      *MemoryRepo
 	runner    *fakeRunner
 	tracker   *fakeTracker
@@ -280,6 +289,7 @@ func newHarness(t *testing.T, cfg Config) *harness {
 		vcs:       &fakeVCS{},
 	}
 	project := &Project{ID: "prj-1", Name: "core", Repo: "acme/core", DefaultBase: "main", LocalPath: "/tmp/repo"}
+	h.project = project
 	s, err := New(cfg, Deps{
 		Repo: h.repo, Runner: h.runner, Differ: DifferFunc(func(ctx context.Context, dir, git string, ex ...string) (string, error) {
 			return "diff --git a/x b/x\n+fix", nil
@@ -541,7 +551,7 @@ func TestPromptsAreRoleSpecific(t *testing.T) {
 
 func TestUnboundChatRepliesAndFails(t *testing.T) {
 	h := newHarness(t, Config{})
-	err := h.s.HandleMessage(context.Background(), Inbound{PlatformMessageID: "m9", GroupID: "other", Text: "你好"})
+	err := h.s.HandleMessage(context.Background(), Inbound{PlatformMessageID: "m9", ChatType: "group", GroupID: "other", Text: "你好", IsAtMe: true})
 	if !errors.Is(err, ErrUnbound) {
 		t.Fatalf("want ErrUnbound, got %v", err)
 	}

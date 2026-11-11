@@ -207,6 +207,18 @@ func (h *Handler) seenID(id string) bool {
 	return false
 }
 
+func isExplicitBotCommand(text string) bool {
+	t := strings.TrimSpace(text)
+	for strings.HasPrefix(t, "@") {
+		fields := strings.Fields(t)
+		if len(fields) == 0 {
+			return false
+		}
+		t = strings.TrimSpace(strings.TrimPrefix(t, fields[0]))
+	}
+	return strings.HasPrefix(t, "/") || strings.HasPrefix(t, "确认建单") || strings.HasPrefix(t, "取消建单") || strings.HasPrefix(t, "撤回建单") || strings.HasPrefix(t, "撤销建单")
+}
+
 // HandleEvent 实现 lanxin.EventHandler。
 func (h *Handler) HandleEvent(ctx context.Context, ev lanxin.Event) error {
 	switch ev.Type {
@@ -248,18 +260,23 @@ func (h *Handler) handleMessage(ctx context.Context, m *lanxin.InboundMessage) e
 	if m.MsgID == "" || h.seenID(m.MsgID) {
 		return nil // 幂等：重连/补发场景
 	}
-	if m.ChatType == "group" && (!h.cfg.RequireAtMe || (m.Reminder != nil && m.Reminder.IsAtMe)) {
+	text := m.TextContent()
+	isAtMe := m.Reminder != nil && m.Reminder.IsAtMe
+	replyToBot := m.ReferenceMsg != nil && m.ReferenceMsg.FromType == 1
+	explicitCommand := isExplicitBotCommand(text)
+	observeAll := m.ChatType == "group" && strings.TrimSpace(h.cfg.SchedulerURL) != ""
+	nonDirect := m.ChatType == "group" && !isAtMe && !replyToBot && !explicitCommand
+	if m.ChatType == "group" && (observeAll || !h.cfg.RequireAtMe || isAtMe || replyToBot || explicitCommand) {
 		h.resolveMessageNames(ctx, m)
 	}
 
-	text := m.TextContent()
 	if mediaType, ids := m.MediaAttachment(); len(ids) > 0 {
-		if m.ChatType == "group" && h.cfg.RequireAtMe && (m.Reminder == nil || !m.Reminder.IsAtMe) {
+		if nonDirect && !observeAll {
 			h.reportInbox(ctx, m, "群消息未 @ 机器人")
 			return nil
 		}
-		// 只有 crash bundle 或 /crash 才走一键上报；图片、文档等交给模型。
-		if h.crash != nil && isCrashBundle(m, text) {
+		// @ 的 crash bundle 走一键上报；非 @ 消息交给调度器观察，避免影子模式直接建草稿。
+		if h.crash != nil && isCrashBundle(m, text) && !nonDirect {
 			chatID := m.GroupID
 			if strings.TrimSpace(chatID) == "" {
 				chatID = m.From
@@ -302,9 +319,9 @@ func (h *Handler) handleMessage(ctx context.Context, m *lanxin.InboundMessage) e
 		}
 		return h.dispatch(ctx, m, text, false, nil)
 	case "group":
-		if h.cfg.RequireAtMe && (m.Reminder == nil || !m.Reminder.IsAtMe) {
+		if nonDirect && !observeAll {
 			h.reportInbox(ctx, m, "群消息未 @ 机器人")
-			return nil // 未 @ 机器人的群消息不处理
+			return nil
 		}
 		if text == "/new" {
 			h.reportInbox(ctx, m, "命令已在本地处理")
@@ -333,6 +350,7 @@ func (h *Handler) dispatch(ctx context.Context, m *lanxin.InboundMessage, text s
 		MsgType:           m.MsgType,
 		Text:              text,
 		IsAtMe:            m.Reminder != nil && m.Reminder.IsAtMe,
+		ReplyToBot:        m.ReferenceMsg != nil && m.ReferenceMsg.FromType == 1,
 		Attachments:       attachments,
 	}
 	in.Reply = func(ctx context.Context, replyText string) error {

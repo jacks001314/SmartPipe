@@ -13,6 +13,11 @@ type Repo interface {
 	AppendChat(ctx context.Context, m ChatMessage) error
 	RecentChat(ctx context.Context, chatID string, limit int) ([]ChatMessage, error)
 
+	ClaimMessage(ctx context.Context, messageID, botID string, now time.Time, ttl time.Duration) (bool, error)
+	RecordChatReply(ctx context.Context, chatID, botID string, at time.Time) error
+	RecentChatReplies(ctx context.Context, chatID string, since time.Time) (int, time.Time, error)
+	CountAutoIssueDrafts(ctx context.Context, projectID, chatID string, since time.Time) (int, error)
+
 	CreateIssueDraft(ctx context.Context, d *IssueDraft) (bool, error)
 	LatestPendingIssueDraft(ctx context.Context, projectID, chatID string, now time.Time) (*IssueDraft, error)
 	ClaimIssueDraft(ctx context.Context, id, projectID, chatID, actorID, actorName string, now time.Time) (*IssueDraft, error)

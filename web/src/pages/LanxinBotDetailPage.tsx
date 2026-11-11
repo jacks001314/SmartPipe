@@ -1,7 +1,24 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api";
-import type { LanxinBot, LanxinBotDetail } from "../types";
+import type { LanxinBot, LanxinBotDetail, LanxinGroup } from "../types";
 import type { Notify } from "../App";
+
+type GroupPolicyForm = {
+  response_mode: "at_only" | "smart" | "all";
+  shadow_mode: boolean;
+  reply_cooldown_seconds: number;
+  hourly_reply_limit: number;
+  auto_issue_enabled: boolean;
+  auto_issue_confidence: number;
+  daily_auto_issue_limit: number;
+  answer_confidence: number;
+};
+
+const MODE_LABEL: Record<string, string> = {
+  at_only: "@ 或命令",
+  smart: "智能观察",
+  all: "全部处理",
+};
 
 type EditForm = {
   name: string;
@@ -20,12 +37,21 @@ const statusLabel = (status: string) => ({
 }[status] ?? status);
 
 const messageStatus = (status: string) => ({
-  awaiting_confirmation: "待确认建单",
   issue_created: "已建单",
   issue_updated: "已补充",
   answered: "已回答",
   need_info: "待补充",
+  awaiting_confirmation: "待确认建单",
   processing: "处理中",
+  ignored: "已忽略",
+  silent: "判断沉默",
+  shadow_silent: "影子-沉默",
+  shadow_answer: "影子-候选回答",
+  shadow_triage: "影子-候选建单",
+  triage_candidate: "待评估候选",
+  rate_limited: "限额跳过",
+  deduped_bot: "其他机器人已处理",
+  control_blocked: "控制命令已拦截",
   filtered: "已过滤",
   unbound: "未绑定项目",
   failed: "处理失败",
@@ -51,6 +77,12 @@ export function LanxinBotDetailPage({
   const [editOpen, setEditOpen] = useState(false);
   const [form, setForm] = useState<EditForm>({ name: "", app_id: "", app_secret: "", api_base: "", require_at_me: true });
   const [saving, setSaving] = useState(false);
+  const [policyGroup, setPolicyGroup] = useState<LanxinGroup | null>(null);
+  const [policyForm, setPolicyForm] = useState<GroupPolicyForm>({
+    response_mode: "smart", shadow_mode: true, reply_cooldown_seconds: 30, hourly_reply_limit: 6,
+    auto_issue_enabled: false, auto_issue_confidence: 0.85, daily_auto_issue_limit: 3, answer_confidence: 0.55,
+  });
+  const [savingPolicy, setSavingPolicy] = useState(false);
 
   const load = useCallback(async (sync = false) => {
     setLoading(true);
@@ -124,6 +156,38 @@ export function LanxinBotDetailPage({
     }
   };
 
+  const openPolicy = (g: LanxinGroup) => {
+    setPolicyGroup(g);
+    setPolicyForm({
+      response_mode: g.response_mode || "smart",
+      shadow_mode: g.shadow_mode,
+      reply_cooldown_seconds: g.reply_cooldown_seconds,
+      hourly_reply_limit: g.hourly_reply_limit,
+      auto_issue_enabled: g.auto_issue_enabled,
+      auto_issue_confidence: g.auto_issue_confidence,
+      daily_auto_issue_limit: g.daily_auto_issue_limit,
+      answer_confidence: g.answer_confidence,
+    });
+  };
+
+  const savePolicy = async () => {
+    if (!policyGroup) return;
+    setSavingPolicy(true);
+    try {
+      const updated = await api.updateLanxinGroupPolicy({
+        group_id: policyGroup.group_id,
+        ...policyForm,
+      });
+      setDetail((prev) => prev ? { ...prev, groups: prev.groups.map((g) => g.group_id === updated.group_id ? { ...g, ...updated } : g) } : prev);
+      setPolicyGroup(null);
+      notify("群响应策略已保存");
+    } catch (err) {
+      notify(err instanceof ApiError ? err.message : "保存群策略失败", "error");
+    } finally {
+      setSavingPolicy(false);
+    }
+  };
+
   const toggle = async () => {
     if (!detail) return;
     try {
@@ -189,7 +253,7 @@ export function LanxinBotDetailPage({
           <div className="stat-grid" style={{ marginBottom: 12 }}>
             <div className="stat"><div className="stat-label">所在群</div><div className="stat-value">{detail.groups.length}</div><div className="stat-foot">自动从蓝信同步</div></div>
             <div className="stat"><div className="stat-label">消息记录</div><div className="stat-value">{detail.messages.length}</div><div className="stat-foot">最近 100 条</div></div>
-            <div className="stat"><div className="stat-label">群聊规则</div><div className="stat-value" style={{ fontSize: 18 }}>{bot.require_at_me ? "仅 @ 时响应" : "全部消息"}</div><div className="stat-foot">保存后自动重连</div></div>
+            <div className="stat"><div className="stat-label">群响应策略</div><div className="stat-value" style={{ fontSize: 18 }}>{detail.groups.filter((g) => g.response_mode !== "at_only").length} 个群观察</div><div className="stat-foot">按群配置，见下方策略列</div></div>
             <div className="stat"><div className="stat-label">最近同步</div><div className="stat-value" style={{ fontSize: 16 }}>{bot.last_group_sync_at ? new Date(bot.last_group_sync_at).toLocaleString() : "—"}</div><div className="stat-foot">打开详情时自动刷新</div></div>
           </div>
           <div className="tiny mono">API Base：{bot.api_base}</div>
@@ -215,15 +279,19 @@ export function LanxinBotDetailPage({
             <div className="empty">当前没有同步到群。确认机器人已加入群，并检查群列表接口权限。</div>
           ) : (
             <table className="table">
-              <thead><tr><th>群名称</th><th>群 ID</th><th>成员</th><th>群主</th><th>项目绑定</th><th>同步时间</th></tr></thead>
+              <thead><tr><th>群名称</th><th>群 ID</th><th>成员</th><th>项目绑定</th><th>响应策略</th><th>限额</th><th>同步时间</th></tr></thead>
               <tbody>
                 {detail.groups.map((g) => (
                   <tr key={g.id}>
                     <td><div className="strong">{g.name || "(未命名群)"}</div>{g.description && <div className="tiny">{g.description}</div>}</td>
                     <td className="mono tiny">{g.group_id}</td>
                     <td>{g.member_count || "—"}</td>
-                    <td>{g.owner_name || <span className="muted">—</span>}</td>
                     <td>{g.project_id ? <span className="chip ok">{g.project_name || g.project_id}</span> : <span className="muted">未绑定项目</span>}</td>
+                    <td>
+                      <div>{MODE_LABEL[g.response_mode] || g.response_mode}{g.shadow_mode && <span className="chip warn" style={{ marginLeft: 6 }}>影子</span>}</div>
+                      <button className="btn" style={{ marginTop: 4 }} onClick={() => openPolicy(g)}>编辑策略</button>
+                    </td>
+                    <td className="tiny">{g.hourly_reply_limit} 条/小时<br />冷却 {g.reply_cooldown_seconds}s<br />自动建单 {g.daily_auto_issue_limit}/日</td>
                     <td className="tiny">{new Date(g.synced_at).toLocaleString()}</td>
                   </tr>
                 ))}
@@ -277,12 +345,43 @@ export function LanxinBotDetailPage({
               <div className="field"><label>App ID</label><input value={form.app_id} onChange={(e) => setForm((p) => ({ ...p, app_id: e.target.value }))} /></div>
               <div className="field full"><label>App Secret</label><input type="password" value={form.app_secret} onChange={(e) => setForm((p) => ({ ...p, app_secret: e.target.value }))} placeholder={"已保存（" + bot.secret_mask + "），留空不修改"} /></div>
               <div className="field full"><label>API Base</label><input value={form.api_base} onChange={(e) => setForm((p) => ({ ...p, api_base: e.target.value }))} /></div>
-              <div className="field full"><label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 400 }}><input type="checkbox" checked={form.require_at_me} onChange={(e) => setForm((p) => ({ ...p, require_at_me: e.target.checked }))} />群聊仅响应 @机器人 的消息</label></div>
+              <div className="field full"><label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 400 }}><input type="checkbox" checked={form.require_at_me} onChange={(e) => setForm((p) => ({ ...p, require_at_me: e.target.checked }))} />未配置 Scheduler 时的兜底：群聊仅响应 @机器人 的消息</label><div className="tiny">启用 Scheduler 后由各群自己的响应策略决定，默认 smart + 影子模式。</div></div>
             </div>
           </div>
           <div className="modal-foot">
             <div className="tiny">凭据只以密文保存。</div>
             <div><button className="btn" onClick={() => setEditOpen(false)}>取消</button>{" "}<button className="btn primary" disabled={saving} onClick={() => void save()}>{saving ? "保存中…" : "保存"}</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div className={"modal-backdrop" + (policyGroup ? " open" : "")}>
+        <div className="modal" style={{ width: "min(680px, 100%)" }}>
+          <div className="modal-head">
+            <div><div className="modal-title">群响应策略</div><div className="modal-sub">{policyGroup?.name || policyGroup?.group_id}</div></div>
+            <button className="icon-btn" onClick={() => setPolicyGroup(null)}>✕</button>
+          </div>
+          <div className="modal-body">
+            <div className="form-grid">
+              <div className="field"><label>响应模式</label>
+                <select value={policyForm.response_mode} onChange={(e) => setPolicyForm((p) => ({ ...p, response_mode: e.target.value as GroupPolicyForm["response_mode"] }))}>
+                  <option value="at_only">at_only：只处理 @ 和明确命令</option>
+                  <option value="smart">smart：观察全部消息，按置信度响应</option>
+                  <option value="all">all：全部消息进入 agent</option>
+                </select>
+              </div>
+              <div className="field"><label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 400 }}><input type="checkbox" checked={policyForm.shadow_mode} onChange={(e) => setPolicyForm((p) => ({ ...p, shadow_mode: e.target.checked }))} />影子模式：只记录判断，不回复</label></div>
+              <div className="field"><label>回答置信度阈值</label><input type="number" min="0" max="1" step="0.05" value={policyForm.answer_confidence} onChange={(e) => setPolicyForm((p) => ({ ...p, answer_confidence: Number(e.target.value) }))} /></div>
+              <div className="field"><label>自动建单置信度阈值</label><input type="number" min="0" max="1" step="0.05" value={policyForm.auto_issue_confidence} onChange={(e) => setPolicyForm((p) => ({ ...p, auto_issue_confidence: Number(e.target.value) }))} /></div>
+              <div className="field"><label>每小时回复上限</label><input type="number" min="1" value={policyForm.hourly_reply_limit} onChange={(e) => setPolicyForm((p) => ({ ...p, hourly_reply_limit: Number(e.target.value) }))} /></div>
+              <div className="field"><label>回复冷却（秒）</label><input type="number" min="0" value={policyForm.reply_cooldown_seconds} onChange={(e) => setPolicyForm((p) => ({ ...p, reply_cooldown_seconds: Number(e.target.value) }))} /></div>
+              <div className="field"><label>每日自动建单草稿上限</label><input type="number" min="0" value={policyForm.daily_auto_issue_limit} onChange={(e) => setPolicyForm((p) => ({ ...p, daily_auto_issue_limit: Number(e.target.value) }))} /></div>
+              <div className="field"><label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 400 }}><input type="checkbox" checked={policyForm.auto_issue_enabled} onChange={(e) => setPolicyForm((p) => ({ ...p, auto_issue_enabled: e.target.checked }))} />允许高置信度非 @ 消息自动建单草稿</label><div className="tiny">即使开启，也仍然先发群等待“确认建单”。</div></div>
+            </div>
+          </div>
+          <div className="modal-foot">
+            <div className="tiny">影子模式适合上线初期观察误判率。</div>
+            <div><button className="btn" onClick={() => setPolicyGroup(null)}>取消</button>{" "}<button className="btn primary" disabled={savingPolicy} onClick={() => void savePolicy()}>{savingPolicy ? "保存中…" : "保存"}</button></div>
           </div>
         </div>
       </div>
