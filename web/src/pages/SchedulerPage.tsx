@@ -49,6 +49,7 @@ const MESSAGE_LABEL: Record<string, string> = {
   processing: "处理中",
   answered: "已回答",
   need_info: "待补充",
+  awaiting_confirmation: "待确认建单",
   issue_created: "已建单",
   issue_updated: "已补充",
   unbound: "未绑定",

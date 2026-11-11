@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"smartpipe/backend/internal/github"
+	"smartpipe/backend/internal/issuedraft"
 	"smartpipe/backend/internal/store"
 )
 
@@ -37,12 +39,23 @@ type Ingest struct {
 	Source  string
 	Bundle  Bundle
 	RawSize int
+
+	// 群会话信息用于建单确认；自动建单必须先回到来源群等待明确确认。
+	MessageID  string
+	ChatID     string
+	BotID      string
+	BotName    string
+	GroupName  string
+	SenderID   string
+	SenderName string
 }
 
 // Outcome 是上报结果。
 type Outcome struct {
 	Status      string             `json:"status"`
 	Report      *store.CrashReport `json:"report,omitempty"`
+	DraftID     string             `json:"draft_id,omitempty"`
+	Prompt      string             `json:"prompt,omitempty"`
 	IssueNumber int                `json:"issue_number"`
 	IssueURL    string             `json:"issue_url"`
 	Occurrences int                `json:"occurrences"`
@@ -136,6 +149,9 @@ func (s *Service) Ingest(ctx context.Context, in Ingest) (*Outcome, error) {
 	}
 
 	b := normalized.Bundle
+	if strings.TrimSpace(in.ChatID) == "" {
+		return nil, errors.New("crash: chat_id is required so the issue can be confirmed in its source group")
+	}
 	if previous, err := s.Store.FindCrashByFingerprint(ctx, projectID, normalized.Fingerprint, now.Add(-s.dedupeWindow())); err == nil {
 		occurrences, bumpErr := s.Store.BumpCrashReport(ctx, previous.ID, now)
 		if bumpErr != nil {
@@ -152,20 +168,13 @@ func (s *Service) Ingest(ctx context.Context, in Ingest) (*Outcome, error) {
 		return nil, err
 	}
 
-	if s.Forge == nil {
-		return nil, errors.New("crash: forge resolver is required")
-	}
-	client, err := s.Forge(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("crash: resolve github client: %w", err)
-	}
 	labels := []string{"crash", "crash_report", "source:" + in.Source}
 	raw, _ := json.Marshal(b)
 	occurred := normalized.OccurredAt
 	report, err := s.Store.CreateCrashReport(ctx, store.CrashReport{
 		ProjectID: projectID, Fingerprint: normalized.Fingerprint, App: b.App, Version: b.Version,
 		OS: b.OS, Arch: b.Arch, UserID: b.UserID, DeviceID: b.DeviceID, Source: in.Source,
-		Repo: in.Repo, Status: "pending", Occurrences: 1, SizeBytes: normalized.SizeBytes,
+		Repo: in.Repo, Status: "awaiting_confirmation", Occurrences: 1, SizeBytes: normalized.SizeBytes,
 		Bundle: raw, OccurredAt: &occurred,
 	})
 	if err != nil {
@@ -177,19 +186,59 @@ func (s *Service) Ingest(ctx context.Context, in Ingest) (*Outcome, error) {
 		report.Similar = rawSimilar
 	}
 	body := Body(*normalized, in.Source, report.ID, 1, now) + SimilarSection(similar)
-	issue, err := client.CreateIssue(ctx, in.Repo, Title(b), body, labels)
+	draftID, err := issuedraft.NewID()
 	if err != nil {
-		_ = s.Store.UpdateCrashIssue(ctx, report.ID, 0, "", "rejected", "issue creation failed: "+err.Error())
-		return nil, fmt.Errorf("crash: create issue: %w", err)
+		_ = s.Store.UpdateCrashIssue(ctx, report.ID, 0, "", "rejected", "draft id failed: "+err.Error())
+		return nil, fmt.Errorf("crash: draft id: %w", err)
 	}
-	if err := s.Store.UpdateCrashIssue(ctx, report.ID, issue.Number, issue.HTMLURL, "created", ""); err != nil {
-		return nil, err
+	sourceID := strings.TrimSpace(in.MessageID)
+	if sourceID == "" {
+		sourceID = "crash-report-" + strconv.FormatInt(report.ID, 10)
 	}
-	report.IssueNumber = issue.Number
-	report.IssueURL = issue.HTMLURL
-	report.Status = "created"
-	return &Outcome{Status: "created", Report: report, IssueNumber: issue.Number,
-		IssueURL: issue.HTMLURL, Occurrences: 1, Similar: similar}, nil
+	draft := &issuedraft.Draft{
+		ID: draftID, Kind: issuedraft.KindCrash, ProjectID: valueOr(projectID, ""), ChatID: in.ChatID,
+		SourceMessageID: sourceID, BotID: in.BotID, BotName: in.BotName,
+		GroupID: in.ChatID, GroupName: in.GroupName, SenderID: in.SenderID, SenderName: in.SenderName,
+		SourceText: "崩溃上报：" + Title(b), Title: Title(b), Body: body, Severity: "high",
+		RefID: strconv.FormatInt(report.ID, 10), Repo: in.Repo, Labels: labels,
+		Status: issuedraft.StatusPending, CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(issuedraft.TTL),
+	}
+	created, err := s.Store.CreateIssueDraft(ctx, draft)
+	if err != nil {
+		_ = s.Store.UpdateCrashIssue(ctx, report.ID, 0, "", "rejected", "issue draft failed: "+err.Error())
+		return nil, fmt.Errorf("crash: create issue draft: %w", err)
+	}
+	if !created {
+		existing, getErr := s.Store.IssueDraftBySource(ctx, sourceID)
+		if getErr != nil {
+			return nil, getErr
+		}
+		if existing == nil {
+			_ = s.Store.UpdateCrashIssue(ctx, report.ID, 0, "", "rejected", "duplicate draft source has no draft")
+			return nil, errors.New("crash: duplicate draft source has no draft")
+		}
+		if existing.Status == issuedraft.StatusCreated {
+			report.Status = "created"
+			report.IssueNumber = existing.Issue
+			report.IssueURL = existing.IssueURL
+			return &Outcome{Status: "deduped", Report: report, DraftID: existing.ID,
+				IssueNumber: existing.Issue, IssueURL: existing.IssueURL, Occurrences: 1, Similar: similar}, nil
+		}
+		if existing.Status != issuedraft.StatusPending && existing.Status != issuedraft.StatusCreating {
+			return &Outcome{Status: "deduped", Report: report, DraftID: existing.ID, Occurrences: 1, Similar: similar}, nil
+		}
+		draft = existing
+	}
+	report.Status = "awaiting_confirmation"
+	return &Outcome{Status: "awaiting_confirmation", Report: report, DraftID: draft.ID,
+		Prompt: issuedraft.Prompt(draft), Occurrences: 1, Similar: similar}, nil
+}
+
+func valueOr(v *string, fallback string) string {
+	if v != nil {
+		return *v
+	}
+	return fallback
 }
 
 func (s *Service) rejectedRow(in Ingest, projectID *string, now time.Time, reason string) store.CrashReport {
@@ -214,7 +263,7 @@ func (s *Service) findSimilar(ctx context.Context, projectID *string, b Bundle, 
 	}
 	items := make([]Similar, 0, len(rows))
 	for _, r := range rows {
-		if r.Fingerprint == fingerprint {
+		if r.Fingerprint == fingerprint || r.IssueNumber <= 0 {
 			continue
 		}
 		var prev Bundle

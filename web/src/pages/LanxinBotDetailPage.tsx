@@ -20,6 +20,7 @@ const statusLabel = (status: string) => ({
 }[status] ?? status);
 
 const messageStatus = (status: string) => ({
+  awaiting_confirmation: "待确认建单",
   issue_created: "已建单",
   issue_updated: "已补充",
   answered: "已回答",

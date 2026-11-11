@@ -347,6 +347,7 @@ func (s *Scheduler) DispatchOnce(ctx context.Context) error {
 type messageOutcome struct {
 	Status   string
 	Reason   string
+	DraftID  string
 	Issue    int
 	IssueURL string
 }
@@ -369,6 +370,9 @@ func (s *Scheduler) HandleMessage(ctx context.Context, msg Inbound) error {
 	referenced := referencedIssue(msg.Text)
 	_ = s.repo.AppendChat(ctx, ChatMessage{ChatID: msg.ChatID(), ProjectID: p.ID, Role: "user", Body: msg.Text})
 
+	if handled, draftErr := s.answerIssueDraft(ctx, p, msg); handled {
+		return draftErr
+	}
 	if handled, controlErr := s.answerWorkerControl(ctx, p, msg, history); handled {
 		return controlErr
 	}
@@ -413,6 +417,9 @@ func messageRecord(msg Inbound, projectID, status, reason string) MessageRecord 
 func decisionSummary(d *ChatDecision, outcome messageOutcome) string {
 	switch d.Action {
 	case "issue":
+		if outcome.Status == "awaiting_confirmation" {
+			return fmt.Sprintf("待确认建单 %s：%s", outcome.DraftID, d.Title)
+		}
 		if outcome.Status == "issue_updated" {
 			return fmt.Sprintf("已补充到已有 Issue #%d：%s", outcome.Issue, d.Title)
 		}
@@ -522,24 +529,14 @@ func (s *Scheduler) applyChatDecision(ctx context.Context, p *Project, msg Inbou
 			}
 			return messageOutcome{Status: "issue_updated", Reason: "重复问题，已补充到已有 Issue", Issue: existing.Number, IssueURL: existing.URL}, nil
 		}
-		labels := []string{"from-lanxin", "severity/" + d.Severity}
-		issue, err := s.tracker.CreateIssue(ctx, p.ID, d.Title, buildIssueBody(msg, d), labels)
+		draft, err := s.newIssueDraft(ctx, p, msg, d)
 		if err != nil {
 			return messageOutcome{Status: "failed"}, err
 		}
-		w := &Worker{ProjectID: p.ID, Issue: issue.Number, IssueTitle: issue.Title, IssueURL: issue.URL, ChatID: msg.ChatID(), State: StateQueued}
-		created, err := s.queueWorker(ctx, w, "来自蓝信建单，worker 已入队")
-		if err != nil {
-			return messageOutcome{Status: "failed", Issue: issue.Number, IssueURL: issue.URL}, err
+		if err := s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, issueDraftPrompt(draft)); err != nil {
+			return messageOutcome{Status: "failed", DraftID: draft.ID}, err
 		}
-		if created {
-			s.Wake()
-		}
-		_ = s.repo.PutLink(ctx, Link{PlatformMessageID: msg.PlatformMessageID, ProjectID: p.ID, Issue: issue.Number, ChatID: msg.ChatID()})
-		if err := s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, buildIssueReply(msg, issue)); err != nil {
-			return messageOutcome{Status: "failed", Issue: issue.Number, IssueURL: issue.URL}, err
-		}
-		return messageOutcome{Status: "issue_created", Reason: d.Title, Issue: issue.Number, IssueURL: issue.URL}, nil
+		return messageOutcome{Status: "awaiting_confirmation", Reason: draft.Title, DraftID: draft.ID}, nil
 	}
 	return messageOutcome{Status: "ignored"}, nil
 }

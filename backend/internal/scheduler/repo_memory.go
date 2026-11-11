@@ -17,6 +17,7 @@ type MemoryRepo struct {
 	workers      map[string]*Worker
 	events       []WorkerEvent
 	messages     []MessageRecord
+	drafts       map[string]*IssueDraft
 	outputs      map[string]map[string]WorkerOutput
 	nextID       int
 	nextOutputID int64
@@ -28,6 +29,7 @@ func NewMemoryRepo() *MemoryRepo {
 	return &MemoryRepo{
 		links:   map[string]Link{},
 		workers: map[string]*Worker{},
+		drafts:  map[string]*IssueDraft{},
 		outputs: map[string]map[string]WorkerOutput{},
 		now:     time.Now,
 	}
@@ -364,4 +366,117 @@ func (r *MemoryRepo) ClaimNext(ctx context.Context, maxGlobal, maxPerProject int
 		return copyWorker(w), nil
 	}
 	return nil, nil
+}
+
+func copyIssueDraft(d *IssueDraft) *IssueDraft {
+	if d == nil {
+		return nil
+	}
+	cp := *d
+	cp.Labels = append([]string(nil), d.Labels...)
+	return &cp
+}
+
+func (r *MemoryRepo) CreateIssueDraft(ctx context.Context, d *IssueDraft) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if d.SourceMessageID != "" {
+		for _, existing := range r.drafts {
+			if existing.SourceMessageID == d.SourceMessageID {
+				return false, nil
+			}
+		}
+	}
+	now := r.clock()
+	cp := copyIssueDraft(d)
+	if cp.Status == "" {
+		cp.Status = IssueDraftPending
+	}
+	if cp.Kind == "" {
+		cp.Kind = "chat"
+	}
+	if cp.CreatedAt.IsZero() {
+		cp.CreatedAt = now
+	}
+	cp.UpdatedAt = now
+	if cp.ExpiresAt.IsZero() {
+		cp.ExpiresAt = now.Add(issueDraftTTL)
+	}
+	if cp.ID == "" {
+		return false, ErrIssueDraftNotFound
+	}
+	for _, existing := range r.drafts {
+		if existing.ProjectID == cp.ProjectID && existing.ChatID == cp.ChatID && existing.Status == IssueDraftPending {
+			existing.Status = IssueDraftSuperseded
+			existing.UpdatedAt = now
+		}
+	}
+	r.drafts[cp.ID] = cp
+	*d = *cp
+	return true, nil
+}
+
+func (r *MemoryRepo) LatestPendingIssueDraft(ctx context.Context, projectID, chatID string, now time.Time) (*IssueDraft, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var found *IssueDraft
+	for _, d := range r.drafts {
+		if d.ProjectID != projectID || d.ChatID != chatID || d.Status != IssueDraftPending {
+			continue
+		}
+		if !d.ExpiresAt.After(now) {
+			d.Status = IssueDraftExpired
+			d.UpdatedAt = now
+			continue
+		}
+		if found == nil || d.CreatedAt.After(found.CreatedAt) {
+			found = d
+		}
+	}
+	return copyIssueDraft(found), nil
+}
+
+func (r *MemoryRepo) ClaimIssueDraft(ctx context.Context, id, projectID, chatID, actorID, actorName string, now time.Time) (*IssueDraft, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	d := r.drafts[id]
+	if d == nil || d.ProjectID != projectID || d.ChatID != chatID || d.Status != IssueDraftPending || !d.ExpiresAt.After(now) {
+		return nil, nil
+	}
+	d.Status = IssueDraftCreating
+	d.ConfirmedByID = actorID
+	d.ConfirmedByName = actorName
+	d.UpdatedAt = now
+	return copyIssueDraft(d), nil
+}
+
+func (r *MemoryRepo) FinishIssueDraft(ctx context.Context, id, status string, issue int, issueURL string, now time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	d := r.drafts[id]
+	if d == nil {
+		return ErrIssueDraftNotFound
+	}
+	d.Status = status
+	d.Issue = issue
+	d.IssueURL = issueURL
+	d.UpdatedAt = now
+	return nil
+}
+
+func (r *MemoryRepo) ReleaseIssueDraft(ctx context.Context, id string, now time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	d := r.drafts[id]
+	if d == nil || d.Status != IssueDraftCreating {
+		return nil
+	}
+	d.Status = IssueDraftPending
+	d.UpdatedAt = now
+	return nil
+}
+
+// MarkIssueDraftSource 在内存仓储里无需回写外部事实；PostgreSQL 实现会更新崩溃上报状态。
+func (r *MemoryRepo) MarkIssueDraftSource(ctx context.Context, d *IssueDraft, status string, issue int, issueURL string) error {
+	return nil
 }

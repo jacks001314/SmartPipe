@@ -138,18 +138,27 @@ func main() {
 			return
 		}
 
-		link, created, err := svc.HandleMessage(r.Context(), msg)
+		res, err := svc.HandleInbound(r.Context(), msg)
 		if err != nil {
 			_ = st.MarkLanxinMessage(r.Context(), msg.MessageID, store.LanxinStatusFailed, err.Error(), 0, "")
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
-		_ = st.MarkLanxinMessage(r.Context(), msg.MessageID, store.LanxinStatusIssueCreated, "", link.IssueNumber, link.IssueURL)
+		if res.Draft != nil && res.Link == nil {
+			_ = st.MarkLanxinMessage(r.Context(), msg.MessageID, store.LanxinStatusReceived, "待群内确认建单", 0, "")
+			writeJSON(w, http.StatusAccepted, map[string]any{"draft": res.Draft, "created": false})
+			return
+		}
+		if res.Link == nil {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+			return
+		}
+		_ = st.MarkLanxinMessage(r.Context(), msg.MessageID, store.LanxinStatusIssueCreated, "", res.Link.IssueNumber, res.Link.IssueURL)
 		status := http.StatusOK
-		if created {
+		if res.Created {
 			status = http.StatusCreated
 		}
-		writeJSON(w, status, map[string]any{"link": link, "created": created})
+		writeJSON(w, status, map[string]any{"link": res.Link, "created": res.Created})
 	})
 	// /bridge/inbound 记录未进入建单流程的消息（未 @、非文本、命令等），保证收件箱完整。
 	mux.HandleFunc("/bridge/inbound", func(w http.ResponseWriter, r *http.Request) {
@@ -243,10 +252,16 @@ func main() {
 			return
 		}
 		var in struct {
-			ProjectID string       `json:"project_id"`
-			ChatID    string       `json:"chat_id"`
-			Source    string       `json:"source"`
-			Bundle    crash.Bundle `json:"bundle"`
+			ProjectID  string       `json:"project_id"`
+			ChatID     string       `json:"chat_id"`
+			MessageID  string       `json:"message_id"`
+			BotID      string       `json:"bot_id"`
+			BotName    string       `json:"bot_name"`
+			GroupName  string       `json:"group_name"`
+			SenderID   string       `json:"sender_id"`
+			SenderName string       `json:"sender_name"`
+			Source     string       `json:"source"`
+			Bundle     crash.Bundle `json:"bundle"`
 		}
 		if err := json.Unmarshal(raw, &in); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
@@ -273,7 +288,11 @@ func main() {
 		if repo == "" {
 			repo = strings.TrimSpace(project.GitHubRepoURL)
 		}
-		outcome, err := crashSvc.Ingest(r.Context(), crash.Ingest{Project: project, Repo: repo, Source: in.Source, Bundle: in.Bundle, RawSize: len(raw)})
+		outcome, err := crashSvc.Ingest(r.Context(), crash.Ingest{
+			Project: project, Repo: repo, Source: in.Source, Bundle: in.Bundle, RawSize: len(raw),
+			MessageID: in.MessageID, ChatID: in.ChatID, BotID: in.BotID, BotName: in.BotName,
+			GroupName: in.GroupName, SenderID: in.SenderID, SenderName: in.SenderName,
+		})
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
 			return
@@ -281,6 +300,8 @@ func main() {
 		payload := map[string]any{"data": outcome}
 		status := http.StatusCreated
 		switch outcome.Status {
+		case "awaiting_confirmation":
+			status = http.StatusAccepted
 		case "deduped":
 			status = http.StatusOK
 		case "rate_limited":

@@ -69,11 +69,18 @@ func TestChatHistoryRemembersCreatedIssue(t *testing.T) {
 	if err := h.s.HandleMessage(context.Background(), msg("m-issue-history", "导出点了没反应")); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
+	draftID := issueDraftIDPattern.FindString(strings.Join(h.notifier.all(), "\n"))
+	if draftID == "" {
+		t.Fatalf("draft id missing: %#v", h.notifier.all())
+	}
+	if err := h.s.HandleMessage(context.Background(), msg("m-issue-history-confirm", "确认建单 "+draftID)); err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
 	history, err := h.repo.RecentChat(context.Background(), "group-1", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(history) == 0 || !strings.Contains(history[len(history)-1].Body, "已建单 #1") {
+	if len(history) == 0 || !strings.Contains(history[len(history)-1].Body, "已确认并创建 Issue #1") {
 		t.Fatalf("history should include issue number: %#v", history)
 	}
 }

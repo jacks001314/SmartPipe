@@ -264,7 +264,11 @@ func (h *Handler) handleMessage(ctx context.Context, m *lanxin.InboundMessage) e
 			if strings.TrimSpace(chatID) == "" {
 				chatID = m.From
 			}
-			res, msg, err := h.crash.HandleAttachment(ctx, mediaType, ids[0], chatID)
+			res, msg, err := h.crash.Handle(ctx, CrashAttachment{
+				MediaType: mediaType, MediaID: ids[0], ChatID: chatID, MessageID: m.MsgID,
+				BotID: h.cfg.BotID, BotName: h.cfg.BotName, GroupName: m.GroupName,
+				SenderID: m.From, SenderName: m.SenderName,
+			})
 			if replyErr := h.reply(ctx, m, msg); replyErr != nil {
 				log.Printf("[bot] crash reply failed: %v", replyErr)
 			}

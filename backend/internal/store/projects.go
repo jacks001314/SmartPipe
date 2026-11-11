@@ -220,6 +220,7 @@ func (s *Store) DeleteProject(ctx context.Context, id string) error {
 	for _, table := range []string{
 		"agent_tokens", "bridge_links", "derivations", "issue_attempts", "patch_verifications",
 		"release_runs", "releases", "repo_ops", "runtime_resources", "tool_calls", "crash_reports",
+		"scheduler_issue_drafts",
 	} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id = $1`, id); err != nil {
 			_ = tx.Rollback()

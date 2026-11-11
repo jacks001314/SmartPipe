@@ -121,16 +121,38 @@ func (e *testEnv) project(t *testing.T, enabled bool) *store.Project {
 	return p
 }
 
+func handleWithConfirm(t *testing.T, svc *Service, msg Message) (*store.BridgeLink, bool) {
+	t.Helper()
+	ctx := context.Background()
+	res, err := svc.HandleInbound(ctx, msg)
+	if err != nil {
+		t.Fatalf("draft: %v", err)
+	}
+	if res == nil || res.Draft == nil || res.Link != nil {
+		t.Fatalf("expected pending draft, got %+v", res)
+	}
+	confirm := msg
+	confirm.MessageID = msg.MessageID + "-confirm"
+	confirm.Title = "确认建单 " + res.Draft.ID
+	confirm.Body = "确认建单 " + res.Draft.ID
+	res, err = svc.HandleInbound(ctx, confirm)
+	if err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+	if res == nil || res.Link == nil || !res.Created || !res.Confirmed {
+		t.Fatalf("expected confirmed issue, got %+v", res)
+	}
+	return res.Link, res.Created
+}
+
 func TestHandleMessageCreatesOnceAndDedupes(t *testing.T) {
 	env := newEnv(t)
 	project := env.project(t, true)
 	svc := NewService(env.store, nil)
 	msg := Message{MessageID: "msg-1", ChatID: "grp-1", UserID: "u-1", Title: "启动崩溃", Body: "点击就崩", ProjectID: project.ID}
+	svc.WithNotifier(&fakeNotifier{})
 
-	link, created, err := svc.HandleMessage(context.Background(), msg)
-	if err != nil {
-		t.Fatalf("handle: %v", err)
-	}
+	link, created := handleWithConfirm(t, svc, msg)
 	if !created || link.IssueNumber != 101 {
 		t.Fatalf("unexpected link: %+v created=%v", link, created)
 	}
@@ -211,11 +233,13 @@ func TestWebhookDedupesDelivery(t *testing.T) {
 }
 
 type fakeNotifier struct {
-	calls  int
-	botID  string
-	target string
-	text   string
-	err    error
+	calls      int
+	failOnCall int
+	botID      string
+	target     string
+	text       string
+	texts      []string
+	err        error
 }
 
 func (f *fakeNotifier) Reply(ctx context.Context, botID, chatType, targetID, refMsgID, text string) error {
@@ -223,7 +247,11 @@ func (f *fakeNotifier) Reply(ctx context.Context, botID, chatType, targetID, ref
 	f.botID = botID
 	f.target = targetID
 	f.text = text
-	return f.err
+	f.texts = append(f.texts, text)
+	if f.failOnCall > 0 && f.calls == f.failOnCall {
+		return f.err
+	}
+	return nil
 }
 
 func TestReceiptSentToSourceGroup(t *testing.T) {
@@ -231,13 +259,13 @@ func TestReceiptSentToSourceGroup(t *testing.T) {
 	project := env.project(t, true)
 	fake := &fakeNotifier{}
 	svc := NewService(env.store, nil).WithNotifier(fake)
-	link, created, err := svc.HandleMessage(context.Background(), Message{
+	link, created := handleWithConfirm(t, svc, Message{
 		MessageID: "msg-r1", BotID: "lbot-receipt", ChatID: "grp-9", Title: "回执验证", ProjectID: project.ID,
 	})
-	if err != nil || !created {
-		t.Fatalf("handle: %v created=%v", err, created)
+	if !created {
+		t.Fatalf("handle: created=%v", created)
 	}
-	if fake.calls != 1 || fake.target != "grp-9" || fake.botID != "lbot-receipt" {
+	if fake.calls != 2 || fake.target != "grp-9" || fake.botID != "lbot-receipt" {
 		t.Fatalf("notifier calls=%d bot=%q target=%q", fake.calls, fake.botID, fake.target)
 	}
 	if !strings.Contains(fake.text, link.IssueURL) || !strings.Contains(fake.text, "#101") {
@@ -251,13 +279,13 @@ func TestReceiptSentToSourceGroup(t *testing.T) {
 func TestReceiptFailureKeepsIssue(t *testing.T) {
 	env := newEnv(t)
 	project := env.project(t, true)
-	fake := &fakeNotifier{err: errors.New("bot offline")}
+	fake := &fakeNotifier{err: errors.New("bot offline"), failOnCall: 2}
 	svc := NewService(env.store, nil).WithNotifier(fake)
-	link, created, err := svc.HandleMessage(context.Background(), Message{
+	link, created := handleWithConfirm(t, svc, Message{
 		MessageID: "msg-r2", ChatID: "grp-9", Title: "回执失败", ProjectID: project.ID,
 	})
-	if err != nil || !created {
-		t.Fatalf("handle: %v created=%v", err, created)
+	if !created {
+		t.Fatalf("handle: created=%v", created)
 	}
 	if link.ReceiptStatus != "failed" || !strings.Contains(link.ReceiptError, "bot offline") {
 		t.Fatalf("link = %+v", link)
@@ -296,11 +324,9 @@ func TestHandleMessageAddsReporterAttribution(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert identity: %v", err)
 	}
-	svc := NewService(env.store, nil)
+	svc := NewService(env.store, nil).WithNotifier(&fakeNotifier{})
 	msg := Message{MessageID: "msg-attr", ChatID: "grp-1", UserID: "u-42", Title: "登录崩溃", Body: "点登录就崩", ProjectID: project.ID}
-	if _, _, err := svc.HandleMessage(context.Background(), msg); err != nil {
-		t.Fatalf("handle: %v", err)
-	}
+	_, _ = handleWithConfirm(t, svc, msg)
 	if len(env.bodies) != 1 {
 		t.Fatalf("issue bodies = %d", len(env.bodies))
 	}
@@ -316,11 +342,9 @@ func TestHandleMessageAddsReporterAttribution(t *testing.T) {
 func TestHandleMessageWithoutIdentityKeepsBody(t *testing.T) {
 	env := newEnv(t)
 	project := env.project(t, true)
-	svc := NewService(env.store, nil)
+	svc := NewService(env.store, nil).WithNotifier(&fakeNotifier{})
 	msg := Message{MessageID: "msg-plain", UserID: "u-unknown", Title: "崩溃", Body: "原始描述", ProjectID: project.ID}
-	if _, _, err := svc.HandleMessage(context.Background(), msg); err != nil {
-		t.Fatalf("handle: %v", err)
-	}
+	_, _ = handleWithConfirm(t, svc, msg)
 	if len(env.bodies) != 1 || env.bodies[0] != "原始描述" {
 		t.Fatalf("body = %v", env.bodies)
 	}

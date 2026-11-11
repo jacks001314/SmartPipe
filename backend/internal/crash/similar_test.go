@@ -55,22 +55,29 @@ func TestIngestAddsSimilarSection(t *testing.T) {
 
 	first := sampleBundle()
 	first.UserID = "test-sim-a"
-	res, err := svc.Ingest(context.Background(), Ingest{Repo: "example/app", Bundle: first, RawSize: 512})
-	if err != nil || res.Status != "created" {
+	res, err := svc.Ingest(context.Background(), Ingest{Repo: "example/app", Bundle: first, RawSize: 512,
+		ChatID: "grp-sim-1", MessageID: "msg-sim-1"})
+	if err != nil || res.Status != "awaiting_confirmation" {
 		t.Fatalf("first ingest: %v %+v", err, res)
 	}
-	if strings.Contains(forge.created[0], "可能相关的问题") {
+	draft, _ := st.LatestPendingIssueDraft(context.Background(), "", "grp-sim-1", now)
+	if draft == nil || strings.Contains(draft.Body, "可能相关的问题") {
 		t.Fatal("first report should not reference anything")
 	}
+	// 模拟第一份崩溃已完成群内确认，后续相似崩溃才应引用它的 Issue。
+	if err := st.UpdateCrashIssue(context.Background(), res.Report.ID, 901, "https://example.test/issues/901", "created", ""); err != nil {
+		t.Fatal(err)
+	}
 
-	// 同栈不同异常类型、不同版本：应在新 Issue 正文里指出历史 Issue。
+	// 同栈不同异常类型、不同版本：应在新 Issue 草稿正文里指出历史 Issue。
 	second := sampleBundle()
 	second.UserID = "test-sim-b"
 	second.Version = "4.3.0"
 	second.Exception.Type = "InvalidOperationException"
 	second.Exception.Message = "wrapped failure on login"
-	res, err = svc.Ingest(context.Background(), Ingest{Repo: "example/app", Bundle: second, RawSize: 512})
-	if err != nil || res.Status != "created" {
+	res, err = svc.Ingest(context.Background(), Ingest{Repo: "example/app", Bundle: second, RawSize: 512,
+		ChatID: "grp-sim-2", MessageID: "msg-sim-2"})
+	if err != nil || res.Status != "awaiting_confirmation" {
 		t.Fatalf("second ingest: %v %+v", err, res)
 	}
 	if len(res.Similar) != 1 {
@@ -79,9 +86,12 @@ func TestIngestAddsSimilarSection(t *testing.T) {
 	if res.Similar[0].IssueNumber != 901 {
 		t.Fatalf("similar issue = %+v", res.Similar)
 	}
-	body := forge.created[len(forge.created)-1]
-	if !strings.Contains(body, "可能相关的问题") || !strings.Contains(body, "#901") {
-		t.Fatalf("body missing similar section: %s", body)
+	draft, _ = st.LatestPendingIssueDraft(context.Background(), "", "grp-sim-2", now)
+	if draft == nil || !strings.Contains(draft.Body, "可能相关的问题") || !strings.Contains(draft.Body, "#901") {
+		t.Fatalf("body missing similar section: %+v", draft)
+	}
+	if len(forge.created) != 0 {
+		t.Fatalf("forge must not create issue before confirmation: %d", len(forge.created))
 	}
 	_, _ = st.DB().Exec("DELETE FROM crash_reports WHERE user_id LIKE 'test-sim-%'")
 }

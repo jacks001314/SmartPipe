@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -408,4 +409,146 @@ WHERE id = (
   LIMIT 1
 ) RETURNING ` + workerColumns
 	return scanWorker(r.db.QueryRowContext(ctx, query, maxGlobal, maxPerProject))
+}
+
+const issueDraftColumns = `id, kind, project_id, chat_id, source_message_id, bot_id, bot_name,
+    group_id, group_name, sender_id, sender_name, source_text, title, body, severity, ref_id, repo, labels,
+    status, issue_number, issue_url, confirmed_by_id, confirmed_by_name, created_at, updated_at, expires_at`
+
+func scanIssueDraft(row interface{ Scan(...any) error }) (*IssueDraft, error) {
+	var (
+		d      IssueDraft
+		labels string
+	)
+	err := row.Scan(&d.ID, &d.Kind, &d.ProjectID, &d.ChatID, &d.SourceMessageID, &d.BotID, &d.BotName,
+		&d.GroupID, &d.GroupName, &d.SenderID, &d.SenderName, &d.SourceText, &d.Title, &d.Body,
+		&d.Severity, &d.RefID, &d.Repo, &labels, &d.Status, &d.Issue, &d.IssueURL,
+		&d.ConfirmedByID, &d.ConfirmedByName, &d.CreatedAt, &d.UpdatedAt, &d.ExpiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if labels != "" {
+		_ = json.Unmarshal([]byte(labels), &d.Labels)
+	}
+	return &d, nil
+}
+
+func (r *PgRepo) CreateIssueDraft(ctx context.Context, d *IssueDraft) (bool, error) {
+	now := time.Now()
+	if d.CreatedAt.IsZero() {
+		d.CreatedAt = now
+	}
+	d.UpdatedAt = now
+	if d.ExpiresAt.IsZero() {
+		d.ExpiresAt = now.Add(issueDraftTTL)
+	}
+	if d.Kind == "" {
+		d.Kind = "chat"
+	}
+	labels, _ := json.Marshal(d.Labels)
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("scheduler: issue draft tx: %w", err)
+	}
+	defer tx.Rollback()
+	row := tx.QueryRowContext(ctx, `
+INSERT INTO scheduler_issue_drafts
+ (id, kind, project_id, chat_id, source_message_id, bot_id, bot_name, group_id, group_name,
+  sender_id, sender_name, source_text, title, body, severity, ref_id, repo, labels,
+  status, created_at, updated_at, expires_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+ON CONFLICT (source_message_id) WHERE source_message_id <> '' DO NOTHING
+RETURNING `+issueDraftColumns,
+		d.ID, d.Kind, d.ProjectID, d.ChatID, d.SourceMessageID, d.BotID, d.BotName, d.GroupID, d.GroupName,
+		d.SenderID, d.SenderName, d.SourceText, d.Title, d.Body, d.Severity, d.RefID, d.Repo, string(labels),
+		d.Status, d.CreatedAt, d.UpdatedAt, d.ExpiresAt)
+	got, err := scanIssueDraft(row)
+	if err != nil {
+		return false, fmt.Errorf("scheduler: create issue draft: %w", err)
+	}
+	if got == nil {
+		return false, nil
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE scheduler_issue_drafts
+SET status=$4, updated_at=$5
+WHERE project_id=$1 AND chat_id=$2 AND status=$3 AND id<>$6`,
+		d.ProjectID, d.ChatID, IssueDraftPending, IssueDraftSuperseded, now, d.ID); err != nil {
+		return false, fmt.Errorf("scheduler: supersede issue drafts: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("scheduler: commit issue draft: %w", err)
+	}
+	*d = *got
+	return true, nil
+}
+
+func (r *PgRepo) LatestPendingIssueDraft(ctx context.Context, projectID, chatID string, now time.Time) (*IssueDraft, error) {
+	_, _ = r.db.ExecContext(ctx, `UPDATE scheduler_issue_drafts
+SET status=$4, updated_at=$3 WHERE project_id=$1 AND chat_id=$2 AND status=$5 AND expires_at <= $3`,
+		projectID, chatID, now, IssueDraftExpired, IssueDraftPending)
+	got, err := scanIssueDraft(r.db.QueryRowContext(ctx, `SELECT `+issueDraftColumns+`
+FROM scheduler_issue_drafts
+WHERE project_id=$1 AND chat_id=$2 AND status=$3 AND expires_at>$4
+ORDER BY created_at DESC LIMIT 1`, projectID, chatID, IssueDraftPending, now))
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: latest issue draft: %w", err)
+	}
+	return got, nil
+}
+
+func (r *PgRepo) ClaimIssueDraft(ctx context.Context, id, projectID, chatID, actorID, actorName string, now time.Time) (*IssueDraft, error) {
+	got, err := scanIssueDraft(r.db.QueryRowContext(ctx, `UPDATE scheduler_issue_drafts
+SET status=$6, confirmed_by_id=$7, confirmed_by_name=$8, updated_at=$9
+WHERE id=$1 AND project_id=$2 AND chat_id=$3 AND status=$4 AND expires_at>$5
+RETURNING `+issueDraftColumns,
+		id, projectID, chatID, IssueDraftPending, now, IssueDraftCreating, actorID, actorName, now))
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: claim issue draft: %w", err)
+	}
+	return got, nil
+}
+
+func (r *PgRepo) FinishIssueDraft(ctx context.Context, id, status string, issue int, issueURL string, now time.Time) error {
+	result, err := r.db.ExecContext(ctx, `UPDATE scheduler_issue_drafts
+SET status=$2, issue_number=$3, issue_url=$4, updated_at=$5 WHERE id=$1`, id, status, issue, issueURL, now)
+	if err != nil {
+		return fmt.Errorf("scheduler: finish issue draft: %w", err)
+	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		return ErrIssueDraftNotFound
+	}
+	return nil
+}
+
+func (r *PgRepo) ReleaseIssueDraft(ctx context.Context, id string, now time.Time) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE scheduler_issue_drafts
+SET status=$3, updated_at=$2 WHERE id=$1 AND status=$4`, id, now, IssueDraftPending, IssueDraftCreating)
+	if err != nil {
+		return fmt.Errorf("scheduler: release issue draft: %w", err)
+	}
+	return nil
+}
+
+// MarkIssueDraftSource 把确认结果回写到来源业务表；崩溃上报需要看到真实 Issue 才能去重和补评论。
+func (r *PgRepo) MarkIssueDraftSource(ctx context.Context, d *IssueDraft, status string, issue int, issueURL string) error {
+	if d == nil || d.Kind != "crash" || d.RefID == "" {
+		return nil
+	}
+	reportID, err := strconv.ParseInt(d.RefID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("scheduler: bad crash report id %q: %w", d.RefID, err)
+	}
+	crashStatus := "pending"
+	if status == IssueDraftCreated {
+		crashStatus = "created"
+	} else if status == IssueDraftCancelled {
+		crashStatus = "cancelled"
+	}
+	_, err = r.db.ExecContext(ctx, `UPDATE crash_reports
+SET issue_number=$2, issue_url=$3, status=$4, updated_at=now() WHERE id=$1`,
+		reportID, issue, issueURL, crashStatus)
+	return err
 }

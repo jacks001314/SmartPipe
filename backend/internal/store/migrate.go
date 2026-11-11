@@ -14,6 +14,54 @@ type migration struct {
 
 var migrations = []migration{
 	{
+		version: 33,
+		name:    "issue_drafts_shared_sources",
+		sql: `
+ALTER TABLE scheduler_issue_drafts ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'chat';
+ALTER TABLE scheduler_issue_drafts ADD COLUMN IF NOT EXISTS ref_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE scheduler_issue_drafts ADD COLUMN IF NOT EXISTS repo TEXT NOT NULL DEFAULT '';
+ALTER TABLE scheduler_issue_drafts ADD COLUMN IF NOT EXISTS labels TEXT NOT NULL DEFAULT '[]';
+CREATE INDEX IF NOT EXISTS scheduler_issue_drafts_kind_idx
+  ON scheduler_issue_drafts (kind, status, created_at DESC);
+`,
+	},
+	{
+		version: 32,
+		name:    "scheduler_issue_drafts",
+		sql: `
+CREATE TABLE IF NOT EXISTS scheduler_issue_drafts (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  source_message_id TEXT NOT NULL DEFAULT '',
+  bot_id TEXT NOT NULL DEFAULT '',
+  bot_name TEXT NOT NULL DEFAULT '',
+  group_id TEXT NOT NULL DEFAULT '',
+  group_name TEXT NOT NULL DEFAULT '',
+  sender_id TEXT NOT NULL DEFAULT '',
+  sender_name TEXT NOT NULL DEFAULT '',
+  source_text TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  severity TEXT NOT NULL DEFAULT 'medium',
+  status TEXT NOT NULL DEFAULT 'pending',
+  issue_number INTEGER NOT NULL DEFAULT 0,
+  issue_url TEXT NOT NULL DEFAULT '',
+  confirmed_by_id TEXT NOT NULL DEFAULT '',
+  confirmed_by_name TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS scheduler_issue_drafts_source_uniq
+  ON scheduler_issue_drafts (source_message_id) WHERE source_message_id <> '';
+CREATE INDEX IF NOT EXISTS scheduler_issue_drafts_pending_idx
+  ON scheduler_issue_drafts (project_id, chat_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS scheduler_issue_drafts_expiry_idx
+  ON scheduler_issue_drafts (status, expires_at);
+`,
+	},
+	{
 		version: 31,
 		name:    "scheduler_worker_outputs",
 		sql: `

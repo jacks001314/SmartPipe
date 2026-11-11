@@ -33,6 +33,8 @@ type CrashIntake struct {
 // CrashResult 是上报接口返回的可展示结果。
 type CrashResult struct {
 	Status      string `json:"status"`
+	DraftID     string `json:"draft_id,omitempty"`
+	Prompt      string `json:"prompt,omitempty"`
 	IssueNumber int    `json:"issue_number"`
 	IssueURL    string `json:"issue_url"`
 	Occurrences int    `json:"occurrences"`
@@ -48,8 +50,27 @@ func (c *CrashIntake) maxBytes() int {
 	return defaultCrashMaxBytes
 }
 
-// HandleAttachment 处理一条带附件的消息：预检失败只回执，不调用上报接口。
+// CrashAttachment 是一条崩溃上报附件的完整来源，用于把建单草稿发回原群。
+type CrashAttachment struct {
+	MediaType  lanxin.MediaType
+	MediaID    string
+	ChatID     string
+	MessageID  string
+	BotID      string
+	BotName    string
+	GroupName  string
+	SenderID   string
+	SenderName string
+}
+
+// HandleAttachment 兼容旧调用：只带聊天目标，不含完整消息元数据。
 func (c *CrashIntake) HandleAttachment(ctx context.Context, mediaType lanxin.MediaType, mediaID, chatID string) (*CrashResult, string, error) {
+	return c.Handle(ctx, CrashAttachment{MediaType: mediaType, MediaID: mediaID, ChatID: chatID})
+}
+
+// Handle 处理一条带附件的消息：预检失败只回执，成功时只生成待确认草稿。
+func (c *CrashIntake) Handle(ctx context.Context, in CrashAttachment) (*CrashResult, string, error) {
+	mediaType, mediaID := in.MediaType, in.MediaID
 	if mediaType != lanxin.MediaFile && mediaType != lanxin.MediaImage {
 		return nil, fmt.Sprintf("只支持文件或图片形式的 crash_bundle（当前类型 %d）", mediaType), nil
 	}
@@ -74,19 +95,25 @@ func (c *CrashIntake) HandleAttachment(ctx context.Context, mediaType lanxin.Med
 	if strings.TrimSpace(bundle.App) == "" || strings.TrimSpace(bundle.Exception.Type) == "" {
 		return nil, "crash_bundle 缺少 app 或 exception.type 字段", nil
 	}
-	res, err := c.ingest(ctx, raw, chatID)
+	res, err := c.ingest(ctx, raw, in)
 	if err != nil {
 		return nil, "上报失败：" + err.Error(), err
 	}
 	return res, summarize(res), nil
 }
 
-func (c *CrashIntake) ingest(ctx context.Context, raw []byte, chatID string) (*CrashResult, error) {
+func (c *CrashIntake) ingest(ctx context.Context, raw []byte, in CrashAttachment) (*CrashResult, error) {
 	payload, err := json.Marshal(map[string]any{
-		"project_id": c.ProjectID,
-		"chat_id":    chatID,
-		"source":     "lanxin",
-		"bundle":     json.RawMessage(raw),
+		"project_id":  c.ProjectID,
+		"chat_id":     in.ChatID,
+		"message_id":  in.MessageID,
+		"bot_id":      in.BotID,
+		"bot_name":    in.BotName,
+		"group_name":  in.GroupName,
+		"sender_id":   in.SenderID,
+		"sender_name": in.SenderName,
+		"source":      "lanxin",
+		"bundle":      json.RawMessage(raw),
 	})
 	if err != nil {
 		return nil, err
@@ -131,6 +158,11 @@ func summarize(res *CrashResult) string {
 		return "上报完成，但没有返回结果"
 	}
 	switch res.Status {
+	case "awaiting_confirmation":
+		if strings.TrimSpace(res.Prompt) != "" {
+			return res.Prompt
+		}
+		return "崩溃已解析，等待群里确认建单。"
 	case "created":
 		return fmt.Sprintf("已建单：%s（Issue #%d），lead 会跟进。", res.IssueURL, res.IssueNumber)
 	case "deduped":
