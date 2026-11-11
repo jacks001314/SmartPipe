@@ -1,6 +1,8 @@
 param(
   [string]$HostName = "192.168.1.99",
   [string]$User = "jacks",
+  [ValidateRange(1, 65535)]
+  [int]$Port = 22,
   [string]$PassFile = "",
   [string]$EnvFile = "",
   [ValidateSet("docker", "binary")]
@@ -87,7 +89,7 @@ try {
 
   $pyArgs = @(
     (Join-Path $PSScriptRoot "remote-run.py"),
-    "--host", $HostName, "--user", $User,
+    "--host", $HostName, "--user", $User, "--port", "$Port",
     "--local", $Archive, "--dir", $RemoteDir, "--cmd", $remoteCommand, "--cleanup"
   )
   if ($PassFile) { $pyArgs += @("--pass-file", $PassFile) }

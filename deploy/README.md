@@ -140,6 +140,8 @@ sudo docker compose down
 
 `deploy.ps1` 会打包当前工作区、上传到 Linux、解包并执行安装脚本。SSH 密码通过 `-PassFile` 或环境变量 `SMARTPIPE_SSH_PASSWORD` 提供；密码不会打印。
 
+SSH 端口不是 22 时，加 `-Port 2222`。
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\deploy.ps1 `
   -HostName 192.168.1.99 -User jacks `

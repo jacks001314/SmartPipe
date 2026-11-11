@@ -223,10 +223,11 @@ install_docker_if_requested() {
 }
 
 wait_compose_healthy() {
-  local dir="$1" i service cid state ok
+  local dir="$1" i service cid state ok services
   for i in $(seq 1 60); do
     ok=1
-    for service in admin-api bridge patch-verifier bot; do
+    services="$(cd "$dir" && docker compose config --services 2>/dev/null || true)"
+    for service in $services; do
       cid="$(cd "$dir" && docker compose ps -q "$service" 2>/dev/null || true)"
       if [[ -z "$cid" ]]; then ok=0; break; fi
       state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" 2>/dev/null || echo unknown)"
