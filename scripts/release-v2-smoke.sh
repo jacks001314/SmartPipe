@@ -8,6 +8,7 @@
 #   agent   让服务端拉起真实 Release Agent 会话，等会话结束后断言运行 built
 #   agent-stage   Agent 自主 build→打包→暂存，停在审批门面；脚本批准后断言自动续跑会话收口到 published
 #   agent-publish 同上，但计划为 publish：批准后的续跑会话要完成 GitHub 发布并 published
+#   publish-partial  让假 GitHub 公开接口返回 503，断言运行停在 partially_published；恢复后只重试收口
 #   fail    用必失败的 fixture 构建，断言运行 failed、有 error_message、不登记制品、不产生发布记录
 #
 # 用法：
@@ -16,6 +17,7 @@
 #   sudo SMOKE_MODE=publish SMOKE_GITHUB_API_BASE=http://127.0.0.1:9099 bash /opt/smartpipe-v2-test/tools/release-v2-smoke.sh
 #   sudo SMOKE_MODE=agent-stage bash /opt/smartpipe-v2-test/tools/release-v2-smoke.sh
 #   sudo SMOKE_MODE=agent-publish SMOKE_GITHUB_API_BASE=http://127.0.0.1:9099 bash /opt/smartpipe-v2-test/tools/release-v2-smoke.sh
+#   sudo SMOKE_MODE=publish-partial SMOKE_GITHUB_API_BASE=http://127.0.0.1:9099 bash /opt/smartpipe-v2-test/tools/release-v2-smoke.sh
 #   sudo SMOKE_MODE=fail bash /opt/smartpipe-v2-test/tools/release-v2-smoke.sh
 #
 # 环境变量：
@@ -23,7 +25,7 @@
 #   SMARTPIPE_ENV_FILE   默认 /etc/smartpipe/smartpipe.env（取 SMARTPIPE_ADMIN_TOKEN）
 #   SMOKE_REPO_URL       默认 file:///opt/smartpipe-v2-test/fixture
 #   SMOKE_PROFILE_DIR    默认 /opt/smartpipe-v2-test/fixture
-#   SMOKE_MODE           build | stage | publish | agent | agent-stage | agent-publish | fail
+#   SMOKE_MODE           build | stage | publish | publish-partial | agent | agent-stage | agent-publish | fail
 #   SMOKE_AGENT_TIMEOUT  发布 Agent 单会话等待上限，默认 900 秒
 #   SMOKE_CHANNEL        默认 test
 #   SMOKE_ARTIFACT_ROLE  GitHub 上传的角色，默认 app-bundle
@@ -58,11 +60,14 @@ if [[ -z "${SMARTPIPE_ADMIN_TOKEN:-}" ]]; then
   set -a; . "$ENV_FILE"; set +a
 fi
 [[ -n "${SMARTPIPE_ADMIN_TOKEN:-}" ]] || fail "$ENV_FILE 里没有 SMARTPIPE_ADMIN_TOKEN"
-case "$MODE" in build|stage|publish|agent|agent-stage|agent-publish|fail) ;; *) fail "SMOKE_MODE 只能是 build/stage/publish/agent/agent-stage/agent-publish/fail（当前 $MODE）" ;; esac
+case "$MODE" in build|stage|publish|publish-partial|agent|agent-stage|agent-publish|fail) ;; *) fail "SMOKE_MODE 只能是 build/stage/publish/publish-partial/agent/agent-stage/agent-publish/fail（当前 $MODE）" ;; esac
 MODE_AGENT=0
 [[ "$MODE" == agent || "$MODE" == agent-stage || "$MODE" == agent-publish ]] && MODE_AGENT=1
 
 AUTH="Authorization: Bearer ${SMARTPIPE_ADMIN_TOKEN}"
+if [[ "$MODE" == "publish-partial" ]]; then
+  trap 'curl -s -m 3 -X POST -H "Content-Type: application/json" -d "{\"on\":false}" "$GH_BASE/__hold" >/dev/null 2>&1 || true' EXIT
+fi
 CT="Content-Type: application/json"
 
 admin_version=$(curl -fsS "$ADMIN/healthz" | json_field 'd.get("version","")')
@@ -85,7 +90,7 @@ pass "项目：$PROJECT_ID"
 
 VERSION="0.0.$((STAMP % 100000))"
 PLAN_MODE=build_only
-case "$MODE" in stage|agent-stage) PLAN_MODE=stage ;; publish|agent-publish) PLAN_MODE=publish ;; esac
+case "$MODE" in stage|agent-stage) PLAN_MODE=stage ;; publish|agent-publish|publish-partial) PLAN_MODE=publish ;; esac
 PLAN=$(curl -fsS -X POST -H "$AUTH" -H "$CT" \
   -d "{\"project_id\":\"$PROJECT_ID\",\"version\":\"$VERSION\",\"mode\":\"$PLAN_MODE\",\"channel\":\"$CHANNEL\",\"commit\":\"$COMMIT\"}" \
   "$ADMIN/admin/releases/v2/plans")
@@ -138,7 +143,7 @@ assert_published() {
   pub_state=$(echo "$pub" | json_field 'next((p.get("state") for p in (d["data"].get("publications") or []) if p.get("provider")=="update_service"), "")')
   [[ "$pub_state" == "promoted" ]] || fail "update_service 发布记录状态=$pub_state"
   pass "运行已发布（update_service=promoted）"
-  if [[ "$MODE" == "publish" || "$MODE" == "agent-publish" ]]; then
+  if [[ "$MODE" == "publish" || "$MODE" == "agent-publish" || "$MODE" == "publish-partial" ]]; then
     gh_id=$(echo "$pub" | json_field 'next((p.get("external_id") for p in (d["data"].get("publications") or []) if p.get("provider")=="github"), "")')
     [[ -n "$gh_id" ]] || fail "缺少 GitHub 发布记录"
     gh_state=$(echo "$pub" | json_field 'next((p.get("state") for p in (d["data"].get("publications") or []) if p.get("provider")=="github"), "")')
@@ -240,7 +245,7 @@ if [[ "$MODE" == "fail" ]]; then
 fi
 
 TARGET_STATUS=built
-[[ "$MODE" == "stage" || "$MODE" == "publish" ]] && TARGET_STATUS=verifying
+[[ "$MODE" == "stage" || "$MODE" == "publish" || "$MODE" == "publish-partial" ]] && TARGET_STATUS=verifying
 DEADLINE=$((SECONDS + TIMEOUT))
 STATUS=""
 while [[ $MODE_AGENT -eq 0 && "$MODE" != "fail" ]] && (( SECONDS < DEADLINE )); do
@@ -287,9 +292,9 @@ PY
 rm -f "$DETAIL_FILE"
 fi
 
-if [[ "$MODE" == "stage" || "$MODE" == "publish" ]]; then
+if [[ "$MODE" == "stage" || "$MODE" == "publish" || "$MODE" == "publish-partial" ]]; then
   SCOPES='"release.read","artifact.read","artifact.write","update.read","update.write","update.publish"'
-  [[ "$MODE" == "publish" ]] && SCOPES="$SCOPES,\"github.read\",\"github.write\",\"release.publish\""
+  [[ "$MODE" == "publish" || "$MODE" == "publish-partial" ]] && SCOPES="$SCOPES,\"github.read\",\"github.write\",\"release.publish\""
   TOKEN=$(curl -fsS -X POST -H "$AUTH" -H "$CT" \
     -d "{\"scopes\":[$SCOPES],\"ttl_seconds\":900}" \
     "$ADMIN/admin/releases/v2/runs/$RUN_ID/agent-token" | json_field 'd["data"]["token"]')
@@ -328,7 +333,7 @@ PY
   expect_ok update_import_stage
   pass "升级包已暂存"
 
-  if [[ "$MODE" == "publish" ]]; then
+  if [[ "$MODE" == "publish" || "$MODE" == "publish-partial" ]]; then
     expect_ok github_draft_create
     pass "GitHub 草稿已创建"
     expect_ok github_asset_upload "{\"role\":\"$ROLE\"}"
@@ -348,8 +353,40 @@ PY
     "$ADMIN/admin/releases/v2/runs/$RUN_ID/approvals" >/dev/null || fail "创建审批失败"
   pass "已批准（内容摘要绑定，未触发自动续跑）"
 
-  expect_ok "$FINAL_TOOL" "{\"channel\":\"$CHANNEL\"}"
-  pass "渠道已推进"
+  if [[ "$MODE" == "publish-partial" ]]; then
+    # 让假 GitHub 的 PATCH release 返回 503：渠道能推进，GitHub 收口失败。
+    curl -fsS -X POST -H "$CT" -d '{"on":true}' "$GH_BASE/__hold" >/dev/null || fail "开启 GitHub 故障失败"
+    pass "假 GitHub 公开接口已切到 503"
+
+    HELD=$(mcp_call "$FINAL_TOOL" "{\"channel\":\"$CHANNEL\"}")
+    echo "$HELD" | grep -v '^::'
+
+    DEADLINE=$((SECONDS + TIMEOUT))
+    STATUS=""
+    while (( SECONDS < DEADLINE )); do
+      DETAIL=$(curl -fsS -H "$AUTH" "$ADMIN/admin/releases/v2/runs/$RUN_ID")
+      STATUS=$(echo "$DETAIL" | json_field 'd["data"].get("run",d["data"])["status"]')
+      [[ "$STATUS" == "partially_published" ]] && break
+      [[ "$STATUS" == "published" ]] && fail "GitHub 故障时不应 published"
+      sleep 2
+    done
+    [[ "$STATUS" == "partially_published" ]] || fail "GitHub 故障后运行状态=$STATUS（期望 partially_published）"
+    pass "运行停在 partially_published"
+    PART_PUB=$(echo "$DETAIL" | json_field 'next((p.get("state") for p in (d["data"].get("publications") or []) if p.get("provider")=="update_service"), "")')
+    [[ "$PART_PUB" == "promoted" ]] || fail "部分发布时渠道应已推进（update_service=$PART_PUB）"
+    PART_GH=$(echo "$DETAIL" | json_field 'next((p.get("state") for p in (d["data"].get("publications") or []) if p.get("provider")=="github"), "")')
+    [[ "$PART_GH" != "published" ]] || fail "GitHub 记录不应已是 published"
+    pass "渠道已推进、GitHub 未完成（$PART_GH，可单独重试）"
+
+    curl -fsS -X POST -H "$CT" -d '{"on":false}' "$GH_BASE/__hold" >/dev/null || fail "恢复 GitHub 失败"
+    pass "假 GitHub 已恢复"
+
+    expect_ok "$FINAL_TOOL" "{\"channel\":\"$CHANNEL\"}"
+    pass "重试收口成功（未重复推进渠道）"
+  else
+    expect_ok "$FINAL_TOOL" "{\"channel\":\"$CHANNEL\"}"
+    pass "渠道已推进"
+  fi
 
   DEADLINE=$((SECONDS + TIMEOUT))
   while (( SECONDS < DEADLINE )); do
@@ -364,7 +401,7 @@ PY
   [[ "$PUB_STATE" == "promoted" ]] || fail "update_service 发布记录状态=$PUB_STATE"
   pass "运行已发布（update_service=promoted）"
 
-  if [[ "$MODE" == "publish" ]]; then
+  if [[ "$MODE" == "publish" || "$MODE" == "publish-partial" ]]; then
     GH_ID=$(echo "$PUB" | json_field 'next((p.get("external_id") for p in (d["data"].get("publications") or []) if p.get("provider")=="github"), "")')
     [[ -n "$GH_ID" ]] || fail "缺少 GitHub 发布记录"
     GH_STATE=$(echo "$PUB" | json_field 'next((p.get("state") for p in (d["data"].get("publications") or []) if p.get("provider")=="github"), "")')
