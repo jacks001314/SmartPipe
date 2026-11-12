@@ -6,6 +6,7 @@
 #   executor  构建进行中 kill -9 执行器，确认租约到期后目标被重排、新一次尝试把构建跑完
 #   storage   构建进行中拒绝对象存储端口，确认上传失败后目标重排、恢复后自动跑完
 #   storage-exhaust  端口一直不通，确认尝试次数用尽后运行按 artifact_upload_failed 收口
+#   both-restart     构建中同时重启 release-service 并杀掉执行器，确认两边都回来后仍能收口
 #
 # 用法：
 #   sudo bash release-v2-recovery.sh            # 两个场景都跑
@@ -13,6 +14,7 @@
 #   sudo bash release-v2-recovery.sh executor
 #   sudo bash release-v2-recovery.sh storage
 #   sudo bash release-v2-recovery.sh storage-exhaust
+#   sudo bash release-v2-recovery.sh both-restart
 #
 # 依赖：/opt/smartpipe-v2-test/fixture-slow（build 里 sleep 20），systemd 单元
 #       smartpipe-v2-release 与 smartpipe-v2-executor 由 systemd 管理。
@@ -47,7 +49,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "PASS: $*"; }
 json_field() { python3 -c "import sys,json;d=json.load(sys.stdin);print($1)" 2>/dev/null || true; }
 
-case "$MODE" in service|executor|storage|storage-exhaust|both) ;; *) fail "参数只能是 service/executor/storage/storage-exhaust/both（当前 $MODE）" ;; esac
+case "$MODE" in service|executor|storage|storage-exhaust|both-restart|both) ;; *) fail "参数只能是 service/executor/storage/storage-exhaust/both-restart/both（当前 $MODE）" ;; esac
 [[ $EUID -eq 0 ]] || fail "需要 root：要重启 systemd 单元"
 
 if [[ -z "${SMARTPIPE_ADMIN_TOKEN:-}" ]]; then
@@ -225,6 +227,34 @@ scenario_storage() {
   echo "RECOVERY_OK scenario=storage run=$run_id attempt=$cur"
 }
 
+scenario_both_restart() {
+  pass "场景 E：构建中同时重启 release-service 并杀掉执行器"
+  local run_id pid attempt arts
+  run_id=$(create_run both | tail -1)
+  wait_target "$run_id" leased 120
+  pass "目标已被认领，同时重启服务并杀执行器"
+  systemctl restart smartpipe-v2-release
+  pid=$(systemctl show -p MainPID --value smartpipe-v2-executor)
+  [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 0 ]] || fail "拿不到执行器 PID"
+  kill -9 "$pid"
+  pass "release-service 已重启、执行器已 kill（PID $pid）"
+  wait_health 60
+  pass "release-service 就绪"
+
+  wait_run "$run_id" built "$TIMEOUT"
+  attempt=$(target_attempt "$run_id")
+  [[ "$attempt" -ge 2 ]] || fail "目标 attempt=$attempt，未发生重排"
+  pass "租约到期后由新执行器完成构建（attempt=$attempt）"
+  assert_built_with_artifact "$run_id"
+  arts=$(run_detail "$run_id" | json_field 'len(d["data"].get("artifacts") or [])')
+  [[ "$arts" == "1" ]] || fail "制品数=$arts（期望 1，不应重复登记）"
+  pass "制品只登记 1 个，没有因重启重复"
+  systemctl is-active --quiet smartpipe-v2-executor || fail "执行器未自动拉起"
+  systemctl is-active --quiet smartpipe-v2-release || fail "release-service 未运行"
+  pass "两个单元都恢复运行"
+  echo "RECOVERY_OK scenario=both-restart run=$run_id attempt=$attempt"
+}
+
 [[ "$MODE" == "service" || "$MODE" == "both" ]] && scenario_service
 [[ "$MODE" == "executor" || "$MODE" == "both" ]] && scenario_executor
 scenario_storage_exhaust() {
@@ -278,5 +308,6 @@ scenario_storage_exhaust() {
 }
 
 [[ "$MODE" == "storage" || "$MODE" == "both" ]] && scenario_storage
+[[ "$MODE" == "both-restart" ]] && scenario_both_restart
 [[ "$MODE" == "storage-exhaust" ]] && scenario_storage_exhaust
 echo "RECOVERY_DONE mode=$MODE"
