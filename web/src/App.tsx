@@ -193,7 +193,7 @@ export function App() {
 
         <div className="sidebar-foot">
           <div className="env-card">
-            <div><b>环境</b> 本地开发（SIT）</div>
+            <div><b>版本</b> {health?.version ?? "-"}</div>
             <div><b>数据库</b> {health?.database ? "已连接" : "未连接"}</div>
             <div><b>鉴权</b> {health ? (health.auth === "dev-open" ? "dev-open" : "令牌") : "-"}</div>
           </div>
