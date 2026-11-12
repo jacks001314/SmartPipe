@@ -29,13 +29,24 @@ func (p settingsCredentialProvider) Resolve(ctx context.Context, ref string) (st
 
 type probeRequest struct {
 	Service string `json:"service"`
+	// Target 是可选的升级服务名；为空时探测全部已配置的服务。
+	Target string `json:"target"`
 }
 
 type probeResult struct {
-	OK      bool   `json:"ok"`
-	Service string `json:"service"`
-	Detail  string `json:"detail"`
-	Admin   bool   `json:"admin,omitempty"`
+	OK      bool                `json:"ok"`
+	Service string              `json:"service"`
+	Detail  string              `json:"detail"`
+	Admin   bool                `json:"admin,omitempty"`
+	Targets []probeTargetResult `json:"targets,omitempty"`
+}
+
+type probeTargetResult struct {
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	OK     bool   `json:"ok"`
+	Admin  bool   `json:"admin,omitempty"`
+	Detail string `json:"detail"`
 }
 
 // probeReleaseV2Settings checks a saved external connection without publishing
@@ -50,7 +61,7 @@ func (a *API) probeReleaseV2Settings(c iris.Context) {
 	}
 	switch strings.TrimSpace(in.Service) {
 	case "update":
-		a.probeUpdateService(ctx, c)
+		a.probeUpdateService(ctx, c, strings.TrimSpace(in.Target))
 	case "github":
 		a.probeGitHub(ctx, c)
 	default:
@@ -58,40 +69,87 @@ func (a *API) probeReleaseV2Settings(c iris.Context) {
 	}
 }
 
-func (a *API) probeUpdateService(ctx context.Context, c iris.Context) {
-	base, _ := a.store.GetSetting(ctx, "release_update_url")
-	credName, _ := a.store.GetSetting(ctx, "release_update_credential")
-	base = strings.TrimRight(strings.TrimSpace(base), "/")
-	if base == "" {
+func (a *API) probeUpdateService(ctx context.Context, c iris.Context, only string) {
+	services := a.updateServices(ctx)
+	if len(services) == 0 {
 		_ = c.JSON(envelope{Data: probeResult{Service: "update", Detail: "还没有保存升级服务地址"}})
 		return
 	}
 	client := &http.Client{Timeout: 20 * time.Second}
-	resp, err := client.Get(base + "/v1/pubkey")
-	if err != nil {
-		_ = c.JSON(envelope{Data: probeResult{Service: "update", Detail: "无法连接 " + base + "：" + err.Error()}})
+	adminClient := &http.Client{Timeout: 20 * time.Second}
+	results := make([]probeTargetResult, 0, len(services))
+	allOK := true
+	matched := false
+	for _, service := range services {
+		if only != "" && service.Name != only {
+			continue
+		}
+		matched = true
+		entry := probeTargetResult{Name: service.Name, URL: service.URL}
+		resp, err := client.Get(strings.TrimRight(service.URL, "/") + "/v1/pubkey")
+		if err != nil {
+			entry.Detail = "无法连接：" + err.Error()
+		} else {
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				entry.Detail = fmt.Sprintf("/v1/pubkey 返回 HTTP %d", resp.StatusCode)
+			} else if strings.TrimSpace(service.Credential) == "" {
+				entry.OK = true
+				entry.Detail = "服务可达；还没有配置管理令牌"
+			} else {
+				update := &releasepublish.UpdateClient{
+					BaseURL: service.URL, Creds: settingsCredentialProvider{store: a.store}, HTTP: adminClient,
+				}
+				releases, lerr := update.ListReleases(ctx, service.Credential, "")
+				if lerr != nil {
+					entry.Detail = "服务可达，但管理令牌校验失败：" + lerr.Error()
+				} else {
+					entry.OK = true
+					entry.Admin = true
+					entry.Detail = fmt.Sprintf("服务可达，管理令牌有效（%d 条发布记录）", len(releases))
+				}
+			}
+		}
+		if !entry.OK {
+			allOK = false
+		}
+		results = append(results, entry)
+	}
+	if only != "" && !matched {
+		_ = c.JSON(envelope{Data: probeResult{Service: "update", Detail: "没有名为 " + only + " 的升级服务"}})
 		return
 	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		_ = c.JSON(envelope{Data: probeResult{Service: "update", Detail: fmt.Sprintf("%s/v1/pubkey 返回 HTTP %d", base, resp.StatusCode)}})
-		return
+	okCount := 0
+	for _, entry := range results {
+		if entry.OK {
+			okCount++
+		}
 	}
-	if strings.TrimSpace(credName) == "" {
-		_ = c.JSON(envelope{Data: probeResult{OK: true, Service: "update", Detail: "服务可达；还没有配置管理令牌，发布前请补上凭据名"}})
-		return
+	out := probeResult{
+		OK: allOK, Service: "update", Targets: results,
+		Detail: fmt.Sprintf("%d/%d 个升级服务可用", okCount, len(results)),
 	}
-	adminClient := &releasepublish.UpdateClient{
-		BaseURL: base, Creds: settingsCredentialProvider{store: a.store},
-		HTTP: &http.Client{Timeout: 20 * time.Second},
+	if len(results) == 1 {
+		out.Admin = results[0].Admin
+		out.Detail = results[0].Detail
 	}
-	releases, err := adminClient.ListReleases(ctx, credName, "")
-	if err != nil {
-		_ = c.JSON(envelope{Data: probeResult{Service: "update", Detail: "服务可达，但管理令牌校验失败：" + err.Error()}})
-		return
+	_ = c.JSON(envelope{Data: out})
+}
+
+// updateServices 读取界面上维护的升级服务列表；空列表时回落到旧的单服务字段。
+func (a *API) updateServices(ctx context.Context) []releaseUpdateService {
+	if raw, err := a.store.GetSetting(ctx, "release_update_services"); err == nil && strings.TrimSpace(raw) != "" {
+		var services []releaseUpdateService
+		if json.Unmarshal([]byte(raw), &services) == nil && len(services) > 0 {
+			return services
+		}
 	}
-	_ = c.JSON(envelope{Data: probeResult{OK: true, Service: "update", Admin: true,
-		Detail: fmt.Sprintf("服务可达，管理令牌有效（当前 %d 条发布记录）", len(releases))}})
+	base, _ := a.store.GetSetting(ctx, "release_update_url")
+	cred, _ := a.store.GetSetting(ctx, "release_update_credential")
+	if strings.TrimSpace(base) == "" {
+		return nil
+	}
+	return []releaseUpdateService{{Name: "默认", URL: strings.TrimRight(strings.TrimSpace(base), "/"), Credential: strings.TrimSpace(cred), Enabled: true}}
 }
 
 func (a *API) probeGitHub(ctx context.Context, c iris.Context) {

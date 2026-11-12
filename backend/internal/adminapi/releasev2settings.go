@@ -1,6 +1,8 @@
 package adminapi
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -9,16 +11,28 @@ import (
 
 // releaseSettings 是发版系统在运行时读取的外部服务参数。密钥本身不在这里，
 // 只存凭据引用（credentials 表里的 name），避免明文进数据库。
+// releaseUpdateService 是一台可发布的升级服务：同一份制品要灌到每一台，
+// 每台有自己的管理员令牌，所以凭据也按服务分别保存。
+type releaseUpdateService struct {
+	Name       string `json:"name"`
+	URL        string `json:"url"`
+	Credential string `json:"credential"`
+	Enabled    bool   `json:"enabled"`
+}
+
 type releaseSettings struct {
-	UpdateURL        string `json:"update_url"`
-	UpdateCredential string `json:"update_credential"`
-	GitHubAPIBase    string `json:"github_api_base"`
-	GitHubCredential string `json:"github_credential"`
-	S3Endpoint       string `json:"s3_endpoint"`
-	S3Bucket         string `json:"s3_bucket"`
-	S3Region         string `json:"s3_region"`
-	S3Prefix         string `json:"s3_prefix"`
-	S3Credential     string `json:"s3_credential"`
+	// UpdateServices 是界面上维护的升级服务列表；UpdateURL/UpdateCredential
+	// 只作为单服务时代的兼容字段，保存时镜像第一个启用的服务。
+	UpdateServices   []releaseUpdateService `json:"update_services"`
+	UpdateURL        string                 `json:"update_url"`
+	UpdateCredential string                 `json:"update_credential"`
+	GitHubAPIBase    string                 `json:"github_api_base"`
+	GitHubCredential string                 `json:"github_credential"`
+	S3Endpoint       string                 `json:"s3_endpoint"`
+	S3Bucket         string                 `json:"s3_bucket"`
+	S3Region         string                 `json:"s3_region"`
+	S3Prefix         string                 `json:"s3_prefix"`
+	S3Credential     string                 `json:"s3_credential"`
 }
 
 var releaseSettingFields = []struct {
@@ -48,6 +62,14 @@ func (a *API) getReleaseV2Settings(c iris.Context) {
 		}
 		*f.Value(&out) = v
 	}
+	if raw, err := a.store.GetSetting(ctx, "release_update_services"); err == nil && strings.TrimSpace(raw) != "" {
+		_ = json.Unmarshal([]byte(raw), &out.UpdateServices)
+	}
+	if len(out.UpdateServices) == 0 && strings.TrimSpace(out.UpdateURL) != "" {
+		out.UpdateServices = []releaseUpdateService{{
+			Name: "默认", URL: out.UpdateURL, Credential: out.UpdateCredential, Enabled: true,
+		}}
+	}
 	_ = c.JSON(envelope{Data: out})
 }
 
@@ -69,14 +91,62 @@ func (a *API) putReleaseV2Settings(c iris.Context) {
 	in.S3Prefix = normalize(in.S3Prefix)
 	in.S3Credential = normalize(in.S3Credential)
 
-	for _, u := range []string{in.UpdateURL, in.GitHubAPIBase, in.S3Endpoint} {
+	for i := range in.UpdateServices {
+		service := &in.UpdateServices[i]
+		service.Name = strings.TrimSpace(service.Name)
+		service.URL = strings.TrimRight(strings.TrimSpace(service.URL), "/")
+		service.Credential = strings.TrimSpace(service.Credential)
+	}
+	cleaned := in.UpdateServices[:0]
+	seen := map[string]bool{}
+	for i, service := range in.UpdateServices {
+		if service.URL == "" {
+			continue
+		}
+		if service.Name == "" {
+			service.Name = fmt.Sprintf("升级服务 %d", i+1)
+		}
+		if seen[service.Name] {
+			a.badRequest(c, "升级服务名称重复: "+service.Name)
+			return
+		}
+		seen[service.Name] = true
+		cleaned = append(cleaned, service)
+	}
+	in.UpdateServices = cleaned
+	// 兼容字段镜像第一个启用的服务，旧版 release-mcp / 脚本仍能读到一个地址。
+	in.UpdateURL, in.UpdateCredential = "", ""
+	for _, service := range in.UpdateServices {
+		if service.Enabled {
+			in.UpdateURL, in.UpdateCredential = service.URL, service.Credential
+			break
+		}
+	}
+
+	for _, service := range in.UpdateServices {
+		u := service.URL
+		if u != "" && !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+			a.badRequest(c, "升级服务地址必须以 http:// 或 https:// 开头: "+u)
+			return
+		}
+	}
+	for _, u := range []string{in.GitHubAPIBase, in.S3Endpoint} {
 		if u != "" && !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
 			a.badRequest(c, "地址必须以 http:// 或 https:// 开头: "+u)
 			return
 		}
 	}
 
+	encoded, err := json.Marshal(in.UpdateServices)
+	if err != nil {
+		a.badRequest(c, "升级服务列表无法序列化")
+		return
+	}
 	ctx := c.Request().Context()
+	if err := a.store.SetSetting(ctx, "release_update_services", string(encoded)); err != nil {
+		a.fail(c, err)
+		return
+	}
 	for _, f := range releaseSettingFields {
 		if err := a.store.SetSetting(ctx, f.Key, *f.Value(&in)); err != nil {
 			a.fail(c, err)

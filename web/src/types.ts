@@ -798,14 +798,31 @@ export type ReleaseV2AgentView = {
   session?: ReleaseV2AgentSession;
 };
 
+export type ReleaseV2ProbeTarget = {
+  name: string;
+  url: string;
+  ok: boolean;
+  admin?: boolean;
+  detail: string;
+};
+
 export type ReleaseV2Probe = {
   ok: boolean;
   service: string;
   detail: string;
   admin?: boolean;
+  targets?: ReleaseV2ProbeTarget[];
+};
+
+export type ReleaseV2UpdateService = {
+  name: string;
+  url: string;
+  credential: string;
+  enabled: boolean;
 };
 
 export type ReleaseV2Settings = {
+  update_services: ReleaseV2UpdateService[];
   update_url: string;
   update_credential: string;
   github_api_base: string;

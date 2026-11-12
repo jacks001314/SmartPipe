@@ -132,8 +132,8 @@ export const api = {
   deleteGithubToken: () => request<void>("/github/token", { method: "DELETE" }),
   getReleaseV2Settings: () => request<ReleaseV2Settings>("/releases/v2/settings"),
   saveReleaseV2Settings: (body: ReleaseV2Settings) => request<ReleaseV2Settings>("/releases/v2/settings", { method: "PUT", body }),
-  probeReleaseV2Settings: (service: "update" | "github") =>
-    request<ReleaseV2Probe>("/releases/v2/settings/probe", { method: "POST", body: { service } }),
+  probeReleaseV2Settings: (service: "update" | "github", target = "") =>
+    request<ReleaseV2Probe>("/releases/v2/settings/probe", { method: "POST", body: { service, target } }),
   createCredential: (body: { project_id?: string | null; kind: string; name: string; value: string; metadata?: Record<string, unknown> }) =>
     request<Credential>("/credentials", { method: "POST", body }),
   rotateCredential: (id: string, value: string) =>

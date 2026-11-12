@@ -793,3 +793,39 @@ button { font-family: inherit; }
 }
 .grid.two input { width: 100%; min-width: 0; }
 .actions { display: flex; gap: 8px; margin-top: 12px; }
+
+/* 发版设置：多台升级服务的列表 */
+.settings-page { max-width: 1120px; }
+.svc-list { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.svc-row {
+  display: grid;
+  grid-template-columns: 130px minmax(220px, 1.7fr) 150px 170px minmax(190px, auto);
+  gap: 10px 12px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fbfcfe;
+}
+.svc-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-weight: 650;
+}
+.svc-row input { width: 100%; min-width: 0; }
+.svc-actions { display: flex; align-items: center; gap: 8px; padding-bottom: 1px; }
+.svc-enabled {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px !important;
+  white-space: nowrap;
+}
+.svc-enabled input { width: 14px; height: 14px; }
+.danger-ghost { color: #b42318; border-color: #f0c2bd; background: #fff; }
+@media (max-width: 1080px) {
+  .svc-row { grid-template-columns: 1fr 1fr; }
+  .svc-actions { grid-column: 1 / -1; }
+}
