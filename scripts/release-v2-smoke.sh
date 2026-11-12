@@ -8,6 +8,7 @@
 #   agent   让服务端拉起真实 Release Agent 会话，等会话结束后断言运行 built
 #   agent-stage   Agent 自主 build→打包→暂存，停在审批门面；脚本批准后断言自动续跑会话收口到 published
 #   agent-publish 同上，但计划为 publish：批准后的续跑会话要完成 GitHub 发布并 published
+#   fail    用必失败的 fixture 构建，断言运行 failed、有 error_message、不登记制品、不产生发布记录
 #
 # 用法：
 #   sudo bash /opt/smartpipe-v2-test/tools/release-v2-smoke.sh
@@ -15,13 +16,14 @@
 #   sudo SMOKE_MODE=publish SMOKE_GITHUB_API_BASE=http://127.0.0.1:9099 bash /opt/smartpipe-v2-test/tools/release-v2-smoke.sh
 #   sudo SMOKE_MODE=agent-stage bash /opt/smartpipe-v2-test/tools/release-v2-smoke.sh
 #   sudo SMOKE_MODE=agent-publish SMOKE_GITHUB_API_BASE=http://127.0.0.1:9099 bash /opt/smartpipe-v2-test/tools/release-v2-smoke.sh
+#   sudo SMOKE_MODE=fail bash /opt/smartpipe-v2-test/tools/release-v2-smoke.sh
 #
 # 环境变量：
 #   SMARTPIPE_ADMIN_URL / SMARTPIPE_RELEASE_URL / SMARTPIPE_MCP_URL  接口地址
 #   SMARTPIPE_ENV_FILE   默认 /etc/smartpipe/smartpipe.env（取 SMARTPIPE_ADMIN_TOKEN）
 #   SMOKE_REPO_URL       默认 file:///opt/smartpipe-v2-test/fixture
 #   SMOKE_PROFILE_DIR    默认 /opt/smartpipe-v2-test/fixture
-#   SMOKE_MODE           build | stage | publish | agent | agent-stage | agent-publish
+#   SMOKE_MODE           build | stage | publish | agent | agent-stage | agent-publish | fail
 #   SMOKE_AGENT_TIMEOUT  发布 Agent 单会话等待上限，默认 900 秒
 #   SMOKE_CHANNEL        默认 test
 #   SMOKE_ARTIFACT_ROLE  GitHub 上传的角色，默认 app-bundle
@@ -34,9 +36,11 @@ ADMIN=${SMARTPIPE_ADMIN_URL:-http://127.0.0.1:18092}
 RELEASE=${SMARTPIPE_RELEASE_URL:-http://127.0.0.1:18099}
 MCP=${SMARTPIPE_MCP_URL:-http://127.0.0.1:18097/mcp}
 ENV_FILE=${SMARTPIPE_ENV_FILE:-/etc/smartpipe/smartpipe.env}
-REPO_URL=${SMOKE_REPO_URL:-file:///opt/smartpipe-v2-test/fixture}
-PROFILE_DIR=${SMOKE_PROFILE_DIR:-/opt/smartpipe-v2-test/fixture}
 MODE=${SMOKE_MODE:-build}
+DEFAULT_FIXTURE=/opt/smartpipe-v2-test/fixture
+[[ "$MODE" == "fail" ]] && DEFAULT_FIXTURE=/opt/smartpipe-v2-test/fixture-fail
+REPO_URL=${SMOKE_REPO_URL:-file://$DEFAULT_FIXTURE}
+PROFILE_DIR=${SMOKE_PROFILE_DIR:-$DEFAULT_FIXTURE}
 CHANNEL=${SMOKE_CHANNEL:-test}
 ROLE=${SMOKE_ARTIFACT_ROLE:-app-bundle}
 GH_BASE=${SMOKE_GITHUB_API_BASE:-http://127.0.0.1:9099}
@@ -54,7 +58,7 @@ if [[ -z "${SMARTPIPE_ADMIN_TOKEN:-}" ]]; then
   set -a; . "$ENV_FILE"; set +a
 fi
 [[ -n "${SMARTPIPE_ADMIN_TOKEN:-}" ]] || fail "$ENV_FILE 里没有 SMARTPIPE_ADMIN_TOKEN"
-case "$MODE" in build|stage|publish|agent|agent-stage|agent-publish) ;; *) fail "SMOKE_MODE 只能是 build/stage/publish/agent/agent-stage/agent-publish（当前 $MODE）" ;; esac
+case "$MODE" in build|stage|publish|agent|agent-stage|agent-publish|fail) ;; *) fail "SMOKE_MODE 只能是 build/stage/publish/agent/agent-stage/agent-publish/fail（当前 $MODE）" ;; esac
 MODE_AGENT=0
 [[ "$MODE" == agent || "$MODE" == agent-stage || "$MODE" == agent-publish ]] && MODE_AGENT=1
 
@@ -68,7 +72,7 @@ pass "admin-api 健康：$admin_version"
 pass "release-service 健康"
 
 [[ -d "$PROFILE_DIR/.git" ]] || fail "$PROFILE_DIR 不是 git 仓库，无法解析提交"
-COMMIT=$(git -C "$PROFILE_DIR" rev-parse HEAD)
+COMMIT=$(git -c safe.directory="$PROFILE_DIR" -C "$PROFILE_DIR" rev-parse HEAD)
 pass "构建提交：$COMMIT"
 
 STAMP=$(date +%s)
@@ -208,11 +212,38 @@ if [[ $MODE_AGENT -eq 1 ]]; then
   esac
 fi
 
+if [[ "$MODE" == "fail" ]]; then
+  DEADLINE=$((SECONDS + TIMEOUT))
+  STATUS=""
+  while (( SECONDS < DEADLINE )); do
+    DETAIL=$(curl -fsS -H "$AUTH" "$ADMIN/admin/releases/v2/runs/$RUN_ID")
+    STATUS=$(echo "$DETAIL" | json_field 'd["data"].get("run",d["data"])["status"]')
+    case "$STATUS" in
+      failed) break ;;
+      built|published) fail "预期失败，但运行到了 $STATUS" ;;
+    esac
+    sleep 2
+  done
+  [[ "$STATUS" == "failed" ]] || fail "等待 $TIMEOUT 秒运行仍未 failed（当前 $STATUS）"
+  pass "运行状态：failed（构建按预期失败）"
+
+  ERR_CODE=$(echo "$DETAIL" | json_field '(d["data"].get("run") or d["data"]).get("error_code") or ""')
+  ERR_MSG=$(echo "$DETAIL" | json_field '(d["data"].get("run") or d["data"]).get("error_message") or ""')
+  [[ -n "$ERR_MSG" ]] || fail "失败运行没有 error_message"
+  pass "错误可见：${ERR_CODE:-no-code} / $(echo "$ERR_MSG" | tr '\n' ' ' | head -c 120)"
+
+  ARTS=$(echo "$DETAIL" | json_field 'len(d["data"].get("artifacts") or [])')
+  PUBS=$(echo "$DETAIL" | json_field 'len(d["data"].get("publications") or [])')
+  [[ "$ARTS" == "0" ]] || fail "失败运行不应登记制品（实际 $ARTS 个）"
+  [[ "$PUBS" == "0" ]] || fail "失败运行不应产生发布记录（实际 $PUBS 个）"
+  pass "无制品、无发布记录（渠道未被推进）"
+fi
+
 TARGET_STATUS=built
 [[ "$MODE" == "stage" || "$MODE" == "publish" ]] && TARGET_STATUS=verifying
 DEADLINE=$((SECONDS + TIMEOUT))
 STATUS=""
-while [[ $MODE_AGENT -eq 0 ]] && (( SECONDS < DEADLINE )); do
+while [[ $MODE_AGENT -eq 0 && "$MODE" != "fail" ]] && (( SECONDS < DEADLINE )); do
   DETAIL=$(curl -fsS -H "$AUTH" "$ADMIN/admin/releases/v2/runs/$RUN_ID")
   STATUS=$(echo "$DETAIL" | json_field 'd["data"].get("run",d["data"])["status"]')
   [[ "$STATUS" == "$TARGET_STATUS" ]] && break
@@ -224,11 +255,12 @@ while [[ $MODE_AGENT -eq 0 ]] && (( SECONDS < DEADLINE )); do
   esac
   sleep 2
 done
-if [[ $MODE_AGENT -eq 0 ]]; then
+if [[ $MODE_AGENT -eq 0 && "$MODE" != "fail" ]]; then
   [[ "$STATUS" == "$TARGET_STATUS" ]] || fail "等待 $TIMEOUT 秒仍未 $TARGET_STATUS（当前 $STATUS）"
   pass "运行状态：$STATUS"
 fi
 
+if [[ "$MODE" != "fail" ]]; then
 DETAIL_FILE=$(mktemp)
 echo "$DETAIL" > "$DETAIL_FILE"
 python3 - "$DETAIL_FILE" <<'PY' || { rm -f "$DETAIL_FILE"; exit 1; }
@@ -253,6 +285,7 @@ for a in arts:
     print("  - %s %s %s" % (a.get("role"), a.get("sha256"), a.get("storage_key")))
 PY
 rm -f "$DETAIL_FILE"
+fi
 
 if [[ "$MODE" == "stage" || "$MODE" == "publish" ]]; then
   SCOPES='"release.read","artifact.read","artifact.write","update.read","update.write","update.publish"'
