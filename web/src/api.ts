@@ -1,4 +1,4 @@
-import type { AuditEntry, AuthConfig, AuthSession, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Health, IssueAttempt, Project, ReleaseCandidate, ReleaseRecord, ReleaseRun, ReleaseV2AgentView, ReleaseV2AgentSession, ReleaseV2Approval, ReleaseV2Bundle, ReleaseV2Executor, ReleaseV2Plan, ReleaseV2Run, ReleaseV2Settings, ReleaseV2Probe, RepoOp, TestResult, UserIdentity, VerificationRecord, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubTunnelView, GitHubPATView, GitHubRepoCatalog, GitHubRepo, SchedulerOverview, SchedulerWorkerDetail, SchedulerWorker, SchedulerMessage, SchedulerOutputFrame, SchedulerOutputRawPage } from "./types";
+import type { AuditEntry, AuthConfig, AuthSession, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Health, IssueAttempt, Project, ReleaseCandidate, ReleaseRecord, ReleaseRun, ReleaseV2AgentView, ReleaseV2AgentSession, ReleaseV2Approval, ReleaseV2Bundle, ReleaseV2Executor, ReleaseV2Plan, ReleaseV2Run, ReleaseV2Settings, ReleaseV2Probe, ReleaseV2ExecutorBootstrap, RepoOp, TestResult, UserIdentity, VerificationRecord, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubTunnelView, GitHubPATView, GitHubRepoCatalog, GitHubRepo, SchedulerOverview, SchedulerWorkerDetail, SchedulerWorker, SchedulerMessage, SchedulerOutputFrame, SchedulerOutputRawPage } from "./types";
 
 const TOKEN_KEY = "smartpipe.adminToken";
 
@@ -252,6 +252,10 @@ export const api = {
   issueReleaseV2Token: (id: string, scopes: string[], ttlSeconds = 14400) =>
     request<{ token: string; token_id: string; expires_at: string; scopes: string[] }>("/releases/v2/runs/" + encodeURIComponent(id) + "/agent-token", { method: "POST", body: { scopes, ttl_seconds: ttlSeconds } }),
   listReleaseV2Executors: () => request<ReleaseV2Executor[]>("/releases/v2/executors"),
+  releaseV2ExecutorBootstrap: (os: string, arch: string, id: string) =>
+    request<ReleaseV2ExecutorBootstrap>(
+      "/releases/v2/executors/bootstrap?os=" + encodeURIComponent(os) + "&arch=" + encodeURIComponent(arch) + "&id=" + encodeURIComponent(id),
+    ),
   listReleaseV2Approvals: (id: string) => request<ReleaseV2Approval[]>("/releases/v2/runs/" + encodeURIComponent(id) + "/approvals"),
   approveReleaseV2Run: (id: string, reason: string, ttlSeconds = 7200) =>
     request<ReleaseV2Approval>("/releases/v2/runs/" + encodeURIComponent(id) + "/approvals", { method: "POST", body: { reason, ttl_seconds: ttlSeconds } }),

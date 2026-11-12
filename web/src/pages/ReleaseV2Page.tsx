@@ -42,7 +42,32 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
   const [bindings, setBindings] = useState<Record<string, string>>({});
   const streamRef = useRef<{ es: EventSource | null; timer: number | null; cursor: number }>({ es: null, timer: null, cursor: 0 });
   const [busy, setBusy] = useState(false);
+  const [bootOpen, setBootOpen] = useState(false);
+  const [bootForm, setBootForm] = useState({ id: "build-01", os: "darwin", arch: "arm64" });
+  const [bootCommand, setBootCommand] = useState("");
+  const [bootBusy, setBootBusy] = useState(false);
   const [form, setForm] = useState({ project_id: "", version: "", mode: "publish", channel: "stable", branch: "", notes: "" });
+
+  const generateBootstrap = async () => {
+    setBootBusy(true);
+    try {
+      const result = await api.releaseV2ExecutorBootstrap(bootForm.os, bootForm.arch, bootForm.id.trim() || "build-01");
+      setBootCommand(result.command);
+    } catch (e) {
+      notify(e instanceof ApiError ? e.message : String(e), "error");
+    } finally {
+      setBootBusy(false);
+    }
+  };
+
+  const copyBootstrap = async () => {
+    try {
+      await navigator.clipboard.writeText(bootCommand);
+      notify("接入命令已复制", "ok");
+    } catch {
+      notify("复制失败，请手动选择命令文本", "error");
+    }
+  };
 
   const load = useCallback(async () => {
     const [r, e, p] = await Promise.allSettled([api.listReleaseV2Runs(50), api.listReleaseV2Executors(), api.listProjects()]);
@@ -312,8 +337,35 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
 
       <div className="card">
         <div className="card-head">
-          <div><div className="card-title">构建执行器</div><div className="card-sub">构建机主动拉取任务，无需 SSH。</div></div>
+          <div><div className="card-title">构建执行器</div><div className="card-sub">构建机主动拉取任务，无需 SSH；在这台机器上跑一次下面的命令就会注册。</div></div>
+          <button className="btn" onClick={() => setBootOpen((v) => !v)}>{bootOpen ? "收起" : "＋ 添加构建机"}</button>
         </div>
+        {bootOpen && (
+          <div className="card-body">
+            <div className="grid two">
+              <label>构建机 id<input value={bootForm.id} onChange={(e) => setBootForm((f) => ({ ...f, id: e.target.value }))} /></label>
+              <label>系统
+                <select value={bootForm.os} onChange={(e) => setBootForm((f) => ({ ...f, os: e.target.value }))}>
+                  <option value="darwin">macOS</option>
+                  <option value="linux">Linux</option>
+                  <option value="windows">Windows</option>
+                </select>
+              </label>
+              <label>架构
+                <select value={bootForm.arch} onChange={(e) => setBootForm((f) => ({ ...f, arch: e.target.value }))}>
+                  <option value="arm64">arm64</option>
+                  <option value="amd64">amd64</option>
+                </select>
+              </label>
+            </div>
+            <div className="actions">
+              <button className="btn primary" disabled={bootBusy} onClick={() => void generateBootstrap()}>{bootBusy ? "生成中…" : "生成接入命令"}</button>
+              {bootCommand && <button className="btn" onClick={() => void copyBootstrap()}>复制命令</button>}
+            </div>
+            {bootCommand && <pre className="boot-command">{bootCommand}</pre>}
+            <p className="muted small">命令里的令牌是服务端读取的 release-service 令牌，只发给已登录管理员。构建机上需要有 release-executor 二进制（仓库里 <code>go build ./cmd/release-executor</code>）。</p>
+          </div>
+        )}
         <div className="card-body" style={{ padding: 0 }}>
           <table className="table">
             <thead><tr><th>执行器</th><th>平台</th><th>状态</th><th>版本</th><th>最近心跳</th></tr></thead>

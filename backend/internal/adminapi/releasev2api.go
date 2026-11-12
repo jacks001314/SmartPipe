@@ -37,6 +37,7 @@ func (a *API) registerReleaseV2(p iris.Party) {
 	p.Post("/v2/settings/probe", a.probeReleaseV2Settings)
 	p.Get("/v2/executors", a.listReleaseV2Executors)
 	p.Post("/v2/executors", a.upsertReleaseV2Executor)
+	p.Get("/v2/executors/bootstrap", a.getReleaseV2ExecutorBootstrap)
 }
 
 type releaseV2PlanRequest struct {

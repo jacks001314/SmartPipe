@@ -830,3 +830,16 @@ button { font-family: inherit; }
   .svc-actions { grid-column: 1 / -1; }
 }
 .grid.two .span-2 { grid-column: 1 / -1; }
+
+/* 构建机接入命令 */
+.boot-command {
+  margin: 10px 0 6px;
+  padding: 12px 14px;
+  background: #0b1a2b;
+  color: #dbe7f3;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

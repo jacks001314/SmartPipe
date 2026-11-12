@@ -834,6 +834,14 @@ export type ReleaseV2Settings = {
   s3_credential: string;
 };
 
+export type ReleaseV2ExecutorBootstrap = {
+  id: string;
+  os: string;
+  arch: string;
+  service_url: string;
+  command: string;
+};
+
 export type ReleaseV2Executor = {
   id: string;
   os: string;
