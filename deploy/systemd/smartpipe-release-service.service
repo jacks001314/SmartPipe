@@ -1,0 +1,26 @@
+[Unit]
+Description=SmartPipe release service v2 (executor pull API, run state machine)
+After=network-online.target smartpipe-admin-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=smartpipe
+Group=smartpipe
+WorkingDirectory=@INSTALL_DIR@
+EnvironmentFile=/etc/smartpipe/smartpipe.env
+Environment=SMARTPIPE_RELEASE_SERVICE_ADDR=:8099
+Environment=SMARTPIPE_RELEASE_STORAGE_DIR=@STATE_DIR@/releases
+ExecStart=@INSTALL_DIR@/bin/release-service
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=@STATE_DIR@
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

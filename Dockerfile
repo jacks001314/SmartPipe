@@ -31,6 +31,9 @@ RUN LDFLAGS="-s -w -X main.version=${VERSION}" \
  && go build -ldflags="$LDFLAGS" -o /out/supervise ./cmd/supervise \
  && go build -ldflags="$LDFLAGS" -o /out/bot ./cmd/bot \
  && go build -ldflags="$LDFLAGS" -o /out/botdiag ./cmd/botdiag \
+ && go build -ldflags="$LDFLAGS" -o /out/release-service ./cmd/release-service \
+ && go build -ldflags="$LDFLAGS" -o /out/release-mcp ./cmd/release-mcp \
+ && go build -ldflags="$LDFLAGS" -o /out/release-executor ./cmd/release-executor \
  && printf '%s\n' "version=${VERSION}" "commit=${COMMIT}" "built_at=${BUILD_TIME}" > /out/BUILD-INFO
 
 FROM golang:1.26-alpine
@@ -52,5 +55,6 @@ ENV PATH=/app/bin:/usr/local/bin:$PATH \
     CODEX_HOME=/data/codex-home \
     TZ=Asia/Shanghai
 USER smartpipe
-EXPOSE 8090 8092 8093 8095 8098
+EXPOSE 8090 8092 8093 8095 8097 8098 8099
 CMD ["supervise", "admin-api", "bot", "bridge"]
+

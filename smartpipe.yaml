@@ -10,3 +10,44 @@ required_for_merge:
 timeouts:
   build: 10m
   unit: 15m
+
+release:
+  source:
+    branch: main
+    require_clean_checkout: false
+  versioning:
+    scheme: semver
+    source: manual
+    default_bump: patch
+    tag_template: v{version}
+  notes:
+    path: docs/发版说明.md
+    required: false
+  targets:
+    windows-amd64:
+      build: "cd backend && go build -trimpath -o ..\\dist\\admin-api.exe ./cmd/admin-api"
+      verify: "if not exist dist\\admin-api.exe exit 1"
+      artifacts:
+        - role: server-binary
+          glob: dist/admin-api.exe
+          content_type: application/vnd.microsoft.portable-executable
+    linux-amd64:
+      build: "cd backend && go build -trimpath -o ../dist/admin-api-linux-amd64 ./cmd/admin-api"
+      verify: "test -x ../dist/admin-api-linux-amd64"
+      artifacts:
+        - role: server-binary
+          glob: dist/admin-api-linux-amd64
+          content_type: application/octet-stream
+  publishing:
+    # GitHub 发布目标可以和构建仓库分开配置；这里的 owner/repo 决定草稿建在哪个仓库。
+    github:
+      owner: smoke
+      repo: fixture
+    update_service:
+      product: smartpipe
+      channel: stable
+      # 升级服务凭据只写引用名；明文由服务端 SMARTPIPE_CRED_<REF> 提供。
+      credential: update-test
+      productSlots:
+        server:
+          artifactRole: server-binary

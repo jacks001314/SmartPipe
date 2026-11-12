@@ -3,11 +3,13 @@
 // 测试辅助：POST /__issues 播种 Issue；POST /__branch {sha} 设置分支 HEAD；
 //           GET /__state 读取 issues/comments/labels/releases/tags。
 import { createServer } from "node:http";
+import { createHash } from "node:crypto";
 
 const port = Number(process.argv[2] || 9099);
 let seq = 100;
 let commentSeq = 0;
 let releaseSeq = 5000;
+let holdPublish = false; // 模拟 GitHub 短暂不可用，用来演练 partially_published 与续跑
 let branchSHA = "0000000000000000000000000000000000000000";
 const issues = new Map(); // number -> {number,title,body,state,html_url,author,labels:Set}
 const comments = [];
@@ -32,7 +34,8 @@ const server = createServer((req, res) => {
   const chunks = [];
   req.on("data", (c) => chunks.push(c));
   req.on("end", () => {
-    const body = Buffer.concat(chunks).toString("utf8");
+    const rawBody = Buffer.concat(chunks);
+    const body = rawBody.toString("utf8");
     const json = (status, payload) => {
       res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify(payload));
@@ -56,6 +59,12 @@ const server = createServer((req, res) => {
       };
       issues.set(number, issue);
       json(201, issueJSON(issue));
+      return;
+    }
+    if (req.method === "POST" && path === "/__hold") {
+      const payload = body ? JSON.parse(body) : {};
+      holdPublish = Boolean(payload.on);
+      json(200, { hold: holdPublish });
       return;
     }
     if (req.method === "POST" && path === "/__branch") {
@@ -172,6 +181,34 @@ const server = createServer((req, res) => {
       json(201, release);
       return;
     }
+    // PATCH 单条 release：公开草稿就是 PATCH {draft:false}。
+    const releasePatch = /^\/repos\/[^/]+\/[^/]+\/releases\/(\d+)$/.exec(path);
+    if (req.method === "PATCH" && releasePatch) {
+      if (holdPublish) return json(503, { message: "service unavailable" });
+      const id = Number(releasePatch[1]);
+      const rel = releases.find((r) => r.id === id);
+      if (!rel) return json(404, { message: "Not Found" });
+      const payload = body ? JSON.parse(body) : {};
+      if (payload.draft === false && !rel.published) {
+        rel.published = true;
+        rel.published_at = new Date().toISOString();
+      }
+      if (payload.draft === true) rel.published = false;
+      for (const key of ["name", "body", "tag_name", "target_commitish", "prerelease"]) {
+        if (payload[key] !== undefined) rel[key] = payload[key];
+      }
+      json(200, rel);
+      return;
+    }
+    // GET 单条 release：发版收口时会回读草稿，核对附件是否齐全。
+    const releaseGet = /^\/repos\/[^/]+\/[^/]+\/releases\/(\d+)$/.exec(path);
+    if (req.method === "GET" && releaseGet) {
+      const id = Number(releaseGet[1]);
+      const rel = releases.find((r) => r.id === id);
+      if (!rel) return json(404, { message: "Not Found" });
+      json(200, rel);
+      return;
+    }
     const assetUpload = /^\/repos\/[^/]+\/[^/]+\/releases\/(\d+)\/assets$/.exec(path);
     if (req.method === "POST" && assetUpload) {
       const id = Number(assetUpload[1]);
@@ -182,7 +219,9 @@ const server = createServer((req, res) => {
       const asset = {
         id: rel.assets.length + 1,
         name,
-        size: Buffer.byteLength(body),
+        // 附件是二进制，必须按原始字节算长度与摘要；按 UTF-8 解码会算错大小。
+        size: rawBody.length,
+        digest: "sha256:" + createHash("sha256").update(rawBody).digest("hex"),
         browser_download_url: "http://127.0.0.1:" + port + "/releases/" + id + "/assets/" + encodeURIComponent(name),
       };
       rel.assets.push(asset);

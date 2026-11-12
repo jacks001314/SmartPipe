@@ -13,7 +13,279 @@ type migration struct {
 }
 
 var migrations = []migration{
+
 	{
+		version: 42,
+		name:    "release_v2_plan_clone_credential",
+		sql: `
+ALTER TABLE release_v2_plans ADD COLUMN IF NOT EXISTS clone_credential TEXT NOT NULL DEFAULT '';
+`,
+	},
+	{
+		version: 41,
+		name:    "release_v2_run_clone_credential",
+		sql: `
+ALTER TABLE release_v2_runs ADD COLUMN IF NOT EXISTS clone_credential TEXT NOT NULL DEFAULT '';
+`,
+	},
+	{
+		version: 40,
+		name:    "release_v2_target_sign_command",
+		sql: `
+ALTER TABLE release_v2_targets ADD COLUMN IF NOT EXISTS sign_command TEXT NOT NULL DEFAULT '';
+`,
+	},
+	{
+		version: 39,
+		name:    "release_v2_agent_sessions",
+		sql: `
+CREATE TABLE IF NOT EXISTS release_v2_agent_sessions (
+    id           TEXT PRIMARY KEY,
+    run_id       TEXT NOT NULL,
+    project_id   TEXT NOT NULL DEFAULT '',
+    status       TEXT NOT NULL DEFAULT 'starting',
+    actor        TEXT NOT NULL DEFAULT '',
+    model        TEXT NOT NULL DEFAULT '',
+    thread_id    TEXT NOT NULL DEFAULT '',
+    turn_id      TEXT NOT NULL DEFAULT '',
+    summary      TEXT NOT NULL DEFAULT '',
+    last_error   TEXT NOT NULL DEFAULT '',
+    token_id     TEXT NOT NULL DEFAULT '',
+    started_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at  TIMESTAMPTZ,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS release_v2_agent_sessions_run_idx
+  ON release_v2_agent_sessions (run_id, created_at DESC);
+`,
+	},
+	{
+		version: 38,
+		name:    "release_v2_approval_state",
+		sql: `
+ALTER TABLE release_v2_approvals ADD COLUMN IF NOT EXISTS state TEXT NOT NULL DEFAULT 'approved';
+ALTER TABLE release_v2_approvals ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS release_v2_approvals_lookup_idx
+  ON release_v2_approvals (run_id, kind, content_sha256, created_at DESC);
+`,
+	},
+	{
+		version: 37,
+		name:    "release_v2_target_artifacts",
+		sql: `
+ALTER TABLE release_v2_targets ADD COLUMN IF NOT EXISTS artifact_rules JSONB NOT NULL DEFAULT '[]'::jsonb;
+`,
+	},
+	{
+		version: 36,
+		name:    "release_v2_lease_guard",
+		sql: `
+CREATE UNIQUE INDEX IF NOT EXISTS release_v2_targets_executor_lease_uniq
+  ON release_v2_targets (executor_id)
+  WHERE status IN ('leased','building','verifying') AND executor_id <> '';
+CREATE INDEX IF NOT EXISTS release_v2_artifacts_role_idx
+  ON release_v2_artifacts (run_id, role, target_id);
+`,
+	},
+	{
+		version: 35,
+		name:    "release_v2",
+		sql: `
+CREATE TABLE IF NOT EXISTS release_v2_plans (
+    id               TEXT PRIMARY KEY,
+    project_id       TEXT NOT NULL,
+    requested_by     TEXT NOT NULL DEFAULT '',
+    trigger          TEXT NOT NULL DEFAULT 'manual',
+    mode             TEXT NOT NULL DEFAULT 'publish',
+    status           TEXT NOT NULL DEFAULT 'planned',
+    version          TEXT NOT NULL,
+    build_version    TEXT NOT NULL DEFAULT '',
+    tag              TEXT NOT NULL DEFAULT '',
+    channel          TEXT NOT NULL DEFAULT 'stable',
+    repo             TEXT NOT NULL DEFAULT '',
+    source_branch    TEXT NOT NULL DEFAULT '',
+    source_commit    TEXT NOT NULL DEFAULT '',
+    resolved_commit  TEXT NOT NULL DEFAULT '',
+    profile_sha256   TEXT NOT NULL DEFAULT '',
+    plan_sha256      TEXT NOT NULL DEFAULT '',
+    candidates       JSONB NOT NULL DEFAULT '[]'::jsonb,
+    targets          JSONB NOT NULL DEFAULT '[]'::jsonb,
+    blockers         JSONB NOT NULL DEFAULT '[]'::jsonb,
+    notes_md         TEXT NOT NULL DEFAULT '',
+    notes_sha256     TEXT NOT NULL DEFAULT '',
+    expires_at       TIMESTAMPTZ,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS release_v2_plans_project_at_idx
+  ON release_v2_plans (project_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS release_v2_runs (
+    id               TEXT PRIMARY KEY,
+    plan_id          TEXT NOT NULL,
+    project_id       TEXT NOT NULL,
+    repo             TEXT NOT NULL DEFAULT '',
+    requested_by     TEXT NOT NULL DEFAULT '',
+    trigger          TEXT NOT NULL DEFAULT 'manual',
+    mode             TEXT NOT NULL DEFAULT 'publish',
+    channel          TEXT NOT NULL DEFAULT 'stable',
+    status           TEXT NOT NULL DEFAULT 'queued',
+    version          TEXT NOT NULL,
+    build_version    TEXT NOT NULL DEFAULT '',
+    tag              TEXT NOT NULL DEFAULT '',
+    source_branch    TEXT NOT NULL DEFAULT '',
+    source_commit    TEXT NOT NULL DEFAULT '',
+    resolved_commit  TEXT NOT NULL DEFAULT '',
+    profile_sha256   TEXT NOT NULL DEFAULT '',
+    plan_sha256      TEXT NOT NULL DEFAULT '',
+    idempotency_key  TEXT NOT NULL DEFAULT '',
+    agent_thread_id  TEXT NOT NULL DEFAULT '',
+    notes_md         TEXT NOT NULL DEFAULT '',
+    notes_sha256     TEXT NOT NULL DEFAULT '',
+    approval_state   TEXT NOT NULL DEFAULT '',
+    error_code       TEXT NOT NULL DEFAULT '',
+    error_message    TEXT NOT NULL DEFAULT '',
+    started_at       TIMESTAMPTZ,
+    finished_at      TIMESTAMPTZ,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS release_v2_runs_project_at_idx
+  ON release_v2_runs (project_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS release_v2_runs_project_idem_uq
+  ON release_v2_runs (project_id, idempotency_key) WHERE idempotency_key <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS release_v2_runs_active_channel_uq
+  ON release_v2_runs (project_id, channel)
+  WHERE status IN ('queued','preparing','building','verifying','staged','publishing');
+
+CREATE TABLE IF NOT EXISTS release_v2_targets (
+    id               BIGSERIAL PRIMARY KEY,
+    run_id           TEXT NOT NULL,
+    target_id        TEXT NOT NULL,
+    os               TEXT NOT NULL,
+    arch             TEXT NOT NULL,
+    executor_id      TEXT NOT NULL DEFAULT '',
+    required         BOOLEAN NOT NULL DEFAULT TRUE,
+    status           TEXT NOT NULL DEFAULT 'queued',
+    attempt          INTEGER NOT NULL DEFAULT 1,
+    lease_owner      TEXT NOT NULL DEFAULT '',
+    lease_expires_at TIMESTAMPTZ,
+    build_command    TEXT NOT NULL DEFAULT '',
+    verify_command   TEXT NOT NULL DEFAULT '',
+    error_code       TEXT NOT NULL DEFAULT '',
+    error_message    TEXT NOT NULL DEFAULT '',
+    started_at       TIMESTAMPTZ,
+    finished_at      TIMESTAMPTZ,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (run_id, target_id)
+);
+CREATE INDEX IF NOT EXISTS release_v2_targets_status_idx
+  ON release_v2_targets (status, updated_at);
+
+CREATE TABLE IF NOT EXISTS release_v2_artifacts (
+    id               BIGSERIAL PRIMARY KEY,
+    run_id           TEXT NOT NULL,
+    target_id        TEXT NOT NULL DEFAULT '',
+    attempt          INTEGER NOT NULL DEFAULT 1,
+    role             TEXT NOT NULL,
+    name             TEXT NOT NULL,
+    content_type     TEXT NOT NULL DEFAULT '',
+    size             BIGINT NOT NULL DEFAULT 0,
+    sha256           TEXT NOT NULL,
+    storage_key      TEXT NOT NULL DEFAULT '',
+    platform_signed  BOOLEAN NOT NULL DEFAULT FALSE,
+    manifest_signed  BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (run_id, target_id, attempt, role, name)
+);
+CREATE INDEX IF NOT EXISTS release_v2_artifacts_run_idx ON release_v2_artifacts (run_id);
+
+CREATE TABLE IF NOT EXISTS release_v2_publications (
+    id               BIGSERIAL PRIMARY KEY,
+    run_id           TEXT NOT NULL,
+    provider         TEXT NOT NULL,
+    target_id        TEXT NOT NULL DEFAULT '',
+    state            TEXT NOT NULL DEFAULT 'pending',
+    external_id      TEXT NOT NULL DEFAULT '',
+    external_url     TEXT NOT NULL DEFAULT '',
+    request_sha256   TEXT NOT NULL DEFAULT '',
+    error_message    TEXT NOT NULL DEFAULT '',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (run_id, provider, target_id)
+);
+CREATE INDEX IF NOT EXISTS release_v2_publications_run_idx ON release_v2_publications (run_id);
+
+CREATE TABLE IF NOT EXISTS release_v2_events (
+    id               BIGSERIAL PRIMARY KEY,
+    run_id           TEXT NOT NULL,
+    actor            TEXT NOT NULL DEFAULT '',
+    kind             TEXT NOT NULL,
+    target_id        TEXT NOT NULL DEFAULT '',
+    summary          TEXT NOT NULL DEFAULT '',
+    detail           JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS release_v2_events_run_idx ON release_v2_events (run_id, id);
+
+CREATE TABLE IF NOT EXISTS release_v2_issue_links (
+    id               BIGSERIAL PRIMARY KEY,
+    run_id           TEXT NOT NULL,
+    issue_number     INTEGER NOT NULL,
+    issue_url        TEXT NOT NULL DEFAULT '',
+    state            TEXT NOT NULL DEFAULT 'claimed',
+    label_before     TEXT NOT NULL DEFAULT '',
+    label_after      TEXT NOT NULL DEFAULT '',
+    error_message    TEXT NOT NULL DEFAULT '',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (run_id, issue_number)
+);
+CREATE INDEX IF NOT EXISTS release_v2_issue_links_state_idx
+  ON release_v2_issue_links (state, updated_at);
+
+CREATE TABLE IF NOT EXISTS release_v2_executors (
+    id               TEXT PRIMARY KEY,
+    os               TEXT NOT NULL,
+    arch             TEXT NOT NULL,
+    labels           JSONB NOT NULL DEFAULT '[]'::jsonb,
+    capabilities     JSONB NOT NULL DEFAULT '{}'::jsonb,
+    version          TEXT NOT NULL DEFAULT '',
+    status           TEXT NOT NULL DEFAULT 'offline',
+    last_heartbeat_at TIMESTAMPTZ,
+    last_error       TEXT NOT NULL DEFAULT '',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS release_v2_executors_platform_idx
+  ON release_v2_executors (os, arch, status);
+
+CREATE TABLE IF NOT EXISTS release_v2_tokens (
+    id               TEXT PRIMARY KEY,
+    run_id           TEXT NOT NULL,
+    project_id       TEXT NOT NULL,
+    token_hash       TEXT NOT NULL UNIQUE,
+    scopes           JSONB NOT NULL DEFAULT '[]'::jsonb,
+    expires_at       TIMESTAMPTZ NOT NULL,
+    revoked_at       TIMESTAMPTZ,
+    last_used_at     TIMESTAMPTZ,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS release_v2_tokens_run_idx ON release_v2_tokens (run_id);
+
+CREATE TABLE IF NOT EXISTS release_v2_approvals (
+    id               TEXT PRIMARY KEY,
+    run_id           TEXT NOT NULL,
+    kind             TEXT NOT NULL,
+    actor            TEXT NOT NULL,
+    reason           TEXT NOT NULL DEFAULT '',
+    content_sha256   TEXT NOT NULL DEFAULT '',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS release_v2_approvals_run_idx ON release_v2_approvals (run_id, created_at DESC);
+`,
+	}, {
 		version: 34,
 		name:    "lanxin_group_response_policies",
 		sql: `

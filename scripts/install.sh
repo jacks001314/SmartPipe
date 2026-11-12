@@ -100,11 +100,12 @@ The installer will generate random service tokens and the AES master key.
 EOF
     exit 2
   fi
-  local admin_token bridge_token verify_token release_token bot_token crash_token hook_secret master_key commit
+  local admin_token bridge_token verify_token release_token release_service_token bot_token crash_token hook_secret master_key commit
   admin_token="$(random_hex)"
   bridge_token="$(random_hex)"
   verify_token="$(random_hex)"
   release_token="$(random_hex)"
+  release_service_token="$(random_hex)"
   bot_token="$(random_hex)"
   crash_token="$(random_hex)"
   hook_secret="$(random_hex)"
@@ -120,6 +121,8 @@ SMARTPIPE_ADMIN_TOKEN=$(quote_env "$admin_token")
 SMARTPIPE_BRIDGE_TOKEN=$(quote_env "$bridge_token")
 SMARTPIPE_VERIFY_TOKEN=$(quote_env "$verify_token")
 SMARTPIPE_RELEASE_TOKEN=$(quote_env "$release_token")
+SMARTPIPE_RELEASE_SERVICE_TOKEN=$(quote_env "$release_service_token")
+RELEASE_SERVICE_TOKEN=$(quote_env "$release_service_token")
 SMARTPIPE_BOT_INTERNAL_TOKEN=$(quote_env "$bot_token")
 SMARTPIPE_CRASH_TOKEN=$(quote_env "$crash_token")
 GITHUB_WEBHOOK_SECRET=$(quote_env "$hook_secret")
@@ -144,6 +147,11 @@ SMARTPIPE_ADMIN_ADDR=:8092
 SMARTPIPE_BRIDGE_ADDR=:8090
 SMARTPIPE_VERIFY_ADDR=:8095
 SMARTPIPE_MCP_ADDR=:8097
+SMARTPIPE_RELEASE_SERVICE_ADDR=:8099
+SMARTPIPE_RELEASE_MCP_ADDR=:8097
+SMARTPIPE_RELEASE_STORAGE_DIR=/var/lib/smartpipe/releases
+SMARTPIPE_RELEASE_MCP_PORT=8097
+SMARTPIPE_RELEASE_SERVICE_PORT=8099
 BOT_HTTP_ADDR=:8093
 SMARTPIPE_APPSERVER_ADDR=$(quote_env "$APPSERVER_ADDR")
 SMARTPIPE_APPSERVER_TOKEN=$(quote_env "$APPSERVER_TOKEN")
@@ -313,7 +321,7 @@ install_binary_mode() {
   fi
 
   local unit source
-  for unit in smartpipe-patch-verifier smartpipe-admin-api smartpipe-bridge smartpipe-bot smartpipe-scheduler; do
+  for unit in smartpipe-patch-verifier smartpipe-admin-api smartpipe-bridge smartpipe-bot smartpipe-scheduler smartpipe-release-service smartpipe-release-mcp; do
     source="$INSTALL_DIR/deploy/systemd/$unit.service"
     if [[ ! -f "$source" ]]; then
       echo "systemd unit missing: $source" >&2
@@ -325,11 +333,12 @@ install_binary_mode() {
   systemctl daemon-reload
   if [[ "$START_SERVICES" -eq 1 ]]; then
     systemctl enable --now smartpipe-patch-verifier.service smartpipe-admin-api.service \
-      smartpipe-bridge.service smartpipe-bot.service smartpipe-scheduler.service
+      smartpipe-bridge.service smartpipe-bot.service smartpipe-scheduler.service \
+      smartpipe-release-service.service smartpipe-release-mcp.service
     local i port ok
     for i in $(seq 1 60); do
       ok=1
-      for port in 8092 8090 8095 8093 8098; do
+      for port in 8092 8090 8095 8093 8098 8097 8099; do
         if ! curl -fsS --max-time 3 "http://127.0.0.1:$port/healthz" >/dev/null 2>&1; then ok=0; fi
       done
       if [[ "$ok" -eq 1 ]]; then
@@ -356,3 +365,5 @@ case "$MODE" in
   docker) install_docker_mode ;;
   binary) install_binary_mode ;;
 esac
+
+

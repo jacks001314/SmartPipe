@@ -1,4 +1,4 @@
-import type { AuditEntry, AuthConfig, AuthSession, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Health, IssueAttempt, Project, ReleaseCandidate, ReleaseRecord, ReleaseRun, RepoOp, TestResult, UserIdentity, VerificationRecord, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubTunnelView, GitHubPATView, GitHubRepoCatalog, GitHubRepo, SchedulerOverview, SchedulerWorkerDetail, SchedulerWorker, SchedulerMessage, SchedulerOutputFrame, SchedulerOutputRawPage } from "./types";
+import type { AuditEntry, AuthConfig, AuthSession, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Health, IssueAttempt, Project, ReleaseCandidate, ReleaseRecord, ReleaseRun, ReleaseV2AgentView, ReleaseV2AgentSession, ReleaseV2Approval, ReleaseV2Bundle, ReleaseV2Executor, ReleaseV2Plan, ReleaseV2Run, RepoOp, TestResult, UserIdentity, VerificationRecord, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubTunnelView, GitHubPATView, GitHubRepoCatalog, GitHubRepo, SchedulerOverview, SchedulerWorkerDetail, SchedulerWorker, SchedulerMessage, SchedulerOutputFrame, SchedulerOutputRawPage } from "./types";
 
 const TOKEN_KEY = "smartpipe.adminToken";
 
@@ -231,6 +231,26 @@ export const api = {
   createReleaseRun: (body: { project_id: string; version: string; commit?: string; branch?: string; notes?: string; dry_run?: boolean; artifact_globs?: string[]; confirm_major?: boolean }) =>
     request<{ run: ReleaseRun; record: ReleaseRun }>("/releases/runs", { method: "POST", body }),
   rollbackReleaseRun: (id: number) => request<ReleaseRun>("/releases/runs/" + id + "/rollback", { method: "POST" }),
+  listReleaseV2Runs: (limit = 50) => request<ReleaseV2Run[]>("/releases/v2/runs?limit=" + limit),
+  getReleaseV2Run: (id: string, after = 0) =>
+    request<ReleaseV2Bundle>("/releases/v2/runs/" + encodeURIComponent(id) + "?after=" + after),
+  createReleaseV2EventTicket: (id: string) =>
+    request<{ ticket: string; expires_at: string }>("/releases/v2/runs/" + encodeURIComponent(id) + "/events/ticket", { method: "POST", body: {} }),
+  getReleaseV2Agent: (id: string) => request<ReleaseV2AgentView>("/releases/v2/runs/" + encodeURIComponent(id) + "/agent"),
+  startReleaseV2Agent: (id: string, body: { scopes?: string[]; model?: string; effort?: string }) =>
+    request<ReleaseV2AgentSession>("/releases/v2/runs/" + encodeURIComponent(id) + "/agent", { method: "POST", body }),
+  createReleaseV2Plan: (body: { project_id: string; version: string; build_version?: string; channel?: string; mode: string; branch?: string; commit?: string; targets?: string[]; executor_bindings?: Record<string, string>; notes?: string }) =>
+    request<ReleaseV2Plan>("/releases/v2/plans", { method: "POST", body }),
+  createReleaseV2Run: (body: { plan_id: string; idempotency_key?: string }) =>
+    request<ReleaseV2Run>("/releases/v2/runs", { method: "POST", body }),
+  cancelReleaseV2Run: (id: string, reason?: string) =>
+    request<ReleaseV2Run>("/releases/v2/runs/" + encodeURIComponent(id) + "/cancel", { method: "POST", body: { reason } }),
+  issueReleaseV2Token: (id: string, scopes: string[], ttlSeconds = 14400) =>
+    request<{ token: string; token_id: string; expires_at: string; scopes: string[] }>("/releases/v2/runs/" + encodeURIComponent(id) + "/agent-token", { method: "POST", body: { scopes, ttl_seconds: ttlSeconds } }),
+  listReleaseV2Executors: () => request<ReleaseV2Executor[]>("/releases/v2/executors"),
+  listReleaseV2Approvals: (id: string) => request<ReleaseV2Approval[]>("/releases/v2/runs/" + encodeURIComponent(id) + "/approvals"),
+  approveReleaseV2Run: (id: string, reason: string, ttlSeconds = 7200) =>
+    request<ReleaseV2Approval>("/releases/v2/runs/" + encodeURIComponent(id) + "/approvals", { method: "POST", body: { reason, ttl_seconds: ttlSeconds } }),
   createVerification: (body: {
     project_id?: string;
     issue_ref: string;
@@ -243,3 +263,5 @@ export const api = {
 };
 
 export type ToolCallApi = typeof api;
+
+

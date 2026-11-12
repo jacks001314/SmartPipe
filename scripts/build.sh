@@ -91,7 +91,10 @@ LDFLAGS="-s -w -X main.version=$VERSION"
     "bot ./cmd/bot" \
     "botdiag ./cmd/botdiag" \
     "codex-runner ./cmd/codex-runner" \
-    "codex-pipeline ./cmd/codex-pipeline"; do
+    "codex-pipeline ./cmd/codex-pipeline" \
+    "release-service ./cmd/release-service" \
+    "release-mcp ./cmd/release-mcp" \
+    "release-executor ./cmd/release-executor"; do
     set -- $pair
     go build -trimpath -ldflags "$LDFLAGS" -o "$OUT/bin/$1$EXT" "$2"
   done
@@ -138,3 +141,4 @@ fi
 
 echo "BUILD OK version=$VERSION commit=$COMMIT os=$TARGET_OS/$ARCH"
 echo "OUTPUT $OUT"
+

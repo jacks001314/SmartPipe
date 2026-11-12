@@ -1,0 +1,26 @@
+[Unit]
+Description=SmartPipe release MCP server (release tools for the Release Agent)
+After=network-online.target smartpipe-release-service.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=smartpipe
+Group=smartpipe
+WorkingDirectory=@INSTALL_DIR@
+EnvironmentFile=/etc/smartpipe/smartpipe.env
+Environment=SMARTPIPE_RELEASE_MCP_ADDR=:8097
+Environment=SMARTPIPE_RELEASE_STORAGE_DIR=@STATE_DIR@/releases
+ExecStart=@INSTALL_DIR@/bin/release-mcp
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=@STATE_DIR@
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

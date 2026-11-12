@@ -53,6 +53,11 @@ type Spec struct {
 	Timeout time.Duration
 	// Env 是追加给 codex 进程的环境变量，形如 KEY=value。
 	Env []string
+	// ConfigOverrides 是追加的 codex --config key=value 覆盖项（例如 MCP 服务器）。
+	ConfigOverrides []string
+	// Compatibility 控制 CLI 版本校验：空/require 表示必须同主次版本，
+	// warn 记录告警后继续，ignore 跳过探测。
+	Compatibility string
 	// LogWriter 接收 SDK 与服务端 stderr 诊断，默认丢弃。
 	LogWriter io.Writer
 	// ModelOutput 为 true 时把最终回复写进结果，否则只保留长度。
@@ -178,11 +183,12 @@ func Run(ctx context.Context, spec Spec) (*Result, error) {
 	restoreEnv := applyEnvOverrides(spec.Env)
 	defer restoreEnv()
 	client, err := codex.New(runCtx, codex.Options{
+		CompatibilityPolicy: compatibilityPolicy(spec.Compatibility),
 		Spawn: codex.SpawnOptions{
 			CodexPath:       strings.TrimSpace(spec.CodexPath),
 			Env:             spec.Env,
 			Stderr:          logs,
-			ConfigOverrides: modelConfigOverrides(spec.Env),
+			ConfigOverrides: append(modelConfigOverrides(spec.Env), spec.ConfigOverrides...),
 		},
 		Logger: logger,
 	})
@@ -454,4 +460,16 @@ func isolateCodexHome(env []string) []string {
 		return env
 	}
 	return append(env, "CODEX_HOME="+home)
+}
+
+// compatibilityPolicy 把配置字符串映射成 SDK 的版本校验策略。
+func compatibilityPolicy(value string) codex.CompatibilityPolicy {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "warn":
+		return codex.Warn
+	case "ignore", "off":
+		return codex.Ignore
+	default:
+		return codex.RequireMajorMinor
+	}
 }

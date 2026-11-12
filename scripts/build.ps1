@@ -94,6 +94,9 @@ try {
     "botdiag" = "./cmd/botdiag"
     "codex-runner" = "./cmd/codex-runner"
     "codex-pipeline" = "./cmd/codex-pipeline"
+    "release-service" = "./cmd/release-service"
+    "release-mcp" = "./cmd/release-mcp"
+    "release-executor" = "./cmd/release-executor"
   }
   $Ldflags = "-s -w -X main.version=$Version"
   $Go = (Get-Command go -ErrorAction Stop).Source
@@ -153,3 +156,4 @@ try {
   $env:CGO_ENABLED = $OldCgo
   $env:GOPROXY = $OldProxy
 }
+

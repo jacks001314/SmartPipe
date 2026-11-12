@@ -24,8 +24,12 @@ import (
 
 	"github.com/kataras/iris/v12"
 
+	"path/filepath"
+
 	"smartpipe/backend/internal/adminapi"
+	"smartpipe/backend/internal/codexrunner"
 	"smartpipe/backend/internal/conncheck"
+	"smartpipe/backend/internal/releaseagent"
 	"smartpipe/backend/internal/secretbox"
 	"smartpipe/backend/internal/store"
 )
@@ -74,7 +78,15 @@ func main() {
 	}
 	origins := splitCSV(os.Getenv("SMARTPIPE_CORS_ORIGINS"))
 
+	releaseAgent := newReleaseAgentLauncher(context.Background(), st)
+	if releaseAgent != nil {
+		if n, cerr := st.CloseStaleAgentSessions(context.Background()); cerr == nil && n > 0 {
+			log.Printf("已把 %d 个遗留的发布 Agent 会话标记为失败", n)
+		}
+	}
+
 	api := adminapi.New(adminapi.Config{
+		ReleaseAgent:          releaseAgent,
 		Store:                 st,
 		Checker:               conncheck.New(),
 		AdminToken:            adminToken,
@@ -187,4 +199,68 @@ func envDuration(key string, def time.Duration) time.Duration {
 		}
 	}
 	return def
+}
+
+// newReleaseAgentLauncher 组装发布 Agent：MCP 地址、Codex 路径、模型供应商环境。
+// 未设置 SMARTPIPE_RELEASE_AGENT_MCP_URL 或显式关闭时返回 nil。
+func newReleaseAgentLauncher(ctx context.Context, st *store.Store) *releaseagent.Launcher {
+	mcpURL := strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_AGENT_MCP_URL"))
+	if mcpURL == "" {
+		mcpURL = strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_MCP_URL"))
+	}
+	if mcpURL == "" || strings.EqualFold(strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_AGENT")), "off") {
+		log.Println("发布 Agent 未启用：缺少 SMARTPIPE_RELEASE_AGENT_MCP_URL 或 SMARTPIPE_RELEASE_AGENT=off")
+		return nil
+	}
+	workRoot := envOr("SMARTPIPE_RELEASE_AGENT_WORK_ROOT", filepath.Join(os.TempDir(), "smartpipe-release-agent"))
+	modelEnv := func(ctx context.Context, projectID string) []string {
+		project, err := st.GetProject(ctx, projectID)
+		if err != nil {
+			log.Printf("发布 Agent 读取项目失败: %v", err)
+			return nil
+		}
+		providerID := strings.TrimSpace(project.CodexModelProvider)
+		if providerID == "" {
+			providerID, _ = st.GetSetting(ctx, "codex_default_provider")
+		}
+		if providerID == "" {
+			return nil
+		}
+		provider, err := st.GetModelProvider(ctx, providerID)
+		if err != nil || !provider.Enabled {
+			log.Printf("发布 Agent 模型供应商不可用: %v", err)
+			return nil
+		}
+		_, key, _, err := st.GetSecret(ctx, provider.CredentialID)
+		if err != nil {
+			log.Printf("发布 Agent 读取模型凭据失败: %v", err)
+			return nil
+		}
+		env := []string{}
+		if provider.BaseURL != "" {
+			env = append(env, "OPENAI_BASE_URL="+provider.BaseURL)
+		}
+		if key != "" {
+			env = append(env, "OPENAI_API_KEY="+key)
+		}
+		return env
+	}
+	launcher := releaseagent.New(st, releaseagent.RunnerFunc(codexrunner.Run), releaseagent.Config{
+		Enabled:       true,
+		MCPURL:        mcpURL,
+		ServerName:    envOr("SMARTPIPE_RELEASE_AGENT_MCP_NAME", "smartpipe_release"),
+		TokenEnvVar:   envOr("SMARTPIPE_RELEASE_AGENT_TOKEN_ENV", "SMARTPIPE_RELEASE_MCP_TOKEN"),
+		WorkRoot:      workRoot,
+		CodexPath:     strings.TrimSpace(os.Getenv("SMARTPIPE_CODEX_PATH")),
+		Model:         strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_AGENT_MODEL")),
+		Effort:        strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_AGENT_EFFORT")),
+		Sandbox:       envOr("SMARTPIPE_RELEASE_AGENT_SANDBOX", "read-only"),
+		Compatibility: envOr("SMARTPIPE_RELEASE_AGENT_COMPAT", "warn"),
+		Timeout:       time.Duration(envInt("SMARTPIPE_RELEASE_AGENT_TIMEOUT_MINUTES", 45)) * time.Minute,
+		MaxSessions:   envInt("SMARTPIPE_RELEASE_AGENT_MAX_SESSIONS", 0),
+		ModelEnv:      modelEnv,
+	})
+	_ = ctx
+	log.Printf("发布 Agent 已启用：MCP %s，工作目录 %s", mcpURL, workRoot)
+	return launcher
 }

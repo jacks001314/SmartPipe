@@ -9,10 +9,11 @@ import { LanxinPage } from "./pages/LanxinPage";
 import { AuditPage } from "./pages/AuditPage";
 import { VerificationPage } from "./pages/VerificationPage";
 import { ReleasePage } from "./pages/ReleasePage";
+import { ReleaseV2Page } from "./pages/ReleaseV2Page";
 import { CrashPage } from "./pages/CrashPage";
 import { SchedulerPage } from "./pages/SchedulerPage";
 
-type PageKey = "projects" | "credentials" | "models" | "lanxin" | "scheduler" | "verify" | "release" | "crash" | "audit";
+type PageKey = "projects" | "credentials" | "models" | "lanxin" | "scheduler" | "verify" | "release" | "releaseV2" | "crash" | "audit";
 
 type NavItem = { key: PageKey; label: string; icon: string };
 
@@ -27,6 +28,7 @@ const OPS_NAV: NavItem[] = [
   { key: "scheduler", label: "调度器", icon: "⇄" },
   { key: "verify", label: "补丁验证", icon: "✓" },
   { key: "release", label: "发版", icon: "⬆" },
+  { key: "releaseV2", label: "发版运行 v2", icon: "⤴" },
   { key: "crash", label: "崩溃上报", icon: "⚠" },
   { key: "audit", label: "审计日志", icon: "☰" },
 ];
@@ -41,6 +43,7 @@ const META: Record<PageKey, { crumb: string; title: string; sub: string }> = {
   scheduler: { crumb: "运行中心 / 调度器", title: "调度器", sub: "查看 worker 当前阶段、心跳和事件时间线，并暂停、恢复、重试或停止单个任务。" },
   verify: { crumb: "配置中心 / 补丁验证", title: "补丁验证", sub: "手动验证：在干净副本上应用补丁并执行 smartpipe.yaml 声明的验证命令，可查看历史验证记录；不再作为 Issue 修复的合并门禁。" },
   release: { crumb: "配置中心 / 发版", title: "发版", sub: "从干净提交构建制品，生成带校验和与签名的 manifest。" },
+  releaseV2: { crumb: "运行中心 / 发版 v2", title: "发版运行 v2", sub: "计划、构建机、目标进度、制品摘要、升级渠道与 GitHub 发布状态。" },
   crash: { crumb: "配置中心 / 崩溃上报", title: "崩溃上报", sub: "客户端 crash_bundle 脱敏、指纹去重、限流与自动建单。" },
   audit: { crumb: "配置中心 / 审计日志", title: "审计日志", sub: "记录项目、凭据与流水线的管理操作，不保存明文秘密。" },
 };
@@ -230,6 +233,7 @@ export function App() {
           {page === "scheduler" && <SchedulerPage notify={notify} />}
           {page === "verify" && <VerificationPage notify={notify} />}
           {page === "release" && <ReleasePage notify={notify} />}
+          {page === "releaseV2" && <ReleaseV2Page notify={notify} />}
           {page === "crash" && <CrashPage notify={notify} />}
           {page === "audit" && <AuditPage notify={notify} />}
         </div>
@@ -281,3 +285,4 @@ export function App() {
     </div>
   );
 }
+

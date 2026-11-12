@@ -31,6 +31,7 @@ func (a *API) registerReleases(p iris.Party) {
 	p.Get("/{id}", a.getRelease)
 	p.Post("", a.createRelease)
 	a.registerReleaseRuns(p)
+	a.registerReleaseV2(p)
 }
 
 func (a *API) listReleases(c iris.Context) {

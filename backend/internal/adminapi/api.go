@@ -17,6 +17,8 @@ import (
 	"github.com/kataras/iris/v12"
 
 	"smartpipe/backend/internal/conncheck"
+	"smartpipe/backend/internal/releaseagent"
+	"smartpipe/backend/internal/releasev2"
 	"smartpipe/backend/internal/store"
 )
 
@@ -34,6 +36,10 @@ type Config struct {
 	BotToken       string
 	SchedulerURL   string
 	SchedulerToken string
+	// ReleaseAgent 负责把运行交给独立的 Codex 会话执行。
+	ReleaseAgent *releaseagent.Launcher
+	// AutoResumeAgentOff 关闭“批准后自动续跑发布 Agent”。
+	AutoResumeAgentOff bool
 	// CrashRetentionDays 原始崩溃包保留天数（0 表示用默认 30 天）。
 	CrashRetentionDays int
 	// RejectedRetentionDays 被拒绝上报的保留天数（0 表示默认 7 天）。
@@ -53,6 +59,7 @@ type Config struct {
 type API struct {
 	store                 *store.Store
 	checker               *conncheck.Checker
+	releaseV2             *releasev2.Service
 	token                 string
 	origins               []string
 	devOpen               bool
@@ -64,6 +71,10 @@ type API struct {
 	botAddr               string
 	botToken              string
 	schedulerURL          string
+	releaseAgent          *releaseagent.Launcher
+	autoResumeAgentOff    bool
+	eventTicketMu         sync.Mutex
+	eventTickets          map[string]eventTicket
 	schedulerToken        string
 	githubHTTPMu          sync.RWMutex
 	githubHTTP            *http.Client
@@ -89,6 +100,9 @@ func New(cfg Config) *API {
 	return &API{
 		store:                 cfg.Store,
 		checker:               checker,
+		releaseV2:             releasev2.NewService(cfg.Store),
+		releaseAgent:          cfg.ReleaseAgent,
+		autoResumeAgentOff:    cfg.AutoResumeAgentOff,
 		token:                 token,
 		origins:               cfg.AllowOrigins,
 		devOpen:               cfg.DevOpen || token == "",
@@ -127,6 +141,9 @@ type apiError struct {
 // Register 把管理路由挂到 Iris 应用上。
 func (a *API) Register(app *iris.Application) {
 	a.registerAuth(app)
+	// 事件流用一次性票据鉴权（EventSource 不能带 Authorization 头），
+	// 所以注册在 /admin 鉴权中间件之外，由处理函数自己校验票据。
+	app.Get("/admin/releases/v2/runs/{id}/events/stream", a.streamReleaseV2Events)
 	party := app.Party("/admin")
 	party.Use(a.cors, a.auth)
 
@@ -241,6 +258,9 @@ func (a *API) health(ctx iris.Context) {
 }
 
 func (a *API) actor(ctx iris.Context) string {
+	if ctx == nil {
+		return "unknown"
+	}
 	if v, ok := ctx.Values().Get("actor").(string); ok && v != "" {
 		return v
 	}
@@ -248,6 +268,9 @@ func (a *API) actor(ctx iris.Context) string {
 }
 
 func (a *API) traceID(ctx iris.Context) string {
+	if ctx == nil {
+		return fmt.Sprintf("adm-%d", time.Now().UnixNano())
+	}
 	if id := ctx.GetHeader("X-Trace-Id"); id != "" {
 		return id
 	}

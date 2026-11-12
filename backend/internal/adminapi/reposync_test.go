@@ -39,7 +39,9 @@ func TestSyncLocalCloneFastForwardsFromRemote(t *testing.T) {
 	runGitForTest(t, seed, "push", "-q", "origin", "main")
 
 	clone := filepath.Join(root, "clone")
-	runGitForTest(t, root, "clone", "-q", remote, clone)
+	runGitForTest(t, root, "-c", "core.autocrlf=false", "clone", "-q", remote, clone)
+	// 测试机可能是 Windows，关闭本地换行转换，保证工作区内容与远端一致。
+	runGitForTest(t, clone, "config", "core.autocrlf", "false")
 
 	// 远端前进一个提交，clone 还停在旧位置。
 	if err := os.WriteFile(filepath.Join(seed, "a.txt"), []byte("v2\n"), 0o644); err != nil {

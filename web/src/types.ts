@@ -678,3 +678,132 @@ export type SchedulerMessage = {
   created_at: string;
   updated_at: string;
 };
+
+export type ReleaseV2Target = {
+  target_id: string;
+  os: string;
+  arch: string;
+  executor_id: string;
+  required: boolean;
+  status: string;
+  attempt: number;
+  error_code?: string;
+  error_message?: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  artifacts?: { role: string; glob: string }[];
+};
+
+export type ReleaseV2Artifact = {
+  id: number;
+  target_id: string;
+  role: string;
+  name: string;
+  size: number;
+  sha256: string;
+  content_type: string;
+  storage_key: string;
+};
+
+export type ReleaseV2Publication = {
+  id: number;
+  provider: string;
+  target_id?: string;
+  state: string;
+  external_id: string;
+  external_url: string;
+  error_message: string;
+};
+
+export type ReleaseV2Event = {
+  id: number;
+  actor: string;
+  kind: string;
+  target_id?: string;
+  summary: string;
+  detail?: Record<string, unknown>;
+  created_at: string;
+};
+
+export type ReleaseV2Run = {
+  id: string;
+  plan_id: string;
+  project_id: string;
+  mode: string;
+  channel: string;
+  status: string;
+  version: string;
+  build_version: string;
+  tag: string;
+  resolved_commit: string;
+  notes_sha256: string;
+  error_code?: string;
+  error_message?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ReleaseV2Approval = {
+  id: string;
+  run_id: string;
+  kind: string;
+  actor: string;
+  reason: string;
+  content_sha256: string;
+  state: string;
+  expires_at?: string | null;
+  created_at: string;
+};
+
+export type ReleaseV2Bundle = {
+  run: ReleaseV2Run;
+  targets: ReleaseV2Target[];
+  artifacts: ReleaseV2Artifact[];
+  publications?: ReleaseV2Publication[];
+  events: ReleaseV2Event[];
+};
+
+export type ReleaseV2Plan = {
+  id: string;
+  status: string;
+  version: string;
+  mode: string;
+  channel: string;
+  targets: { id: string; os: string; arch: string; executor_id: string }[];
+  blockers?: { code: string; message: string; target_id?: string }[];
+  expires_at: string;
+};
+
+export type ReleaseV2AgentSession = {
+  id: string;
+  run_id: string;
+  project_id: string;
+  status: string;
+  actor: string;
+  model: string;
+  thread_id?: string;
+  turn_id?: string;
+  summary?: string;
+  last_error?: string;
+  token_id?: string;
+  started_at: string;
+  finished_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ReleaseV2AgentView = {
+  enabled: boolean;
+  running: boolean;
+  session?: ReleaseV2AgentSession;
+};
+
+export type ReleaseV2Executor = {
+  id: string;
+  os: string;
+  arch: string;
+  status: string;
+  version: string;
+  last_heartbeat_at?: string | null;
+};
+
