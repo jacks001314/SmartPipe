@@ -1266,3 +1266,9 @@ input, select, textarea { font-family: inherit; color: var(--ink); }
 @media (max-width: 1100px) {
   .projects-table th:nth-child(3), .projects-table td:nth-child(3) { display: none; }
 }
+
+/* 登录页：标题不再出现孤字换行 */
+.login-headline { font-size: 26px; line-height: 1.45; letter-spacing: 0; word-break: keep-all; text-wrap: balance; }
+.login-card { min-height: auto; }
+.login-left { padding: 40px 42px; }
+.login-desc { max-width: 340px; }
