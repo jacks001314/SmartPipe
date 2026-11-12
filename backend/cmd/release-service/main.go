@@ -55,7 +55,9 @@ func main() {
 		log.Fatalf("初始化制品存储失败: %v", err)
 	}
 	log.Printf("制品存储模式: %s", mode)
-	handler := &releasesvc.HTTPHandler{Store: st, Objects: objects, Token: token}
+	maxAttempts := targetMaxAttempts()
+	handler := &releasesvc.HTTPHandler{Store: st, Objects: objects, Token: token, MaxTargetAttempts: maxAttempts}
+	log.Printf("release service: max target attempts=%d (retryable failures)", maxAttempts)
 	srv := &http.Server{Addr: addr, Handler: handler.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		log.Printf("release-service %s 监听 %s", version, addr)
@@ -84,6 +86,20 @@ func main() {
 	shutdown, done := context.WithTimeout(context.Background(), 10*time.Second)
 	defer done()
 	_ = srv.Shutdown(shutdown)
+}
+
+// targetMaxAttempts 读取可重试失败（对象存储不可用等）的最大尝试次数，缺省 3。
+func targetMaxAttempts() int {
+	raw := strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_TARGET_MAX_ATTEMPTS"))
+	if raw == "" {
+		return 3
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		log.Printf("警告: SMARTPIPE_RELEASE_TARGET_MAX_ATTEMPTS=%q 无效，按 3 处理", raw)
+		return 3
+	}
+	return n
 }
 
 // maxActiveRuns 读取并发上限；非法值按 0（不限制）处理并在日志里说明。

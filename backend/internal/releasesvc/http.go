@@ -16,6 +16,16 @@ type HTTPHandler struct {
 	Objects          releasev2.ObjectStore
 	Token            string
 	MaxArtifactBytes int64
+	// MaxTargetAttempts 是可重试失败（例如对象存储短暂不可用）允许的最大尝试次数。
+	MaxTargetAttempts int
+}
+
+// maxTargetAttempts 缺省 3 次：首次失败后还能再试两次。
+func (h *HTTPHandler) maxTargetAttempts() int {
+	if h.MaxTargetAttempts <= 0 {
+		return 3
+	}
+	return h.MaxTargetAttempts
 }
 
 func (h *HTTPHandler) Handler() http.Handler {
@@ -162,6 +172,9 @@ func (h *HTTPHandler) executorAction(w http.ResponseWriter, r *http.Request) {
 			RunID        string `json:"run_id"`
 			TargetID     string `json:"target_id"`
 			OK           bool   `json:"ok"`
+			// Retryable 表示这次失败属于瞬时故障（网络、对象存储不可用等），
+			// 目标应退回队列重试，而不是把整次运行判死。
+			Retryable    bool   `json:"retryable"`
 			ErrorCode    string `json:"error_code"`
 			ErrorMessage string `json:"error_message"`
 			Log          string `json:"log"`
@@ -169,6 +182,24 @@ func (h *HTTPHandler) executorAction(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&in); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
 			return
+		}
+		if !in.OK && in.Retryable {
+			code := firstNonEmpty(in.ErrorCode, "target_retryable")
+			requeued, rerr := h.Store.RequeueReleaseV2TargetLease(r.Context(), in.RunID, in.TargetID, executorID, code, in.ErrorMessage, h.maxTargetAttempts())
+			if rerr != nil {
+				http.Error(w, rerr.Error(), http.StatusInternalServerError)
+				return
+			}
+			if requeued {
+				_ = h.Store.AppendEvent(r.Context(), releasev2.Event{
+					RunID: in.RunID, Actor: "executor:" + executorID, Kind: "target.retry", TargetID: in.TargetID,
+					Summary: firstNonEmpty(in.ErrorMessage, "target requeued for retry"),
+					Detail:  map[string]any{"code": code, "log": truncate(in.Log, 64<<10)},
+				})
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			// 尝试次数用尽：按真实失败收口。
 		}
 		ok, err := h.Store.FinishReleaseV2Target(r.Context(), in.RunID, in.TargetID, executorID, in.OK, in.ErrorCode, in.ErrorMessage)
 		if err != nil {

@@ -20,6 +20,10 @@ type fakeControlStore struct {
 	artifacts   []releasev2.Artifact
 	statusCalls []string
 	events      []releasev2.Event
+
+	requeueOK    bool
+	requeueCalls []string
+	finishCalls  []string
 }
 
 func (f *fakeControlStore) GetExecutor(context.Context, string) (*releasev2.Executor, error) {
@@ -39,8 +43,21 @@ func (f *fakeControlStore) GetTarget(context.Context, string, string) (*releasev
 func (f *fakeControlStore) HeartbeatReleaseV2Target(context.Context, string, string, string, time.Duration) (bool, error) {
 	return true, nil
 }
-func (f *fakeControlStore) FinishReleaseV2Target(context.Context, string, string, string, bool, string, string) (bool, error) {
+func (f *fakeControlStore) FinishReleaseV2Target(_ context.Context, runID, targetID string, _ string, ok bool, code, message string) (bool, error) {
+	f.finishCalls = append(f.finishCalls, runID+"/"+targetID+" ok="+boolString(ok)+" code="+code)
 	return true, nil
+}
+
+func (f *fakeControlStore) RequeueReleaseV2TargetLease(_ context.Context, runID, targetID, _ string, code, message string, maxAttempt int) (bool, error) {
+	f.requeueCalls = append(f.requeueCalls, runID+"/"+targetID+" code="+code)
+	return f.requeueOK, nil
+}
+
+func boolString(v bool) string {
+	if v {
+		return "true"
+	}
+	return "false"
 }
 func (f *fakeControlStore) MarkTargetStatus(_ context.Context, _, _ string, from, to releasev2.TargetStatus) (bool, error) {
 	f.statusCalls = append(f.statusCalls, string(from)+"->"+string(to))

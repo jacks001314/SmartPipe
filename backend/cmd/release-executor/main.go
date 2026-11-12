@@ -181,7 +181,9 @@ func executeTarget(parent context.Context, client *http.Client, cfg config, env 
 	}
 	if err := uploadArtifacts(ctx, client, cfg, env, repoDir, streamed); err != nil {
 		sink.Close()
-		return report(targetResult{err: err, output: output.String()}, client, cfg, env)
+		// 上传失败通常是对象存储/网络瞬时不可用：标记 retryable，由服务端把目标重排，
+		// 而不是把整次发布判死。
+		return report(targetResult{err: err, code: "artifact_upload_failed", retryable: true, output: output.String()}, client, cfg, env)
 	}
 	sink.Close()
 	return report(targetResult{ok: true, output: output.String()}, client, cfg, env)
@@ -190,18 +192,33 @@ func executeTarget(parent context.Context, client *http.Client, cfg config, env 
 type targetResult struct {
 	ok     bool
 	err    error
-	output string
+	// code 覆盖默认的 target_failed，便于区分失败类别。
+	code string
+	// retryable 表示这次失败可以重试（服务端会把目标退回队列）。
+	retryable bool
+	output    string
 }
 
-func report(result targetResult, client *http.Client, cfg config, env *targetEnvelope) error {
+// reportBody 把执行结果整理成 /complete 的请求体，失败时带上错误码与是否可重试。
+func reportBody(result targetResult, env *targetEnvelope) map[string]any {
 	body := map[string]any{
 		"run_id": env.Run.ID, "target_id": env.Target.TargetID, "ok": result.ok,
 		"log": result.output,
 	}
 	if result.err != nil {
-		body["error_code"] = "target_failed"
+		code := result.code
+		if code == "" {
+			code = "target_failed"
+		}
+		body["error_code"] = code
 		body["error_message"] = result.err.Error()
+		body["retryable"] = result.retryable
 	}
+	return body
+}
+
+func report(result targetResult, client *http.Client, cfg config, env *targetEnvelope) error {
+	body := reportBody(result, env)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	return postJSON(ctx, client, cfg, "/internal/release-executors/"+cfg.ExecutorID+"/complete", body, nil)

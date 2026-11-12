@@ -633,6 +633,27 @@ WHERE run_id=$1 AND target_id=$2 AND lease_owner=$3
 	return n == 1, nil
 }
 
+// RequeueReleaseV2TargetLease 把仍由执行器持租的目标退回 retry_queued。
+// 对象存储短暂不可用这类瞬时故障走这里：目标重排后由执行器再试一次，
+// attempt 达到上限才返回 false，由调用方按真正失败处理。
+func (s *Store) RequeueReleaseV2TargetLease(ctx context.Context, runID, targetID, executorID, code, message string, maxAttempt int) (bool, error) {
+	if maxAttempt <= 0 {
+		maxAttempt = 3
+	}
+	res, err := s.db.ExecContext(ctx, `
+UPDATE release_v2_targets SET
+  status='retry_queued', attempt=attempt+1, lease_owner='', lease_expires_at=NULL,
+  error_code=$4, error_message=$5, started_at=NULL, finished_at=NULL, updated_at=now()
+WHERE run_id=$1 AND target_id=$2 AND lease_owner=$3
+  AND status IN ('leased','building','verifying','uploaded') AND attempt < $6`,
+		runID, targetID, executorID, code, message, maxAttempt)
+	if err != nil {
+		return false, fmt.Errorf("store: requeue release v2 target: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
 func (s *Store) RetryReleaseV2Target(ctx context.Context, runID, targetID string) (bool, error) {
 	res, err := s.db.ExecContext(ctx, `
 UPDATE release_v2_targets SET status='retry_queued', attempt=attempt+1,

@@ -11,6 +11,36 @@ import (
 	"smartpipe/backend/internal/releasev2"
 )
 
+// 上传失败要带 retryable，服务端才知道把目标退回队列而不是判死。
+func TestReportBodyMarksUploadFailureRetryable(t *testing.T) {
+	env := &targetEnvelope{
+		Run:    &releasev2.Run{ID: "rrun_1"},
+		Target: &releasev2.Target{TargetID: "linux-amd64"},
+	}
+	body := reportBody(targetResult{err: errTest("put: connection refused"), code: "artifact_upload_failed", retryable: true, output: "log"}, env)
+	if body["retryable"] != true {
+		t.Fatalf("retryable = %v, want true", body["retryable"])
+	}
+	if body["error_code"] != "artifact_upload_failed" {
+		t.Fatalf("error_code = %v", body["error_code"])
+	}
+	if body["ok"] != false {
+		t.Fatalf("ok = %v, want false", body["ok"])
+	}
+	// 构建失败没有 code 时回落到 target_failed，且不可重试。
+	plain := reportBody(targetResult{err: errTest("build: exit status 7")}, env)
+	if plain["error_code"] != "target_failed" {
+		t.Fatalf("default error_code = %v", plain["error_code"])
+	}
+	if plain["retryable"] != false {
+		t.Fatalf("build failure should not be retryable: %v", plain["retryable"])
+	}
+}
+
+type errTest string
+
+func (e errTest) Error() string { return string(e) }
+
 func TestExpandCommandAndPlatformNormalization(t *testing.T) {
 	run := &releasev2.Run{Version: "0.5.16", Tag: "v0.5.16", BuildVersion: "0.5.16.2026-11-12", ResolvedCommit: "abc1234", Channel: "stable"}
 	got := expandCommand("build {{version}} {{dated_version}} {{commit}} {{channel}}", run)

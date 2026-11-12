@@ -26,6 +26,7 @@ type ControlStore interface {
 	GetTarget(context.Context, string, string) (*releasev2.Target, error)
 	HeartbeatReleaseV2Target(context.Context, string, string, string, time.Duration) (bool, error)
 	FinishReleaseV2Target(context.Context, string, string, string, bool, string, string) (bool, error)
+	RequeueReleaseV2TargetLease(context.Context, string, string, string, string, string, int) (bool, error)
 	MarkTargetStatus(context.Context, string, string, releasev2.TargetStatus, releasev2.TargetStatus) (bool, error)
 	AppendEvent(context.Context, releasev2.Event) error
 	AppendLogChunk(context.Context, string, string, string, int, string) error

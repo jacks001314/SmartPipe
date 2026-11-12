@@ -4,11 +4,13 @@
 # 两个场景（参数 service / executor / both，默认 both）：
 #   service   构建进行中重启 release-service，确认运行仍能收口到 built
 #   executor  构建进行中 kill -9 执行器，确认租约到期后目标被重排、新一次尝试把构建跑完
+#   storage   构建进行中拒绝对象存储端口，确认上传失败后目标重排、恢复后自动跑完
 #
 # 用法：
 #   sudo bash release-v2-recovery.sh            # 两个场景都跑
 #   sudo bash release-v2-recovery.sh service
 #   sudo bash release-v2-recovery.sh executor
+#   sudo bash release-v2-recovery.sh storage
 #
 # 依赖：/opt/smartpipe-v2-test/fixture-slow（build 里 sleep 20），systemd 单元
 #       smartpipe-v2-release 与 smartpipe-v2-executor 由 systemd 管理。
@@ -21,12 +23,28 @@ SLOW_DIR=${SMOKE_SLOW_DIR:-/opt/smartpipe-v2-test/fixture-slow}
 CHANNEL=${SMOKE_CHANNEL:-test}
 TIMEOUT=${SMOKE_TIMEOUT:-300}
 MODE=${1:-both}
+S3_ADDR=${SMOKE_S3_ADDR:-127.0.0.1}
+S3_PORT=${SMOKE_S3_PORT:-9000}
+
+# 对象存储断开用 iptables 拒绝端口实现：比停 MinIO 更轻，退出时一定恢复。
+S3_BLOCKED=0
+block_s3() {
+  iptables -I OUTPUT 1 -p tcp -d "$S3_ADDR" --dport "$S3_PORT" -j REJECT || fail "无法添加 iptables 规则"
+  S3_BLOCKED=1
+}
+unblock_s3() {
+  if [[ "$S3_BLOCKED" == "1" ]]; then
+    iptables -D OUTPUT -p tcp -d "$S3_ADDR" --dport "$S3_PORT" -j REJECT 2>/dev/null || true
+    S3_BLOCKED=0
+  fi
+}
+trap unblock_s3 EXIT
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "PASS: $*"; }
 json_field() { python3 -c "import sys,json;d=json.load(sys.stdin);print($1)" 2>/dev/null || true; }
 
-case "$MODE" in service|executor|both) ;; *) fail "参数只能是 service/executor/both（当前 $MODE）" ;; esac
+case "$MODE" in service|executor|storage|both) ;; *) fail "参数只能是 service/executor/storage/both（当前 $MODE）" ;; esac
 [[ $EUID -eq 0 ]] || fail "需要 root：要重启 systemd 单元"
 
 if [[ -z "${SMARTPIPE_ADMIN_TOKEN:-}" ]]; then
@@ -151,6 +169,38 @@ scenario_executor() {
   echo "RECOVERY_OK scenario=executor run=$run_id attempt=$attempt"
 }
 
+scenario_storage() {
+  pass "场景 C：构建中对象存储不可用（$S3_ADDR:$S3_PORT REJECT）"
+  local run_id attempt_before cur deadline retries
+  run_id=$(create_run sto | tail -1)
+  wait_target "$run_id" leased 120
+  attempt_before=$(target_attempt "$run_id")
+  pass "目标已被认领（attempt=$attempt_before），8 秒后断开对象存储"
+  sleep 8
+  block_s3
+  pass "对象存储不可用，等第一次上传失败并重排"
+
+  deadline=$((SECONDS + 120))
+  while (( SECONDS < deadline )); do
+    cur=$(target_attempt "$run_id")
+    [[ "$cur" -gt "$attempt_before" ]] && break
+    sleep 2
+  done
+  cur=$(target_attempt "$run_id")
+  [[ "$cur" -gt "$attempt_before" ]] || fail "上传失败后目标没有重排（attempt 仍为 $attempt_before）"
+  pass "上传失败后目标已重排（attempt=$cur）"
+  unblock_s3
+  pass "对象存储已恢复"
+
+  wait_run "$run_id" built "$TIMEOUT"
+  assert_built_with_artifact "$run_id"
+  retries=$(run_detail "$run_id" | json_field 'sum(1 for e in (d["data"].get("events") or []) if e.get("kind")=="target.retry")')
+  [[ "${retries:-0}" -ge 1 ]] || fail "运行里没有 target.retry 事件"
+  pass "共记录 $retries 次可重试失败（target.retry）"
+  echo "RECOVERY_OK scenario=storage run=$run_id attempt=$cur"
+}
+
 [[ "$MODE" == "service" || "$MODE" == "both" ]] && scenario_service
 [[ "$MODE" == "executor" || "$MODE" == "both" ]] && scenario_executor
+[[ "$MODE" == "storage" || "$MODE" == "both" ]] && scenario_storage
 echo "RECOVERY_DONE mode=$MODE"
