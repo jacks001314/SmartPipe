@@ -155,6 +155,17 @@ func (a *API) updateServices(ctx context.Context) []releaseUpdateService {
 func (a *API) probeGitHub(ctx context.Context, c iris.Context) {
 	base, _ := a.store.GetSetting(ctx, "release_github_api_base")
 	credName, _ := a.store.GetSetting(ctx, "release_github_credential")
+	if strings.TrimSpace(credName) == "" {
+		// 默认复用「GitHub 配置」页保存的全局凭据（PAT 或 OAuth）。
+		if items, err := a.store.ListCredentials(ctx, nil); err == nil {
+			for _, item := range items {
+				if item.Kind == "github_pat" && item.ProjectID == nil && item.Enabled {
+					credName = item.Name
+					break
+				}
+			}
+		}
+	}
 	base = strings.TrimRight(strings.TrimSpace(base), "/")
 	if base == "" {
 		base = "https://api.github.com"

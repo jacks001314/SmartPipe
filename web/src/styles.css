@@ -829,3 +829,4 @@ button { font-family: inherit; }
   .svc-row { grid-template-columns: 1fr 1fr; }
   .svc-actions { grid-column: 1 / -1; }
 }
+.grid.two .span-2 { grid-column: 1 / -1; }

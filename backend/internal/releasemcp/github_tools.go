@@ -11,12 +11,35 @@ import (
 	"smartpipe/backend/internal/releasev2"
 )
 
+// githubCredential 解析发版用的 GitHub 令牌：工具参数 > 发版设置 > 环境变量 >
+// 「GitHub 配置」页保存的全局凭据（PAT 或 OAuth 都存成 github_pat 类型）。
+// 顺序说明：控制台已经授权过一次的账号，发版时不该再要求用户配第二遍。
 func (s *Server) githubCredential(ctx context.Context, args map[string]any) string {
-	return firstNonEmpty(
+	if value := firstNonEmpty(
 		stringArg(args, "credential"),
 		s.settingValue(ctx, "release_github_credential"),
 		s.GitHubCredential,
-	)
+	); value != "" {
+		return value
+	}
+	return s.defaultGitHubCredential(ctx)
+}
+
+// defaultGitHubCredential 返回当前启用的全局 GitHub 凭据名；没有时返回空串。
+func (s *Server) defaultGitHubCredential(ctx context.Context) string {
+	if s.Store == nil {
+		return ""
+	}
+	items, err := s.Store.ListCredentials(ctx, nil)
+	if err != nil {
+		return ""
+	}
+	for _, item := range items {
+		if item.Kind == "github_pat" && item.ProjectID == nil && item.Enabled {
+			return item.Name
+		}
+	}
+	return ""
 }
 
 // githubClient 每次按当前设置构造：界面改了 API 地址或凭据后不需要重启进程。

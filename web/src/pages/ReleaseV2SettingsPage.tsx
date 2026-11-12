@@ -42,7 +42,7 @@ export function ReleaseV2SettingsPage({ notify }: { notify: Notify }) {
   const [probing, setProbing] = useState("");
   // 每个升级服务待保存的令牌（按列表下标），保存后清空。
   const [serviceSecrets, setServiceSecrets] = useState<Record<number, string>>({});
-  const [secrets, setSecrets] = useState({ github: "", s3Secret: "", s3Access: "" });
+  const [secrets, setSecrets] = useState({ s3Secret: "", s3Access: "" });
 
   const load = useCallback(async () => {
     try {
@@ -80,7 +80,7 @@ export function ReleaseV2SettingsPage({ notify }: { notify: Notify }) {
       }
       await api.saveReleaseV2Settings(next);
       notify(label + " 已保存", "ok");
-      setSecrets({ github: "", s3Secret: "", s3Access: "" });
+      setSecrets({ s3Secret: "", s3Access: "" });
       setServiceSecrets({});
       await load();
     } catch (e) {
@@ -103,8 +103,6 @@ export function ReleaseV2SettingsPage({ notify }: { notify: Notify }) {
     await persist("升级服务", { ...form, update_services: services });
   };
 
-  const saveGitHub = () =>
-    persist("GitHub", form, { kind: "github_pat", name: form.github_credential, value: secrets.github, metadata: { api_base: form.github_api_base } });
   const saveS3 = () =>
     persist("对象存储", form, {
       kind: "release_s3",
@@ -206,17 +204,15 @@ export function ReleaseV2SettingsPage({ notify }: { notify: Notify }) {
         <header className="card-head">
           <div>
             <h3>GitHub 发布</h3>
-            <p className="muted">草稿、附件与公开走这里配置的 API 地址和令牌；仓库 owner/repo 取自项目里绑定的 GitHub 地址。</p>
+            <p className="muted">令牌直接复用「GitHub 配置」页保存的账号 PAT，仓库 owner/repo 取自项目绑定的 GitHub 地址；只有自建 GitHub Enterprise 时才需要改这里的 API 地址。</p>
           </div>
         </header>
         <div className="grid two">
-          <label>API 地址<input placeholder="https://api.github.com" value={form.github_api_base} onChange={(e) => patch("github_api_base", e.target.value)} /></label>
-          <label>凭据名<input placeholder="github-prod" value={form.github_credential} onChange={(e) => patch("github_credential", e.target.value)} /></label>
-          <label>个人访问令牌<input type="password" placeholder="repo 权限的 PAT，留空表示不修改" value={secrets.github} onChange={(e) => setSecrets((s) => ({ ...s, github: e.target.value }))} /></label>
+          <label className="span-2">API 地址<input placeholder="https://api.github.com" value={form.github_api_base} onChange={(e) => patch("github_api_base", e.target.value)} /></label>
         </div>
         <p className="muted small">{credLine("github_pat")}</p>
         <div className="actions">
-          <button className="btn primary" disabled={busy} onClick={() => void saveGitHub()}>保存 GitHub</button>
+          <button className="btn primary" disabled={busy} onClick={() => void persist("GitHub", form)}>保存 GitHub 设置</button>
           <button className="btn" disabled={busy || probing !== ""} onClick={() => void probe("github")}>{probing === "github:" ? "测试中…" : "测试连接"}</button>
         </div>
       </section>
