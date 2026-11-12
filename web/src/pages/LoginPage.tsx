@@ -47,7 +47,7 @@ export function LoginPage({ onSuccess, hint }: { onSuccess: (session: AuthSessio
               <li>补丁验证与发版流水线</li>
             </ul>
           </div>
-          <div className="login-foot">本地开发环境（SIT）</div>
+          <div className="login-foot">SmartPipe 配置中心</div>
         </div>
 
         <div className="login-right">
