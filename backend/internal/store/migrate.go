@@ -15,6 +15,32 @@ type migration struct {
 var migrations = []migration{
 
 	{
+		version: 43,
+		name:    "ssh_runtime_resources",
+		sql: `
+ALTER TABLE runtime_resources ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+ALTER TABLE runtime_resources ADD COLUMN IF NOT EXISTS host TEXT NOT NULL DEFAULT '';
+ALTER TABLE runtime_resources ADD COLUMN IF NOT EXISTS port INTEGER NOT NULL DEFAULT 22;
+ALTER TABLE runtime_resources ADD COLUMN IF NOT EXISTS username TEXT NOT NULL DEFAULT '';
+ALTER TABLE runtime_resources ADD COLUMN IF NOT EXISTS auth_type TEXT NOT NULL DEFAULT 'password';
+ALTER TABLE runtime_resources ADD COLUMN IF NOT EXISTS secret_ciphertext TEXT NOT NULL DEFAULT '';
+ALTER TABLE runtime_resources ADD COLUMN IF NOT EXISTS secret_mask TEXT NOT NULL DEFAULT '';
+ALTER TABLE runtime_resources ADD COLUMN IF NOT EXISTS passphrase_ciphertext TEXT NOT NULL DEFAULT '';
+ALTER TABLE runtime_resources ADD COLUMN IF NOT EXISTS host_key_fingerprint TEXT NOT NULL DEFAULT '';
+ALTER TABLE runtime_resources ADD COLUMN IF NOT EXISTS tags JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE runtime_resources ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE runtime_resources ADD COLUMN IF NOT EXISTS last_tested_at TIMESTAMPTZ;
+ALTER TABLE runtime_resources ADD COLUMN IF NOT EXISTS last_test_ok BOOLEAN;
+ALTER TABLE runtime_resources ADD COLUMN IF NOT EXISTS last_test_message TEXT NOT NULL DEFAULT '';
+ALTER TABLE runtime_resources ADD COLUMN IF NOT EXISTS system_info JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE runtime_resources ADD COLUMN IF NOT EXISTS inspected_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS runtime_resources_enabled_idx
+    ON runtime_resources (kind, enabled, updated_at DESC);
+`,
+	},
+
+
+	{
 		version: 42,
 		name:    "release_v2_plan_clone_credential",
 		sql: `

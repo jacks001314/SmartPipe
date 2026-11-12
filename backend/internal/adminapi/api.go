@@ -19,6 +19,7 @@ import (
 	"smartpipe/backend/internal/conncheck"
 	"smartpipe/backend/internal/releaseagent"
 	"smartpipe/backend/internal/releasev2"
+	"smartpipe/backend/internal/resourceprobe"
 	"smartpipe/backend/internal/store"
 )
 
@@ -87,6 +88,7 @@ type API struct {
 	sessionTTL            time.Duration
 	cookieSecure          bool
 	oauthFlows            *githubOAuthState
+	resourceProber        *resourceprobe.Prober
 	appSetups             *githubAppSetupState
 }
 
@@ -125,6 +127,7 @@ func New(cfg Config) *API {
 		cookieSecure:          cfg.CookieSecure,
 		oauthFlows:            newGitHubOAuthState(),
 		appSetups:             newGitHubAppSetupState(),
+		resourceProber:        resourceprobe.New(),
 	}
 }
 
@@ -183,6 +186,7 @@ func (a *API) Register(app *iris.Application) {
 	a.registerGitHubRepos(party)
 	a.registerGitHubProxy(party)
 	a.registerGitHubTunnel(party)
+	a.registerResources(party)
 	a.registerLanxinInternal(app)
 }
 

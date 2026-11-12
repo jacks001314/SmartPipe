@@ -3,6 +3,7 @@ import { api, ApiError, getToken, setToken, setUnauthorizedHandler } from "./api
 import type { AuthSession, Health } from "./types";
 import { LoginPage } from "./pages/LoginPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
+import { ResourcesPage } from "./pages/ResourcesPage";
 import { GitHubPage } from "./pages/GitHubPage";
 import { ModelsPage } from "./pages/ModelsPage";
 import { LanxinPage } from "./pages/LanxinPage";
@@ -14,12 +15,13 @@ import { ReleaseV2SettingsPage } from "./pages/ReleaseV2SettingsPage";
 import { CrashPage } from "./pages/CrashPage";
 import { SchedulerPage } from "./pages/SchedulerPage";
 
-type PageKey = "projects" | "credentials" | "models" | "lanxin" | "scheduler" | "verify" | "release" | "releaseV2" | "releaseSettings" | "crash" | "audit";
+type PageKey = "projects" | "resources" | "credentials" | "models" | "lanxin" | "scheduler" | "verify" | "release" | "releaseV2" | "releaseSettings" | "crash" | "audit";
 
 type NavItem = { key: PageKey; label: string; icon: string };
 
 const CONFIG_NAV: NavItem[] = [
   { key: "projects", label: "项目", icon: "▤" },
+  { key: "resources", label: "资源管理", icon: "⌁" },
   { key: "credentials", label: "GitHub 配置", icon: "⌥" },
   { key: "models", label: "模型配置", icon: "◎" },
   { key: "lanxin", label: "蓝信机器人", icon: "✆" },
@@ -39,6 +41,7 @@ const NAV = [...CONFIG_NAV, ...OPS_NAV];
 
 const META: Record<PageKey, { crumb: string; title: string; sub: string }> = {
   projects: { crumb: "配置中心 / 项目", title: "项目", sub: "管理项目、GitHub 仓库、蓝信群和 Codex 模型绑定。" },
+  resources: { crumb: "配置中心 / 资源管理", title: "资源管理", sub: "登记可复用的 SSH 硬件平台，测试连接、采集系统画像并供发版等模块选择。" },
   credentials: { crumb: "配置中心 / GitHub 配置", title: "GitHub 配置", sub: "GitHub 账户授权与仓库列表；仓库绑定在项目中完成。" },
   models: { crumb: "配置中心 / 模型配置", title: "模型配置", sub: "管理模型供应商、模型目录与推理强度，支持从本机 Codex 配置导入。" },
   lanxin: { crumb: "配置中心 / 蓝信机器人", title: "蓝信机器人", sub: "管理多个机器人、自动同步所在群，并查看每个机器人的聊天消息与连接状态。" },
@@ -230,6 +233,7 @@ export function App() {
 
         <div className="content">
           {page === "projects" && <ProjectsPage notify={notify} />}
+          {page === "resources" && <ResourcesPage notify={notify} />}
           {page === "credentials" && <GitHubPage notify={notify} />}
           {page === "models" && <ModelsPage notify={notify} />}
           {page === "lanxin" && <LanxinPage notify={notify} />}

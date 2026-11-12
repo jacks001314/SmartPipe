@@ -1,4 +1,5 @@
 import type { AuditEntry, AuthConfig, AuthSession, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Health, IssueAttempt, Project, ReleaseCandidate, ReleaseRecord, ReleaseRun, ReleaseV2AgentView, ReleaseV2AgentSession, ReleaseV2Approval, ReleaseV2Bundle, ReleaseV2Executor, ReleaseV2Plan, ReleaseV2Run, ReleaseV2Settings, ReleaseV2Probe, ReleaseV2ExecutorBootstrap, RepoOp, TestResult, UserIdentity, VerificationRecord, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubTunnelView, GitHubPATView, GitHubRepoCatalog, GitHubRepo, SchedulerOverview, SchedulerWorkerDetail, SchedulerWorker, SchedulerMessage, SchedulerOutputFrame, SchedulerOutputRawPage } from "./types";
+import type { ResourceInspectionResult, ResourceProbeResult, RuntimeResource } from "./types";
 
 const TOKEN_KEY = "smartpipe.adminToken";
 
@@ -210,6 +211,44 @@ export const api = {
     request<LanxinMessage[]>("/lanxin/messages?limit=" + limit + (botId ? "&bot_id=" + encodeURIComponent(botId) : "")),
   listAudit: (limit = 100, action = "") =>
     request<AuditEntry[]>("/audit?limit=" + limit + (action ? "&action=" + encodeURIComponent(action) : "")),
+
+  listResources: () => request<RuntimeResource[]>("/resources"),
+  listAvailableResources: (tag = "") =>
+    request<RuntimeResource[]>("/resources/available" + (tag ? "?tag=" + encodeURIComponent(tag) : "")),
+  getResource: (id: string) => request<RuntimeResource>("/resources/" + encodeURIComponent(id)),
+  createResource: (body: {
+    name: string;
+    description?: string;
+    host: string;
+    port: number;
+    username: string;
+    auth_type: "password" | "private_key";
+    secret: string;
+    passphrase?: string;
+    host_key_fingerprint?: string;
+    tags?: string[];
+    enabled?: boolean;
+  }) => request<RuntimeResource>("/resources", { method: "POST", body }),
+  updateResource: (id: string, body: {
+    name: string;
+    description?: string;
+    host: string;
+    port: number;
+    username: string;
+    auth_type: "password" | "private_key";
+    secret?: string;
+    passphrase?: string;
+    host_key_fingerprint?: string;
+    tags?: string[];
+    enabled?: boolean;
+  }) => request<RuntimeResource>("/resources/" + encodeURIComponent(id), { method: "PATCH", body }),
+  setResourceEnabled: (id: string, enabled: boolean) =>
+    request<RuntimeResource>("/resources/" + encodeURIComponent(id) + "/enabled", { method: "POST", body: { enabled } }),
+  testResource: (id: string) =>
+    request<ResourceProbeResult>("/resources/" + encodeURIComponent(id) + "/test", { method: "POST" }),
+  inspectResource: (id: string) =>
+    request<ResourceInspectionResult>("/resources/" + encodeURIComponent(id) + "/inspect", { method: "POST" }),
+  deleteResource: (id: string) => request<void>("/resources/" + encodeURIComponent(id), { method: "DELETE" }),
 
   listIdentities: (platform = "", projectId = "") =>
     request<UserIdentity[]>("/identities?platform=" + encodeURIComponent(platform) + (projectId ? "&project_id=" + encodeURIComponent(projectId) : "")),

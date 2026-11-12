@@ -851,3 +851,62 @@ export type ReleaseV2Executor = {
   last_heartbeat_at?: string | null;
 };
 
+export type ResourceGPU = {
+  name: string;
+  memory_mb?: string;
+  driver_version?: string;
+};
+
+export type ResourceSystemInfo = {
+  hostname?: string;
+  os?: string;
+  kernel?: string;
+  architecture?: string;
+  cpu_model?: string;
+  cpu_count?: number;
+  memory_total_bytes?: number;
+  disk_total_bytes?: number;
+  disk_available_bytes?: number;
+  uptime_seconds?: number;
+  login_user?: string;
+  home?: string;
+  tools?: Record<string, string>;
+  gpus?: ResourceGPU[];
+  captured_at?: string;
+};
+
+export type RuntimeResource = {
+  id: string;
+  kind: string;
+  name: string;
+  description: string;
+  host: string;
+  port: number;
+  username: string;
+  auth_type: "password" | "private_key";
+  secret_mask: string;
+  passphrase_set: boolean;
+  host_key_fingerprint: string;
+  tags: string[];
+  enabled: boolean;
+  last_tested_at: string | null;
+  last_test_ok: boolean | null;
+  last_test_message: string;
+  system_info: ResourceSystemInfo;
+  inspected_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ResourceProbeResult = {
+  ok: boolean;
+  message: string;
+  latency_ms: number;
+  fingerprint: string;
+  server_version: string;
+  resource: RuntimeResource;
+};
+
+export type ResourceInspectionResult = ResourceProbeResult & {
+  system_info: ResourceSystemInfo;
+};
