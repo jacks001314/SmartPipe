@@ -34,11 +34,24 @@ func (s *Server) credentials() releasepublish.Provider {
 	return releasepublish.EnvProvider{Lookup: os.LookupEnv}
 }
 
-func (s *Server) updateClient() *releasepublish.UpdateClient {
+func (s *Server) updateClient(ctx context.Context) *releasepublish.UpdateClient {
 	if s.Update != nil {
 		return s.Update
 	}
-	return &releasepublish.UpdateClient{BaseURL: s.UpdateURL, Creds: s.credentials()}
+	base := firstNonEmpty(s.settingValue(ctx, "release_update_url"), s.UpdateURL)
+	return &releasepublish.UpdateClient{BaseURL: base, Creds: s.credentials()}
+}
+
+// settingValue 读取界面保存的参数；没配置或读失败时返回空串，由调用方回落到环境变量。
+func (s *Server) settingValue(ctx context.Context, key string) string {
+	if s.Settings == nil {
+		return ""
+	}
+	v, err := s.Settings.GetSetting(ctx, key)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(v)
 }
 
 // runProfile loads the project release profile and returns it with the
@@ -381,7 +394,7 @@ func (s *Server) stageImport(ctx context.Context, p *principal, args map[string]
 	if err != nil {
 		return blockedResult("profile_error", err.Error()), nil
 	}
-	client := s.updateClient()
+	client := s.updateClient(ctx)
 	if strings.TrimSpace(client.BaseURL) == "" {
 		return blockedResult("update_service_not_configured", "upgrade service URL is not configured"), nil
 	}
@@ -446,7 +459,7 @@ func (s *Server) getImport(ctx context.Context, p *principal, args map[string]an
 	if credential == "" {
 		return blockedResult("credential_required", "no upgrade service credential configured for this project"), nil
 	}
-	imp, err := s.updateClient().Get(ctx, credential, importID)
+	imp, err := s.updateClient(ctx).Get(ctx, credential, importID)
 	if err != nil {
 		return nil, err
 	}
@@ -523,7 +536,7 @@ func (s *Server) promote(ctx context.Context, p *principal, args map[string]any,
 	}
 	expectedVersion := stringArg(args, "expected_current_version")
 	expectedBOM := stringArg(args, "expected_bom_sha256")
-	client := s.updateClient()
+	client := s.updateClient(ctx)
 	if expectedVersion == "" && expectedBOM == "" {
 		pointer, lerr := client.Latest(ctx, credential, run.Channel)
 		switch {
@@ -572,7 +585,7 @@ func (s *Server) promote(ctx context.Context, p *principal, args map[string]any,
 	if run.Status == releasev2.RunPublishing {
 		switch {
 		case final:
-			s.finishPublish(ctx, p, run, targets, artifacts, s.githubCredential(args))
+			s.finishPublish(ctx, p, run, targets, artifacts, s.githubCredential(ctx, args))
 		case s.githubDraftID(ctx, run.ID) == 0:
 			// Channel promote is the last external step for stage runs and for
 			// projects without a GitHub release target.
@@ -584,7 +597,7 @@ func (s *Server) promote(ctx context.Context, p *principal, args map[string]any,
 	if final && run.Status == releasev2.RunPartiallyPublished {
 		_ = s.Store.AppendEvent(ctx, releasev2.Event{RunID: run.ID, Actor: "agent:" + p.Token.ID, Kind: "release.resume",
 			Summary: "resuming partial publication", Detail: map[string]any{"from": run.Status}})
-		s.finishPublish(ctx, p, run, targets, artifacts, s.githubCredential(args))
+		s.finishPublish(ctx, p, run, targets, artifacts, s.githubCredential(ctx, args))
 	}
 	if pointer, lerr := client.Latest(ctx, stringArg(args, "credential"), result.Channel); lerr == nil {
 		if pointer.BOMSHA256 != "" && result.BOMSHA256 != "" && pointer.BOMSHA256 != result.BOMSHA256 {
@@ -705,7 +718,7 @@ func (s *Server) finishPublish(ctx context.Context, p *principal, run *releasev2
 			_, _ = s.Service.Transition(ctx, runID, from, releasev2.RunPartiallyPublished, actor, "github repository unavailable")
 			return
 		}
-		release, err := s.githubClient().GetRelease(ctx, ghCredential, owner, repo, githubID)
+		release, err := s.githubClient(ctx).GetRelease(ctx, ghCredential, owner, repo, githubID)
 		if err == nil {
 			if gaps := verifyGitHubAssets(release, artifacts); len(gaps) > 0 {
 				_, _ = s.Service.Transition(ctx, runID, from, releasev2.RunPartiallyPublished, actor, strings.Join(gaps, "; "))
@@ -714,7 +727,7 @@ func (s *Server) finishPublish(ctx context.Context, p *principal, run *releasev2
 				return
 			}
 		}
-		published, err := s.githubClient().PublishRelease(ctx, ghCredential, owner, repo, githubID)
+		published, err := s.githubClient(ctx).PublishRelease(ctx, ghCredential, owner, repo, githubID)
 		if err != nil {
 			_, _ = s.Service.Transition(ctx, runID, from, releasev2.RunPartiallyPublished, actor, "github publish failed: "+err.Error())
 			_ = s.Store.AppendEvent(ctx, releasev2.Event{RunID: runID, Actor: actor, Kind: "github.publish_failed",
@@ -736,7 +749,8 @@ func (s *Server) updateCredential(ctx context.Context, projectID string, args ma
 	if err != nil {
 		profile = nil
 	}
-	return updateCredentialFrom(profile, stringArg(args, "credential"), s.UpdateCredential)
+	fallback := firstNonEmpty(s.settingValue(ctx, "release_update_credential"), s.UpdateCredential)
+	return updateCredentialFrom(profile, stringArg(args, "credential"), fallback)
 }
 
 // updateCredentialFrom 是本包的凭据引用解析规则，单独抽出来便于测试。

@@ -66,6 +66,8 @@ func main() {
 	if presigner, ok := objects.(releasev2.Presigner); ok {
 		mcp.Presigner = presigner
 	}
+	mcp.Settings = st
+	mcp.Creds = releasemcp.StoreProvider{Store: st, Fallback: releasepublish.EnvProvider{Lookup: os.LookupEnv}}
 	mcp.UpdateURL = strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_UPDATE_URL"))
 	mcp.GitHubCredential = strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_GITHUB_CREDENTIAL"))
 	mcp.UpdateCredential = strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_UPDATE_CREDENTIAL"))

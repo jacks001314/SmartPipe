@@ -32,6 +32,8 @@ func (a *API) registerReleaseV2(p iris.Party) {
 	p.Post("/v2/runs/{id}/approvals", a.createReleaseV2Approval)
 	a.registerReleaseV2Agent(p)
 	p.Post("/v2/runs/{id}/events/ticket", a.issueReleaseV2EventTicket)
+	p.Get("/v2/settings", a.getReleaseV2Settings)
+	p.Put("/v2/settings", a.putReleaseV2Settings)
 	p.Get("/v2/executors", a.listReleaseV2Executors)
 	p.Post("/v2/executors", a.upsertReleaseV2Executor)
 }

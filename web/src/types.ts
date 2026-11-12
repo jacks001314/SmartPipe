@@ -798,6 +798,20 @@ export type ReleaseV2AgentView = {
   session?: ReleaseV2AgentSession;
 };
 
+export type ReleaseV2Settings = {
+  update_url: string;
+  update_credential: string;
+  github_api_base: string;
+  github_credential: string;
+  github_owner: string;
+  github_repo: string;
+  s3_endpoint: string;
+  s3_bucket: string;
+  s3_region: string;
+  s3_prefix: string;
+  s3_credential: string;
+};
+
 export type ReleaseV2Executor = {
   id: string;
   os: string;

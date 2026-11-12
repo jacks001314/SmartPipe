@@ -33,6 +33,9 @@ type Server struct {
 	// 其次项目发版配置里的 publishing.update_service.credential。
 	UpdateCredential string
 	Creds            releasepublish.Provider
+	// Settings 读取界面保存的发版参数（升级服务地址、GitHub 地址、默认凭据等）；
+	// nil 时只用环境变量。
+	Settings SettingStore
 	Clock            func() time.Time
 }
 
@@ -41,6 +44,11 @@ func New(st *store.Store, service *releasev2.Service, version string) *Server {
 		service = releasev2.NewService(st)
 	}
 	return &Server{Store: st, Service: service, Version: version}
+}
+
+// SettingStore 是 runtime_settings 的读取接口（*store.Store 直接满足）。
+type SettingStore interface {
+	GetSetting(ctx context.Context, key string) (string, error)
 }
 
 type rpcRequest struct {

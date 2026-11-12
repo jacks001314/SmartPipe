@@ -11,18 +11,31 @@ import (
 	"smartpipe/backend/internal/releasev2"
 )
 
-func (s *Server) githubCredential(args map[string]any) string {
-	return firstNonEmpty(stringArg(args, "credential"), s.GitHubCredential)
+func (s *Server) githubCredential(ctx context.Context, args map[string]any) string {
+	return firstNonEmpty(
+		stringArg(args, "credential"),
+		s.settingValue(ctx, "release_github_credential"),
+		s.GitHubCredential,
+	)
 }
 
-func (s *Server) githubClient() *releasepublish.GitHubClient {
+// githubClient 每次按当前设置构造：界面改了 API 地址或凭据后不需要重启进程。
+func (s *Server) githubClient(ctx context.Context) *releasepublish.GitHubClient {
+	base := s.settingValue(ctx, "release_github_api_base")
 	if s.GitHub != nil {
-		if s.GitHub.Creds == nil {
-			s.GitHub.Creds = s.credentials()
+		if base == "" || base == s.GitHub.APIBase {
+			if s.GitHub.Creds == nil {
+				s.GitHub.Creds = s.credentials()
+			}
+			return s.GitHub
 		}
-		return s.GitHub
 	}
-	return &releasepublish.GitHubClient{Creds: s.credentials()}
+	client := &releasepublish.GitHubClient{Creds: s.credentials()}
+	if base != "" {
+		client.APIBase = base
+		client.UploadBase = base
+	}
+	return client
 }
 
 // repoSlug extracts owner/repo from the project GitHub URL.
@@ -83,7 +96,7 @@ func (s *Server) githubDispatch(ctx context.Context, p *principal, name string, 
 		if body == "" {
 			body = run.NotesMD
 		}
-		release, err := s.githubClient().CreateDraft(ctx, s.githubCredential(args), owner, repo, releasepublish.CreateDraftRequest{
+		release, err := s.githubClient(ctx).CreateDraft(ctx, s.githubCredential(ctx, args), owner, repo, releasepublish.CreateDraftRequest{
 			TagName: tag, TargetCommitish: run.ResolvedCommit,
 			Name:       firstNonEmpty(stringArg(args, "name"), tag),
 			Body:       body,
@@ -129,7 +142,7 @@ func (s *Server) githubDispatch(ctx context.Context, p *principal, name string, 
 			return blockedResult("artifact_invalid", "the upgrade bundle is an internal artifact"), true, nil
 		}
 		// 同名同大小的附件已经存在时直接复用，避免重复调用工具把同一文件传两遍。
-		if existing, err := s.githubClient().GetRelease(ctx, s.githubCredential(args), owner, repo, releaseID); err == nil {
+		if existing, err := s.githubClient(ctx).GetRelease(ctx, s.githubCredential(ctx, args), owner, repo, releaseID); err == nil {
 			for _, asset := range existing.Assets {
 				if asset.Name == artifact.Name && asset.Size == artifact.Size {
 					return textResult(asset), true, nil
@@ -141,7 +154,7 @@ func (s *Server) githubDispatch(ctx context.Context, p *principal, name string, 
 			return nil, true, err
 		}
 		defer reader.Close()
-		asset, err := s.githubClient().UploadAsset(ctx, s.githubCredential(args), owner, repo, releaseID,
+		asset, err := s.githubClient(ctx).UploadAsset(ctx, s.githubCredential(ctx, args), owner, repo, releaseID,
 			artifact.Name, artifact.ContentType, reader, artifact.Size)
 		if err != nil {
 			return nil, true, err
@@ -165,7 +178,7 @@ func (s *Server) githubDispatch(ctx context.Context, p *principal, name string, 
 		if releaseID == 0 {
 			return blockedResult("github_draft_missing", "create the GitHub draft first"), true, nil
 		}
-		release, err := s.githubClient().PublishRelease(ctx, s.githubCredential(args), owner, repo, releaseID)
+		release, err := s.githubClient(ctx).PublishRelease(ctx, s.githubCredential(ctx, args), owner, repo, releaseID)
 		if err != nil {
 			return nil, true, err
 		}
@@ -187,7 +200,7 @@ func (s *Server) githubDispatch(ctx context.Context, p *principal, name string, 
 		if releaseID == 0 {
 			releaseID = s.githubDraftID(ctx, p.Run.ID)
 		}
-		release, err := s.githubClient().GetRelease(ctx, s.githubCredential(args), owner, repo, releaseID)
+		release, err := s.githubClient(ctx).GetRelease(ctx, s.githubCredential(ctx, args), owner, repo, releaseID)
 		if err != nil {
 			return nil, true, err
 		}

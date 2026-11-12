@@ -1,0 +1,157 @@
+import { useCallback, useEffect, useState } from "react";
+import { api, ApiError } from "../api";
+import type { Credential, ReleaseV2Settings } from "../types";
+import type { Notify } from "../App";
+
+const EMPTY: ReleaseV2Settings = {
+  update_url: "",
+  update_credential: "",
+  github_api_base: "https://api.github.com",
+  github_credential: "",
+  github_owner: "",
+  github_repo: "",
+  s3_endpoint: "",
+  s3_bucket: "",
+  s3_region: "",
+  s3_prefix: "",
+  s3_credential: "",
+};
+
+// 凭据保存：同名同类型已存在就轮换，否则新建。
+async function saveCredential(
+  existing: Credential[],
+  kind: string,
+  name: string,
+  value: string,
+  metadata: Record<string, unknown> = {},
+) {
+  const current = existing.find((c) => c.kind === kind && c.name === name && !c.project_id);
+  if (current) {
+    await api.rotateCredential(current.id, value);
+    return;
+  }
+  await api.createCredential({ kind, name, value, metadata });
+}
+
+export function ReleaseV2SettingsPage({ notify }: { notify: Notify }) {
+  const [form, setForm] = useState<ReleaseV2Settings>(EMPTY);
+  const [creds, setCreds] = useState<Credential[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  // 三个区块各自的待保存密钥（不落 localStorage，保存后清空）
+  const [secrets, setSecrets] = useState({ update: "", github: "", s3Secret: "", s3Access: "" });
+
+  const load = useCallback(async () => {
+    try {
+      const [settings, list] = await Promise.all([api.getReleaseV2Settings(), api.listCredentials()]);
+      setForm({ ...EMPTY, ...settings });
+      setCreds(list);
+      setError("");
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const patch = (key: keyof ReleaseV2Settings, value: string) => setForm((f) => ({ ...f, [key]: value }));
+
+  const persist = async (label: string, next: ReleaseV2Settings, cred?: { kind: string; name: string; value: string; metadata?: Record<string, unknown> }) => {
+    setBusy(true);
+    setError("");
+    try {
+      if (cred && cred.name.trim() !== "" && cred.value.trim() !== "") {
+        await saveCredential(creds, cred.kind, cred.name.trim(), cred.value.trim(), cred.metadata);
+      }
+      await api.saveReleaseV2Settings(next);
+      notify(label + " 已保存", "ok");
+      setSecrets((s) => ({ ...s, update: "", github: "", s3Secret: "", s3Access: "" }));
+      await load();
+    } catch (e) {
+      const message = e instanceof ApiError ? e.message : String(e);
+      setError(message);
+      notify(label + " 保存失败：" + message, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveUpdate = () =>
+    persist("升级服务", form, { kind: "release_update", name: form.update_credential, value: secrets.update });
+  const saveGitHub = () =>
+    persist("GitHub", form, { kind: "github_pat", name: form.github_credential, value: secrets.github, metadata: { api_base: form.github_api_base } });
+  const saveS3 = () =>
+    persist("对象存储", form, {
+      kind: "release_s3",
+      name: form.s3_credential,
+      value: secrets.s3Secret,
+      metadata: { access_key: secrets.s3Access, endpoint: form.s3_endpoint, bucket: form.s3_bucket },
+    });
+
+  const credLine = (kind: string) => {
+    const items = creds.filter((c) => c.kind === kind && !c.project_id);
+    if (items.length === 0) return "还没有保存过凭据";
+    return "已保存：" + items.map((c) => `${c.name}（${c.mask}）`).join("、");
+  };
+
+  return (
+    <div className="page-body">
+      {error && <div className="banner error">{error}</div>}
+      <section className="card">
+        <header className="card-head">
+          <div>
+            <h3>升级服务（syntropy_update）</h3>
+            <p className="muted">发布时把升级包 stage/promote 到这个服务；凭据只加密保存，不回显明文。</p>
+          </div>
+        </header>
+        <div className="grid two">
+          <label>服务地址<input placeholder="https://update.example.com" value={form.update_url} onChange={(e) => patch("update_url", e.target.value)} /></label>
+          <label>凭据名<input placeholder="update-prod" value={form.update_credential} onChange={(e) => patch("update_credential", e.target.value)} /></label>
+          <label>凭据令牌<input type="password" placeholder="留空表示不修改" value={secrets.update} onChange={(e) => setSecrets((s) => ({ ...s, update: e.target.value }))} /></label>
+        </div>
+        <p className="muted small">{credLine("release_update")}</p>
+        <div className="actions"><button className="btn primary" disabled={busy} onClick={() => void saveUpdate()}>保存升级服务</button></div>
+      </section>
+
+      <section className="card">
+        <header className="card-head">
+          <div>
+            <h3>GitHub 发布</h3>
+            <p className="muted">草稿、附件与公开走这里配置的 API 地址和令牌；仓库填默认 owner/repo。</p>
+          </div>
+        </header>
+        <div className="grid two">
+          <label>API 地址<input placeholder="https://api.github.com" value={form.github_api_base} onChange={(e) => patch("github_api_base", e.target.value)} /></label>
+          <label>凭据名<input placeholder="github-prod" value={form.github_credential} onChange={(e) => patch("github_credential", e.target.value)} /></label>
+          <label>owner<input placeholder="jacks001314" value={form.github_owner} onChange={(e) => patch("github_owner", e.target.value)} /></label>
+          <label>repo<input placeholder="SmartPipe" value={form.github_repo} onChange={(e) => patch("github_repo", e.target.value)} /></label>
+          <label>个人访问令牌<input type="password" placeholder="repo 权限的 PAT，留空表示不修改" value={secrets.github} onChange={(e) => setSecrets((s) => ({ ...s, github: e.target.value }))} /></label>
+        </div>
+        <p className="muted small">{credLine("github_pat")}</p>
+        <div className="actions"><button className="btn primary" disabled={busy} onClick={() => void saveGitHub()}>保存 GitHub</button></div>
+      </section>
+
+      <section className="card">
+        <header className="card-head">
+          <div>
+            <h3>制品对象存储（S3 / MinIO）</h3>
+            <p className="muted">留空则用服务端默认存储；填写后构建机上传与回读都走这里。</p>
+          </div>
+        </header>
+        <div className="grid two">
+          <label>Endpoint<input placeholder="http://127.0.0.1:9000" value={form.s3_endpoint} onChange={(e) => patch("s3_endpoint", e.target.value)} /></label>
+          <label>Bucket<input placeholder="smartpipe-releases" value={form.s3_bucket} onChange={(e) => patch("s3_bucket", e.target.value)} /></label>
+          <label>Region<input placeholder="us-east-1" value={form.s3_region} onChange={(e) => patch("s3_region", e.target.value)} /></label>
+          <label>前缀<input placeholder="releases" value={form.s3_prefix} onChange={(e) => patch("s3_prefix", e.target.value)} /></label>
+          <label>凭据名<input placeholder="s3-prod" value={form.s3_credential} onChange={(e) => patch("s3_credential", e.target.value)} /></label>
+          <label>Access Key<input value={secrets.s3Access} onChange={(e) => setSecrets((s) => ({ ...s, s3Access: e.target.value }))} /></label>
+          <label>Secret Key<input type="password" placeholder="留空表示不修改" value={secrets.s3Secret} onChange={(e) => setSecrets((s) => ({ ...s, s3Secret: e.target.value }))} /></label>
+        </div>
+        <p className="muted small">{credLine("release_s3")}</p>
+        <div className="actions"><button className="btn primary" disabled={busy} onClick={() => void saveS3()}>保存对象存储</button></div>
+      </section>
+
+      <p className="muted small">保存后 MCP 与 release-service 会在下一次请求读取新配置，不需要重启。</p>
+    </div>
+  );
+}

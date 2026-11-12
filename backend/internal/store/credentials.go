@@ -25,6 +25,10 @@ const (
 	CredentialModelProvider = "model_provider"
 	// CredentialFRPToken 是内嵌 frpc 连接 frps 的 auth.token。
 	CredentialFRPToken = "frp_token"
+	// CredentialReleaseUpdate 是真实升级服务（syntropy_update）的调用令牌。
+	CredentialReleaseUpdate = "release_update"
+	// CredentialReleaseS3 是制品对象存储的密钥（value 为 secret key，metadata 带 endpoint/bucket/access_key）。
+	CredentialReleaseS3 = "release_s3"
 )
 
 var allowedKinds = map[string]bool{
@@ -37,6 +41,8 @@ var allowedKinds = map[string]bool{
 	CredentialSigningKey:    true,
 	CredentialModelProvider: true,
 	CredentialFRPToken:      true,
+	CredentialReleaseUpdate: true,
+	CredentialReleaseS3:     true,
 }
 
 // ValidKind 判断凭据类型是否受支持。
@@ -163,6 +169,37 @@ func (s *Store) GetSecret(ctx context.Context, id string) (kind string, plaintex
 	}
 	if err != nil {
 		return "", "", nil, fmt.Errorf("store: get secret: %w", err)
+	}
+	plaintext, err = s.box.Open(sealed)
+	if err != nil {
+		return "", "", nil, err
+	}
+	metadata = map[string]any{}
+	if len(rawMeta) > 0 {
+		_ = json.Unmarshal(rawMeta, &metadata)
+	}
+	return kind, plaintext, metadata, nil
+}
+
+// ResolveCredentialByName 按名字解密一条启用中的凭据，供发版服务在运行时取用。
+// 全局凭据优先于项目级；同名多条时取最近更新的一条。
+func (s *Store) ResolveCredentialByName(ctx context.Context, name string) (kind string, plaintext string, metadata map[string]any, err error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", "", nil, ErrNotFound
+	}
+	var sealed string
+	var rawMeta []byte
+	err = s.db.QueryRowContext(ctx, `
+SELECT kind, ciphertext, metadata FROM credentials
+ WHERE name = $1 AND enabled
+ ORDER BY (project_id IS NULL) DESC, updated_at DESC
+ LIMIT 1`, name).Scan(&kind, &sealed, &rawMeta)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", nil, ErrNotFound
+	}
+	if err != nil {
+		return "", "", nil, fmt.Errorf("store: resolve credential: %w", err)
 	}
 	plaintext, err = s.box.Open(sealed)
 	if err != nil {

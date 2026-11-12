@@ -98,11 +98,54 @@ func (c *Checker) Dispatch(ctx context.Context, kind, secret string, meta map[st
 		if !res.OK {
 			res.Message = "frps token 不能为空"
 		}
+	case "release_update":
+		res = c.releaseUpdate(ctx, secret, meta)
+	case "release_s3":
+		res = c.releaseS3(ctx, secret, meta)
 	default:
 		res = Result{OK: false, Message: "不支持的凭据类型: " + kind}
 	}
 	res.Latency = c.Now().Sub(start).Milliseconds()
 	return res
+}
+
+// releaseUpdate 用凭据访问升级服务的 /healthz，确认地址与令牌都可用。
+func (c *Checker) releaseUpdate(ctx context.Context, token string, meta map[string]any) Result {
+	base := strings.TrimRight(metaString(meta, "url", ""), "/")
+	if base == "" {
+		return Result{Message: "缺少升级服务地址（metadata.url）"}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/healthz", nil)
+	if err != nil {
+		return Result{Message: "构造请求失败"}
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := c.client().Do(req)
+	if err != nil {
+		return Result{Message: "网络不可达: " + scrub(err.Error(), token)}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return Result{OK: true, Message: "升级服务可达（" + resp.Status + "）"}
+	}
+	return Result{Message: "升级服务返回 " + resp.Status}
+}
+
+// releaseS3 检查对象存储 endpoint 是否可达；密钥本身不做联网签名校验。
+func (c *Checker) releaseS3(_ context.Context, secret string, meta map[string]any) Result {
+	if strings.TrimSpace(secret) == "" {
+		return Result{Message: "Secret Key 不能为空"}
+	}
+	endpoint := metaString(meta, "endpoint", "")
+	if endpoint == "" {
+		return Result{Message: "缺少 endpoint"}
+	}
+	if metaString(meta, "access_key", "") == "" {
+		return Result{Message: "缺少 Access Key"}
+	}
+	return Result{OK: true, Message: "已登记 endpoint/bucket/密钥（上传时以真实请求为准）"}
 }
 
 func (c *Checker) githubPAT(ctx context.Context, token string, meta map[string]any) Result {

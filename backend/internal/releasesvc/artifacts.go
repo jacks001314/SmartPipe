@@ -124,7 +124,8 @@ func (h *HTTPHandler) beginArtifact(w http.ResponseWriter, r *http.Request, exec
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if h.Objects == nil {
+	objects := h.objectsFor(r.Context())
+	if objects == nil {
 		http.Error(w, "artifact storage is not configured", http.StatusServiceUnavailable)
 		return
 	}
@@ -147,7 +148,7 @@ func (h *HTTPHandler) beginArtifact(w http.ResponseWriter, r *http.Request, exec
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if presigner, ok := h.Objects.(releasev2.PutPresigner); ok {
+	if presigner, ok := h.objectsFor(r.Context()).(releasev2.PutPresigner); ok {
 		uploadURL, headers, err := presigner.PresignPut(r.Context(), key, in.Size, in.ContentType, 30*time.Minute)
 		if err == nil && uploadURL != "" {
 			writeJSON(w, http.StatusOK, artifactBeginResponse{
@@ -178,7 +179,8 @@ func (h *HTTPHandler) putArtifact(w http.ResponseWriter, r *http.Request, execut
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if h.Objects == nil {
+	objects := h.objectsFor(r.Context())
+	if objects == nil {
 		http.Error(w, "artifact storage is not configured", http.StatusServiceUnavailable)
 		return
 	}
@@ -203,7 +205,7 @@ func (h *HTTPHandler) putArtifact(w http.ResponseWriter, r *http.Request, execut
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	stored, err := h.Objects.Put(r.Context(), key, r.Body, in.Size, in.ContentType)
+	stored, err := objects.Put(r.Context(), key, r.Body, in.Size, in.ContentType)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -223,7 +225,8 @@ func (h *HTTPHandler) confirmArtifact(w http.ResponseWriter, r *http.Request, ex
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if h.Objects == nil {
+	objects := h.objectsFor(r.Context())
+	if objects == nil {
 		http.Error(w, "artifact storage is not configured", http.StatusServiceUnavailable)
 		return
 	}
@@ -246,7 +249,7 @@ func (h *HTTPHandler) confirmArtifact(w http.ResponseWriter, r *http.Request, ex
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	stored, err := h.Objects.Stat(r.Context(), key)
+	stored, err := objects.Stat(r.Context(), key)
 	if err != nil {
 		http.Error(w, "uploaded object not found: "+err.Error(), http.StatusNotFound)
 		return
@@ -256,7 +259,7 @@ func (h *HTTPHandler) confirmArtifact(w http.ResponseWriter, r *http.Request, ex
 		return
 	}
 	if strings.TrimSpace(stored.SHA256) == "" {
-		digest, size, err := hashObject(r.Context(), h.Objects, key)
+		digest, size, err := hashObject(r.Context(), objects, key)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
