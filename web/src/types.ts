@@ -798,6 +798,13 @@ export type ReleaseV2AgentView = {
   session?: ReleaseV2AgentSession;
 };
 
+export type ReleaseV2Probe = {
+  ok: boolean;
+  service: string;
+  detail: string;
+  admin?: boolean;
+};
+
 export type ReleaseV2Settings = {
   update_url: string;
   update_credential: string;

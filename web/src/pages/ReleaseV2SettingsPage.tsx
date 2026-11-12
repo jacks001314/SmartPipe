@@ -36,6 +36,7 @@ export function ReleaseV2SettingsPage({ notify }: { notify: Notify }) {
   const [creds, setCreds] = useState<Credential[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [probing, setProbing] = useState<"" | "update" | "github">("");
   // 三个区块各自的待保存密钥（不落 localStorage，保存后清空）
   const [secrets, setSecrets] = useState({ update: "", github: "", s3Secret: "", s3Access: "" });
 
@@ -74,6 +75,21 @@ export function ReleaseV2SettingsPage({ notify }: { notify: Notify }) {
     }
   };
 
+  const probe = async (service: "update" | "github") => {
+    setProbing(service);
+    setError("");
+    try {
+      const result = await api.probeReleaseV2Settings(service);
+      notify(result.detail, result.ok ? "ok" : "error");
+    } catch (e) {
+      const message = e instanceof ApiError ? e.message : String(e);
+      setError(message);
+      notify("测试连接失败：" + message, "error");
+    } finally {
+      setProbing("");
+    }
+  };
+
   const saveUpdate = () =>
     persist("升级服务", form, { kind: "release_update", name: form.update_credential, value: secrets.update });
   const saveGitHub = () =>
@@ -108,7 +124,7 @@ export function ReleaseV2SettingsPage({ notify }: { notify: Notify }) {
           <label>凭据令牌<input type="password" placeholder="留空表示不修改" value={secrets.update} onChange={(e) => setSecrets((s) => ({ ...s, update: e.target.value }))} /></label>
         </div>
         <p className="muted small">{credLine("release_update")}</p>
-        <div className="actions"><button className="btn primary" disabled={busy} onClick={() => void saveUpdate()}>保存升级服务</button></div>
+        <div className="actions"><button className="btn primary" disabled={busy} onClick={() => void saveUpdate()}>保存升级服务</button><button className="btn" disabled={busy || probing !== ""} onClick={() => void probe("update")}>{probing === "update" ? "测试中…" : "测试连接"}</button></div>
       </section>
 
       <section className="card">
@@ -124,7 +140,7 @@ export function ReleaseV2SettingsPage({ notify }: { notify: Notify }) {
           <label>个人访问令牌<input type="password" placeholder="repo 权限的 PAT，留空表示不修改" value={secrets.github} onChange={(e) => setSecrets((s) => ({ ...s, github: e.target.value }))} /></label>
         </div>
         <p className="muted small">{credLine("github_pat")}</p>
-        <div className="actions"><button className="btn primary" disabled={busy} onClick={() => void saveGitHub()}>保存 GitHub</button></div>
+        <div className="actions"><button className="btn primary" disabled={busy} onClick={() => void saveGitHub()}>保存 GitHub</button><button className="btn" disabled={busy || probing !== ""} onClick={() => void probe("github")}>{probing === "github" ? "测试中…" : "测试连接"}</button></div>
       </section>
 
       <section className="card">

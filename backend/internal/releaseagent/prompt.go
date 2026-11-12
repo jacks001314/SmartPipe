@@ -54,7 +54,7 @@ func BuildPrompt(bundle *releasev2.RunBundle, mcpURL, serverName string) string 
 - build_dispatch / build_wait / build_logs / build_retry：派发、等待、读日志、重试构建
 - artifact_list / artifact_verify：核对制品清单与摘要
 - release_notes_save：写入发布说明
-- update_bundle_build / update_import_stage / update_channel_promote：生成升级包、推送升级服务、推进渠道
+- update_bundle_build / update_import_stage / update_channel_promote：生成升级包、把制品上传为未公开的组件发布、推进渠道并发布 BOM
 - github_draft_create / github_asset_upload / github_release_publish：GitHub 发布
 - release_publish：收口发布；release_approval_list：查看审批状态
 `)
@@ -68,7 +68,7 @@ func BuildPrompt(bundle *releasev2.RunBundle, mcpURL, serverName string) string 
 1. 先用 release_run_get 读取当前状态，确认目标构建机与阻断项。
 2. 需要构建时按目标逐个 build_dispatch，然后 build_wait 等待结果；失败就读 build_logs，必要时 build_retry 一次并说明原因。
 3. 构建完成后用 artifact_list 与 artifact_verify 核对制品，再 release_notes_save 写入发布说明。
-4. 需要升级包时执行 update_bundle_build，再 update_import_stage；进入 Stable 等需要审批的渠道时，先 release_approval_list 检查，没有有效审批就停下汇报。
+4. 需要升级包时执行 update_bundle_build，再 update_import_stage（这一步会真实上传每个制品，但不移动渠道指针）；进入 Stable 等需要审批的渠道时，先 release_approval_list 检查，没有有效审批就停下汇报。
 5. 有审批后调用 update_channel_promote / release_publish 收口。这两个工具的 CAS 期望值可以不传：服务端会自己读当前渠道指针，不要猜版本号；最后再次 release_run_get 确认最终状态。
 `)
 	return b.String()

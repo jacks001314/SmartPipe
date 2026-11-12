@@ -1,4 +1,4 @@
-import type { AuditEntry, AuthConfig, AuthSession, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Health, IssueAttempt, Project, ReleaseCandidate, ReleaseRecord, ReleaseRun, ReleaseV2AgentView, ReleaseV2AgentSession, ReleaseV2Approval, ReleaseV2Bundle, ReleaseV2Executor, ReleaseV2Plan, ReleaseV2Run, ReleaseV2Settings, RepoOp, TestResult, UserIdentity, VerificationRecord, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubTunnelView, GitHubPATView, GitHubRepoCatalog, GitHubRepo, SchedulerOverview, SchedulerWorkerDetail, SchedulerWorker, SchedulerMessage, SchedulerOutputFrame, SchedulerOutputRawPage } from "./types";
+import type { AuditEntry, AuthConfig, AuthSession, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Health, IssueAttempt, Project, ReleaseCandidate, ReleaseRecord, ReleaseRun, ReleaseV2AgentView, ReleaseV2AgentSession, ReleaseV2Approval, ReleaseV2Bundle, ReleaseV2Executor, ReleaseV2Plan, ReleaseV2Run, ReleaseV2Settings, ReleaseV2Probe, RepoOp, TestResult, UserIdentity, VerificationRecord, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubTunnelView, GitHubPATView, GitHubRepoCatalog, GitHubRepo, SchedulerOverview, SchedulerWorkerDetail, SchedulerWorker, SchedulerMessage, SchedulerOutputFrame, SchedulerOutputRawPage } from "./types";
 
 const TOKEN_KEY = "smartpipe.adminToken";
 
@@ -132,6 +132,8 @@ export const api = {
   deleteGithubToken: () => request<void>("/github/token", { method: "DELETE" }),
   getReleaseV2Settings: () => request<ReleaseV2Settings>("/releases/v2/settings"),
   saveReleaseV2Settings: (body: ReleaseV2Settings) => request<ReleaseV2Settings>("/releases/v2/settings", { method: "PUT", body }),
+  probeReleaseV2Settings: (service: "update" | "github") =>
+    request<ReleaseV2Probe>("/releases/v2/settings/probe", { method: "POST", body: { service } }),
   createCredential: (body: { project_id?: string | null; kind: string; name: string; value: string; metadata?: Record<string, unknown> }) =>
     request<Credential>("/credentials", { method: "POST", body }),
   rotateCredential: (id: string, value: string) =>

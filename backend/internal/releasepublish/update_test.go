@@ -20,75 +20,117 @@ func testCreds() Provider {
 	}}
 }
 
-func TestUpdateClientStageAndPromote(t *testing.T) {
-	var stageAuth, stageKey string
-	var stageBody map[string]any
+func TestUpdateClientStagesAndPublishes(t *testing.T) {
+	var (
+		gotAuth, gotFilename, gotSHA, gotBody string
+		gotComponent, gotPublish              string
+		gotDistribution                       map[string]any
+	)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/admin/update-imports":
-			stageAuth = r.Header.Get("Authorization")
-			stageKey = r.Header.Get("Idempotency-Key")
-			_ = json.NewDecoder(r.Body).Decode(&stageBody)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id": "imp_1", "state": "staged", "channel": "stable", "productVersion": "0.5.16",
-				"bomSha256": "sha256:bom1",
-				"slots":     []map[string]any{{"slot": "desktop", "os": "windows", "arch": "amd64", "sha256": "sha256:a"}},
-			})
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/admin/update-imports/imp_1/promote":
-			_ = json.NewEncoder(w).Encode(map[string]any{"state": "promoted", "channel": "stable", "productVersion": "0.5.16", "bomSha256": "sha256:bom1", "releaseId": "rel_1"})
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/admin/update-imports/imp_conflict/promote":
-			w.WriteHeader(http.StatusConflict)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": "channel moved by another release"})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/admin/components":
+			writeTestJSON(w, map[string]any{"name": "product", "kind": "product", "versioning": "product"})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/admin/releases":
+			writeTestJSON(w, map[string]any{"releases": []map[string]any{
+				{"id": "release-1", "component": "product", "version": "0.5.16", "channel": "beta"},
+			}})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/admin/releases":
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			gotComponent = body["component"].(string)
+			writeTestJSON(w, map[string]any{"id": "release-2", "component": body["component"], "version": body["version"], "channel": body["channel"]})
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/v1/admin/releases/release-2/artifacts/"):
+			gotAuth = r.Header.Get("Authorization")
+			gotFilename = r.Header.Get("X-Filename")
+			gotSHA = r.Header.Get("X-Sha256")
+			raw, _ := io.ReadAll(r.Body)
+			gotBody = string(raw)
+			if r.URL.Path != "/v1/admin/releases/release-2/artifacts/desktop/windows/amd64" {
+				t.Errorf("upload path = %s", r.URL.Path)
+			}
+			writeTestJSON(w, map[string]any{"id": "artifact-1", "releaseId": "release-2", "slot": "desktop", "os": "windows", "arch": "amd64", "filename": gotFilename, "size": len(raw), "sha256": gotSHA})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/admin/releases/release-2/publish":
+			gotPublish = "yes"
+			writeTestJSON(w, map[string]string{"releaseId": "release-2", "status": "published"})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/admin/distributions":
+			_ = json.NewDecoder(r.Body).Decode(&gotDistribution)
+			writeTestJSON(w, map[string]any{"channel": "beta", "productVersion": "0.5.16", "components": []map[string]any{
+				{"name": "product", "version": "0.5.16", "releaseId": "release-2"},
+			}})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/distributions/latest":
+			payload := map[string]any{
+				"channel": "beta", "productVersion": "0.5.16", "publishedAt": "2026-11-12T00:00:00Z",
+				"components": []map[string]any{{"name": "product", "version": "0.5.16"}},
+			}
+			raw, _ := json.Marshal(payload)
+			writeTestJSON(w, map[string]any{"payload": json.RawMessage(raw), "signature": "sig"})
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	defer server.Close()
 
+	ctx := context.Background()
 	client := &UpdateClient{BaseURL: server.URL, Creds: testCreds()}
-	imp, err := client.Stage(context.Background(), "update-stable", ImportRequest{
-		Product: "product", Channel: "stable", ProductVersion: "0.5.16", BuildVersion: "0.5.16.2026-11-12",
-		BundleSHA256: "sha256:bundle", IdempotencyKey: "stage-run_1", BundleURL: "https://objects/x.json",
-	})
+
+	if _, err := client.EnsureComponent(ctx, "update-stable", EnsureComponentRequest{Name: "product", Kind: "product", Versioning: "product"}); err != nil {
+		t.Fatal(err)
+	}
+	if release, err := client.FindRelease(ctx, "update-stable", "product", "beta", "0.5.16"); err != nil || release.ID != "release-1" {
+		t.Fatalf("find release = %+v, %v", release, err)
+	}
+	if _, err := client.FindRelease(ctx, "update-stable", "product", "beta", "9.9.9"); !errors.Is(err, ErrNotFoundRemote) {
+		t.Fatalf("missing release err = %v", err)
+	}
+	created, err := client.CreateRelease(ctx, "update-stable", CreateReleaseRequest{Component: "product", Version: "0.5.17", Channel: "beta"})
+	if err != nil || created.ID != "release-2" || gotComponent != "product" {
+		t.Fatalf("create release = %+v, %v", created, err)
+	}
+	if _, err := client.UploadArtifact(ctx, "update-stable", "release-2", "desktop", "windows", "amd64", "app-setup.exe",
+		"sha256:abc123", int64(len("payload")), strings.NewReader("payload")); err != nil {
+		t.Fatal(err)
+	}
+	if gotAuth != "Bearer s3cret" || gotFilename != "app-setup.exe" || gotSHA != "abc123" || gotBody != "payload" {
+		t.Fatalf("upload headers = %q %q %q body=%q", gotAuth, gotFilename, gotSHA, gotBody)
+	}
+	if err := client.PublishRelease(ctx, "update-stable", "release-2"); err != nil || gotPublish != "yes" {
+		t.Fatalf("publish release err = %v", err)
+	}
+	if _, err := client.PublishDistribution(ctx, "update-stable", PublishDistributionRequest{
+		Channel: "beta", ProductVersion: "0.5.16",
+		Components: []DistributionComponent{{Name: "product", Version: "0.5.16"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if gotDistribution["productVersion"] != "0.5.16" {
+		t.Fatalf("distribution body = %+v", gotDistribution)
+	}
+	pointer, err := client.Latest(ctx, "", "beta")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if imp.ID != "imp_1" || imp.State != "staged" || len(imp.Slots) != 1 {
-		t.Fatalf("import = %+v", imp)
-	}
-	if stageAuth != "Bearer s3cret" {
-		t.Fatalf("authorization = %q", stageAuth)
-	}
-	if stageKey != "stage-run_1" || stageBody["bundleUrl"] != "https://objects/x.json" {
-		t.Fatalf("request headers/body = %q %+v", stageKey, stageBody)
-	}
-
-	promoted, err := client.Promote(context.Background(), "update-stable", "imp_1", PromoteRequest{
-		ExpectedCurrentProductVersion: "0.5.15", ExpectedBOMSHA256: "sha256:prev", IdempotencyKey: "promote-run_1",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if promoted.State != "promoted" || promoted.ReleaseID != "rel_1" {
-		t.Fatalf("promote = %+v", promoted)
-	}
-
-	_, err = client.Promote(context.Background(), "update-stable", "imp_conflict", PromoteRequest{
-		ExpectedBOMSHA256: "sha256:x", IdempotencyKey: "promote-2",
-	})
-	if !errors.Is(err, ErrConflictRemote) {
-		t.Fatalf("conflict err = %v", err)
+	want := DistributionDigest("beta", "0.5.16", []DistributionComponent{{Name: "product", Version: "0.5.16"}})
+	if pointer.ProductVersion != "0.5.16" || pointer.BOMSHA256 != want {
+		t.Fatalf("pointer = %+v want digest %s", pointer, want)
 	}
 }
 
 func TestUpdateClientRejectsMissingCredential(t *testing.T) {
 	client := &UpdateClient{BaseURL: "https://example.invalid", Creds: testCreds()}
-	_, err := client.Stage(context.Background(), "update-missing", ImportRequest{
-		Product: "product", Channel: "stable", ProductVersion: "1.0.0",
-		BundleSHA256: "sha256:x", IdempotencyKey: "k",
-	})
+	_, err := client.EnsureComponent(context.Background(), "update-missing", EnsureComponentRequest{Name: "product"})
 	if !errors.Is(err, ErrCredentialMissing) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDistributionDigestIgnoresOrderAndExpiry(t *testing.T) {
+	left := DistributionDigest("stable", "1.2.3", []DistributionComponent{{Name: "skills", Version: "1.0.0"}, {Name: "product", Version: "1.2.3"}})
+	right := DistributionDigest("stable", "1.2.3", []DistributionComponent{{Name: "product", Version: "1.2.3"}, {Name: "skills", Version: "1.0.0"}})
+	if left != right {
+		t.Fatalf("digest depends on component order: %s vs %s", left, right)
+	}
+	if left == DistributionDigest("beta", "1.2.3", []DistributionComponent{{Name: "product", Version: "1.2.3"}}) {
+		t.Fatal("digest must include channel and component set")
 	}
 }
 
@@ -132,4 +174,9 @@ func TestGitHubUploadStreamsWithDigest(t *testing.T) {
 	if gotBody != "payload" {
 		t.Fatalf("body = %q", gotBody)
 	}
+}
+
+func writeTestJSON(w http.ResponseWriter, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(body)
 }

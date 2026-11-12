@@ -326,21 +326,21 @@ func toolsFor(scopes []string) []map[string]any {
 			"inputSchema": objectSchema(map[string]any{}),
 		},
 		{
-			"name": "update_import_stage", "description": "Create an invisible staging import and BOM in the upgrade service. Does not move the channel.",
+			"name": "update_import_stage", "description": "Create unpublished component releases and upload every bundle artifact to the upgrade service. Does not move any channel pointer.",
 			"inputSchema": objectSchema(map[string]any{
 				"credential": map[string]any{"type": "string", "description": "Credential reference configured on the server."},
 				"channel":    map[string]any{"type": "string"},
 			}),
 		},
 		{
-			"name": "update_import_get", "description": "Read the staging import, slot matrix and BOM hash from the upgrade service.",
+			"name": "update_import_get", "description": "Read a staged release with its artifact matrix plus the channel pointer clients currently receive.",
 			"inputSchema": objectSchema(map[string]any{
 				"credential": map[string]any{"type": "string"},
 				"import_id":  map[string]any{"type": "string"},
 			}),
 		},
 		{
-			"name": "update_channel_promote", "description": "Promote the staged import to the run channel. Compare-and-swap expectations are optional: when omitted the server reads the current channel pointer itself, so do not guess version numbers.",
+			"name": "update_channel_promote", "description": "Point every staged component at the run channel, publish the channel BOM and verify the signed distribution. Compare-and-swap expectations are optional, so do not guess version numbers.",
 			"inputSchema": objectSchema(map[string]any{
 				"credential":               map[string]any{"type": "string", "description": "Credential reference; defaults to the project publishing.update_service.credential."},
 				"expected_current_version": map[string]any{"type": "string", "description": "Optional CAS expectation; omit to use the current channel pointer."},
