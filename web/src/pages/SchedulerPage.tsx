@@ -254,10 +254,14 @@ export function SchedulerPage({ notify }: { notify: Notify }) {
     return (
       <div className="card">
         <div className="empty">
-          <h3>无法读取调度器</h3>
-          <div className="tiny">{error}</div>
-          <div className="tiny">检查调度器是否在运行，以及 admin-api 的 SMARTPIPE_SCHEDULER_URL / SMARTPIPE_SCHEDULER_TOKEN 是否配置正确。</div>
-          <button className="btn" style={{ marginTop: 12 }} onClick={() => void load(true)}>重试</button>
+          <div className="resource-empty-icon">⇄</div>
+          <h3>调度器暂不可用</h3>
+          <p>控制台还没连上调度器服务，服务恢复后这里会自动可用。</p>
+          <div className="scheduler-offline-detail">
+            <div className="tiny">检查：调度器进程是否运行，admin-api 的 SMARTPIPE_SCHEDULER_URL / SMARTPIPE_SCHEDULER_TOKEN 是否正确。</div>
+            <code className="mono">{error}</code>
+          </div>
+          <button className="btn primary" onClick={() => void load(true)}>重新连接</button>
         </div>
       </div>
     );

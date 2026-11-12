@@ -607,53 +607,51 @@ export function GitHubPage({ notify }: { notify: Notify }) {
             </button>
             <span className="tiny github-proxy-hint">仓库会 clone 到该目录下的 owner/repo，项目创建时选择本地库。</span>
           </div>
-          <div className="github-proxy github-tunnel">
-            <span className="github-proxy-label">Webhook 隧道</span>
-            <label className="tiny github-tunnel-switch">
-              <input type="checkbox" checked={tunnelEnabled} onChange={(event) => setTunnelEnabled(event.target.checked)} />
-              启用内嵌 frpc
-            </label>
-            <input
-              value={tunnelServer}
-              onChange={(event) => setTunnelServer(event.target.value)}
-              placeholder="frps 地址，如 frp.example.com"
-              spellCheck={false}
-            />
-            <input
-              className="github-tunnel-port"
-              value={tunnelServerPort}
-              onChange={(event) => setTunnelServerPort(event.target.value)}
-              placeholder="7000"
-              inputMode="numeric"
-            />
-            <span className="tiny">→ 远端端口</span>
-            <input
-              className="github-tunnel-port"
-              value={tunnelRemotePort}
-              onChange={(event) => setTunnelRemotePort(event.target.value)}
-              placeholder="18090"
-              inputMode="numeric"
-            />
-            <input
-              value={tunnelProxyName}
-              onChange={(event) => setTunnelProxyName(event.target.value)}
-              placeholder="smartpipe-webhook"
-              spellCheck={false}
-            />
-            <input
-              type="password"
-              value={tunnelToken}
-              onChange={(event) => setTunnelToken(event.target.value)}
-              placeholder={tunnel?.token_set ? "已配置 frps token（留空不改）" : "frps auth.token"}
-              spellCheck={false}
-            />
-            <button className="btn small" disabled={tunnelBusy} onClick={() => void saveTunnel()}>
-              {tunnelBusy ? "保存中…" : "保存"}
-            </button>
-            {tunnelNote && <span className={"tiny " + (tunnelNoteOk ? "" : "bad-note")}>{tunnelNote}</span>}
-            <span className="tiny github-proxy-hint">
-              bridge 以库方式连接 frps，把 Webhook 端口映射到远端端口，配置改动 30 秒内自动生效。GitHub 的回调地址要填 frps 那台机器上对应的反向代理入口。
-            </span>
+          <div className="github-tunnel-block">
+            <div className="github-tunnel-head">
+              <div>
+                <div className="github-proxy-label">Webhook 隧道</div>
+                <div className="tiny">bridge 以库方式连接 frps，把 Webhook 端口映射到远端端口；配置改动 30 秒内自动生效，GitHub 回调地址填 frps 机器上对应的反向代理入口。</div>
+              </div>
+              <label className="github-tunnel-switch">
+                <input type="checkbox" checked={tunnelEnabled} onChange={(event) => setTunnelEnabled(event.target.checked)} />
+                启用内嵌 frpc
+              </label>
+            </div>
+            <div className="github-tunnel-grid">
+              <label>
+                frps 地址
+                <input value={tunnelServer} onChange={(event) => setTunnelServer(event.target.value)} placeholder="frp.example.com" spellCheck={false} />
+              </label>
+              <label>
+                frps 端口
+                <input value={tunnelServerPort} onChange={(event) => setTunnelServerPort(event.target.value)} placeholder="7000" inputMode="numeric" />
+              </label>
+              <label>
+                远端端口
+                <input value={tunnelRemotePort} onChange={(event) => setTunnelRemotePort(event.target.value)} placeholder="18090" inputMode="numeric" />
+              </label>
+              <label>
+                代理名
+                <input value={tunnelProxyName} onChange={(event) => setTunnelProxyName(event.target.value)} placeholder="smartpipe-webhook" spellCheck={false} />
+              </label>
+              <label className="github-tunnel-token">
+                frps token
+                <input
+                  type="password"
+                  value={tunnelToken}
+                  onChange={(event) => setTunnelToken(event.target.value)}
+                  placeholder={tunnel?.token_set ? "已配置（留空不改）" : "auth.token"}
+                  spellCheck={false}
+                />
+              </label>
+              <div className="github-tunnel-actions">
+                <button className="btn primary" disabled={tunnelBusy} onClick={() => void saveTunnel()}>
+                  {tunnelBusy ? "保存中…" : "保存隧道配置"}
+                </button>
+                {tunnelNote && <span className={"tiny " + (tunnelNoteOk ? "" : "bad-note")}>{tunnelNote}</span>}
+              </div>
+            </div>
           </div>
           <div className="github-account-auth">
             <div className="tiny">

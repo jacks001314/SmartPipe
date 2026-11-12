@@ -339,7 +339,7 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
               <button className="btn primary" style={{ marginTop: 14 }} onClick={startCreate}>＋ 新增项目</button>
             </div>
           ) : (
-            <table className="table">
+            <table className="table projects-table">
               <thead>
                 <tr>
                   <th>项目</th>
