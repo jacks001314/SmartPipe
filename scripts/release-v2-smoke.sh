@@ -6,18 +6,23 @@
 #   stage   再走升级包 → 暂存 → 审批门禁 → 批准 → 推进渠道 → published
 #   publish 再额外走 GitHub（草稿、附件、公开），断言两侧发布记录
 #   agent   让服务端拉起真实 Release Agent 会话，等会话结束后断言运行 built
+#   agent-stage   Agent 自主 build→打包→暂存，停在审批门面；脚本批准后断言自动续跑会话收口到 published
+#   agent-publish 同上，但计划为 publish：批准后的续跑会话要完成 GitHub 发布并 published
 #
 # 用法：
 #   sudo bash /opt/smartpipe-v2-test/tools/release-v2-smoke.sh
 #   sudo SMOKE_MODE=stage bash /opt/smartpipe-v2-test/tools/release-v2-smoke.sh
 #   sudo SMOKE_MODE=publish SMOKE_GITHUB_API_BASE=http://127.0.0.1:9099 bash /opt/smartpipe-v2-test/tools/release-v2-smoke.sh
+#   sudo SMOKE_MODE=agent-stage bash /opt/smartpipe-v2-test/tools/release-v2-smoke.sh
+#   sudo SMOKE_MODE=agent-publish SMOKE_GITHUB_API_BASE=http://127.0.0.1:9099 bash /opt/smartpipe-v2-test/tools/release-v2-smoke.sh
 #
 # 环境变量：
 #   SMARTPIPE_ADMIN_URL / SMARTPIPE_RELEASE_URL / SMARTPIPE_MCP_URL  接口地址
 #   SMARTPIPE_ENV_FILE   默认 /etc/smartpipe/smartpipe.env（取 SMARTPIPE_ADMIN_TOKEN）
 #   SMOKE_REPO_URL       默认 file:///opt/smartpipe-v2-test/fixture
 #   SMOKE_PROFILE_DIR    默认 /opt/smartpipe-v2-test/fixture
-#   SMOKE_MODE           build | stage | publish
+#   SMOKE_MODE           build | stage | publish | agent | agent-stage | agent-publish
+#   SMOKE_AGENT_TIMEOUT  发布 Agent 单会话等待上限，默认 900 秒
 #   SMOKE_CHANNEL        默认 test
 #   SMOKE_ARTIFACT_ROLE  GitHub 上传的角色，默认 app-bundle
 #   SMOKE_GITHUB_API_BASE 默认 http://127.0.0.1:9099（publish 模式回读用）
@@ -37,6 +42,7 @@ ROLE=${SMOKE_ARTIFACT_ROLE:-app-bundle}
 GH_BASE=${SMOKE_GITHUB_API_BASE:-http://127.0.0.1:9099}
 GH_REPO=${SMOKE_GITHUB_REPO:-smoke/fixture}
 TIMEOUT=${SMOKE_TIMEOUT:-180}
+AGENT_TIMEOUT=${SMOKE_AGENT_TIMEOUT:-900}
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "PASS: $*"; }
@@ -48,7 +54,9 @@ if [[ -z "${SMARTPIPE_ADMIN_TOKEN:-}" ]]; then
   set -a; . "$ENV_FILE"; set +a
 fi
 [[ -n "${SMARTPIPE_ADMIN_TOKEN:-}" ]] || fail "$ENV_FILE 里没有 SMARTPIPE_ADMIN_TOKEN"
-case "$MODE" in build|stage|publish|agent) ;; *) fail "SMOKE_MODE 只能是 build/stage/publish/agent（当前 $MODE）" ;; esac
+case "$MODE" in build|stage|publish|agent|agent-stage|agent-publish) ;; *) fail "SMOKE_MODE 只能是 build/stage/publish/agent/agent-stage/agent-publish（当前 $MODE）" ;; esac
+MODE_AGENT=0
+[[ "$MODE" == agent || "$MODE" == agent-stage || "$MODE" == agent-publish ]] && MODE_AGENT=1
 
 AUTH="Authorization: Bearer ${SMARTPIPE_ADMIN_TOKEN}"
 CT="Content-Type: application/json"
@@ -73,8 +81,7 @@ pass "项目：$PROJECT_ID"
 
 VERSION="0.0.$((STAMP % 100000))"
 PLAN_MODE=build_only
-[[ "$MODE" == "stage" ]] && PLAN_MODE=stage
-[[ "$MODE" == "publish" ]] && PLAN_MODE=publish
+case "$MODE" in stage|agent-stage) PLAN_MODE=stage ;; publish|agent-publish) PLAN_MODE=publish ;; esac
 PLAN=$(curl -fsS -X POST -H "$AUTH" -H "$CT" \
   -d "{\"project_id\":\"$PROJECT_ID\",\"version\":\"$VERSION\",\"mode\":\"$PLAN_MODE\",\"channel\":\"$CHANNEL\",\"commit\":\"$COMMIT\"}" \
   "$ADMIN/admin/releases/v2/plans")
@@ -91,36 +98,121 @@ RUN_ID=$(echo "$RUN" | json_field 'd["data"]["id"]')
 [[ "$RUN_ID" == rrun_* ]] || fail "创建运行失败：$RUN"
 pass "运行：$RUN_ID"
 
-if [[ "$MODE" == "agent" ]]; then
-  AGENT=$(curl -fsS -X POST -H "$AUTH" -H "$CT" -d '{}' "$ADMIN/admin/releases/v2/runs/$RUN_ID/agent")
-  SESSION_ID=$(echo "$AGENT" | json_field 'd["data"]["id"]')
-  [[ "$SESSION_ID" == ragent_* ]] || fail "启动发布 Agent 失败：$AGENT"
-  pass "发布 Agent 会话：$SESSION_ID"
+# agent_launch 通过 admin API 拉起一次发布 Agent 会话，回显会话 ID。
+agent_launch() {
+  local resp sid
+  resp=$(curl -fsS -X POST -H "$AUTH" -H "$CT" -d '{}' "$ADMIN/admin/releases/v2/runs/$RUN_ID/agent")
+  sid=$(echo "$resp" | json_field 'd["data"]["id"]')
+  [[ "$sid" == ragent_* ]] || fail "启动发布 Agent 失败：$resp"
+  echo "$sid"
+}
 
-  DEADLINE=$((SECONDS + TIMEOUT))
-  RUNNING=True
-  while (( SECONDS < DEADLINE )); do
-    A=$(curl -fsS -H "$AUTH" "$ADMIN/admin/releases/v2/runs/$RUN_ID/agent")
-    RUNNING=$(echo "$A" | json_field 'd["data"].get("running")')
-    [[ "$RUNNING" == "False" ]] && break
+# agent_wait_finished 等会话结束，且要等到一个和 $1 不同的会话（自动续跑会新建会话）。
+# 成功时回显 "<会话ID> <状态>"。
+agent_wait_finished() {
+  local prev=$1 deadline=$((SECONDS + AGENT_TIMEOUT)) a running sid status
+  while (( SECONDS < deadline )); do
+    a=$(curl -fsS -H "$AUTH" "$ADMIN/admin/releases/v2/runs/$RUN_ID/agent")
+    running=$(echo "$a" | json_field 'd["data"].get("running")')
+    sid=$(echo "$a" | json_field '(d["data"].get("session") or {}).get("id","")')
+    status=$(echo "$a" | json_field '(d["data"].get("session") or {}).get("status","")')
+    if [[ "$running" == "False" && -n "$sid" && "$sid" != "$prev" ]]; then
+      echo "$sid $status"
+      return 0
+    fi
     sleep 3
   done
-  [[ "$RUNNING" == "False" ]] || fail "等待 $TIMEOUT 秒发布 Agent 仍未结束"
-  SESSION_STATUS=$(echo "$A" | json_field '(d["data"].get("session") or {}).get("status","")')
+  fail "等待 $AGENT_TIMEOUT 秒发布 Agent 仍未结束（上一会话 ${prev:-无}）"
+}
+
+# assert_published 断言运行已 published、升级服务（和 publish 模式的 GitHub）发布记录一致。
+assert_published() {
+  local pub=$1 status gh_id gh_state gh_detail
+  status=$(echo "$pub" | json_field 'd["data"].get("run",d["data"])["status"]')
+  [[ "$status" == "published" ]] || fail "收口后未 published（当前 $status）"
+  local pub_state
+  pub_state=$(echo "$pub" | json_field 'next((p.get("state") for p in (d["data"].get("publications") or []) if p.get("provider")=="update_service"), "")')
+  [[ "$pub_state" == "promoted" ]] || fail "update_service 发布记录状态=$pub_state"
+  pass "运行已发布（update_service=promoted）"
+  if [[ "$MODE" == "publish" || "$MODE" == "agent-publish" ]]; then
+    gh_id=$(echo "$pub" | json_field 'next((p.get("external_id") for p in (d["data"].get("publications") or []) if p.get("provider")=="github"), "")')
+    [[ -n "$gh_id" ]] || fail "缺少 GitHub 发布记录"
+    gh_state=$(echo "$pub" | json_field 'next((p.get("state") for p in (d["data"].get("publications") or []) if p.get("provider")=="github"), "")')
+    [[ "$gh_state" == "published" ]] || fail "GitHub 发布记录状态=$gh_state"
+    gh_detail=$(curl -fsS -H "Authorization: Bearer smoke" "$GH_BASE/repos/$GH_REPO/releases/$gh_id")
+    python3 - "$gh_detail" <<'PY' || fail "假 GitHub 回读不一致"
+import json, sys
+rel = json.loads(sys.argv[1])
+assets = rel.get("assets") or []
+if not rel.get("published"):
+    print("FAIL: github release published=%s" % rel.get("published"), file=sys.stderr)
+    sys.exit(1)
+if not assets:
+    print("FAIL: github release 没有附件", file=sys.stderr)
+    sys.exit(1)
+print("PASS: GitHub release %s published，附件 %d 个" % (rel.get("id"), len(assets)))
+for a in assets:
+    print("  - %s %s bytes" % (a.get("name"), a.get("size")))
+PY
+    pass "GitHub 回读一致（published + 附件）"
+  fi
+}
+
+if [[ $MODE_AGENT -eq 1 ]]; then
+  SESSION_ID=$(agent_launch)
+  pass "发布 Agent 会话：$SESSION_ID"
+  RESULT=$(agent_wait_finished "")
+  SESSION_ID=${RESULT%% *}
+  SESSION_STATUS=${RESULT##* }
   [[ "$SESSION_STATUS" == "finished" ]] || fail "发布 Agent 会话状态=$SESSION_STATUS"
-  pass "发布 Agent 会话结束：finished"
+  pass "发布 Agent 会话结束：finished（$SESSION_ID）"
 
   DETAIL=$(curl -fsS -H "$AUTH" "$ADMIN/admin/releases/v2/runs/$RUN_ID")
   STATUS=$(echo "$DETAIL" | json_field 'd["data"].get("run",d["data"])["status"]')
-  [[ "$STATUS" == "built" ]] || fail "Agent 结束后运行状态=$STATUS（期望 built）"
-  pass "运行状态：built（Agent 收口）"
+  case "$MODE" in
+    agent)
+      [[ "$STATUS" == "built" ]] || fail "Agent 结束后运行状态=$STATUS（期望 built）"
+      pass "运行状态：built（Agent 收口）"
+      ;;
+    agent-stage|agent-publish)
+      # Agent 应当在审批门禁前停下：升级包已暂存，运行停在 staged。
+      [[ "$STATUS" == "staged" ]] || fail "Agent 结束后运行状态=$STATUS（期望停在 staged 等审批）"
+      pass "运行状态：staged（Agent 停在审批门禁）"
+      PUB_STATE_BEFORE=$(echo "$DETAIL" | json_field 'next((p.get("state") for p in (d["data"].get("publications") or []) if p.get("provider")=="update_service"), "")')
+      [[ "$PUB_STATE_BEFORE" == "staged" ]] || fail "暂存后 update_service 记录状态=$PUB_STATE_BEFORE"
+      pass "升级包已暂存（update_service=staged）"
+
+      PREV_SESSION=$SESSION_ID
+      curl -fsS -X POST -H "$AUTH" -H "$CT" \
+        -d '{"reason":"smoke agent approval","ttl_seconds":600}' \
+        "$ADMIN/admin/releases/v2/runs/$RUN_ID/approvals" >/dev/null || fail "创建审批失败"
+      pass "已批准（默认触发自动续跑）"
+
+      RESULT=$(agent_wait_finished "$PREV_SESSION")
+      SESSION_ID=${RESULT%% *}
+      SESSION_STATUS=${RESULT##* }
+      [[ "$SESSION_STATUS" == "finished" ]] || fail "续跑会话状态=$SESSION_STATUS"
+      pass "续跑会话结束：finished（$SESSION_ID）"
+
+      DEADLINE=$((SECONDS + TIMEOUT))
+      PUB=""
+      while (( SECONDS < DEADLINE )); do
+        PUB=$(curl -fsS -H "$AUTH" "$ADMIN/admin/releases/v2/runs/$RUN_ID")
+        STATUS=$(echo "$PUB" | json_field 'd["data"].get("run",d["data"])["status"]')
+        [[ "$STATUS" == "published" ]] && break
+        sleep 2
+      done
+      assert_published "$PUB"
+      DETAIL=$PUB
+      ;;
+  esac
 fi
 
 TARGET_STATUS=built
 [[ "$MODE" == "stage" || "$MODE" == "publish" ]] && TARGET_STATUS=verifying
 DEADLINE=$((SECONDS + TIMEOUT))
 STATUS=""
-while [[ "$MODE" != "agent" ]] && (( SECONDS < DEADLINE )); do
+while [[ $MODE_AGENT -eq 0 ]] && (( SECONDS < DEADLINE )); do
   DETAIL=$(curl -fsS -H "$AUTH" "$ADMIN/admin/releases/v2/runs/$RUN_ID")
   STATUS=$(echo "$DETAIL" | json_field 'd["data"].get("run",d["data"])["status"]')
   [[ "$STATUS" == "$TARGET_STATUS" ]] && break
@@ -132,7 +224,7 @@ while [[ "$MODE" != "agent" ]] && (( SECONDS < DEADLINE )); do
   esac
   sleep 2
 done
-if [[ "$MODE" != "agent" ]]; then
+if [[ $MODE_AGENT -eq 0 ]]; then
   [[ "$STATUS" == "$TARGET_STATUS" ]] || fail "等待 $TIMEOUT 秒仍未 $TARGET_STATUS（当前 $STATUS）"
   pass "运行状态：$STATUS"
 fi
