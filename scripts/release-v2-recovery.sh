@@ -5,12 +5,14 @@
 #   service   构建进行中重启 release-service，确认运行仍能收口到 built
 #   executor  构建进行中 kill -9 执行器，确认租约到期后目标被重排、新一次尝试把构建跑完
 #   storage   构建进行中拒绝对象存储端口，确认上传失败后目标重排、恢复后自动跑完
+#   storage-exhaust  端口一直不通，确认尝试次数用尽后运行按 artifact_upload_failed 收口
 #
 # 用法：
 #   sudo bash release-v2-recovery.sh            # 两个场景都跑
 #   sudo bash release-v2-recovery.sh service
 #   sudo bash release-v2-recovery.sh executor
 #   sudo bash release-v2-recovery.sh storage
+#   sudo bash release-v2-recovery.sh storage-exhaust
 #
 # 依赖：/opt/smartpipe-v2-test/fixture-slow（build 里 sleep 20），systemd 单元
 #       smartpipe-v2-release 与 smartpipe-v2-executor 由 systemd 管理。
@@ -18,6 +20,7 @@ set -euo pipefail
 
 ADMIN=${SMARTPIPE_ADMIN_URL:-http://127.0.0.1:18092}
 RELEASE=${SMARTPIPE_RELEASE_URL:-http://127.0.0.1:18099}
+MCP=${SMARTPIPE_MCP_URL:-http://127.0.0.1:18097/mcp}
 ENV_FILE=${SMARTPIPE_ENV_FILE:-/etc/smartpipe/smartpipe.env}
 SLOW_DIR=${SMOKE_SLOW_DIR:-/opt/smartpipe-v2-test/fixture-slow}
 CHANNEL=${SMOKE_CHANNEL:-test}
@@ -44,7 +47,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "PASS: $*"; }
 json_field() { python3 -c "import sys,json;d=json.load(sys.stdin);print($1)" 2>/dev/null || true; }
 
-case "$MODE" in service|executor|storage|both) ;; *) fail "参数只能是 service/executor/storage/both（当前 $MODE）" ;; esac
+case "$MODE" in service|executor|storage|storage-exhaust|both) ;; *) fail "参数只能是 service/executor/storage/storage-exhaust/both（当前 $MODE）" ;; esac
 [[ $EUID -eq 0 ]] || fail "需要 root：要重启 systemd 单元"
 
 if [[ -z "${SMARTPIPE_ADMIN_TOKEN:-}" ]]; then
@@ -92,6 +95,28 @@ create_run() {
 }
 
 run_detail() { curl -fsS -H "$AUTH" "$ADMIN/admin/releases/v2/runs/$1"; }
+
+# mcp_tool <工具名> <参数JSON>：用运行级 token 调 release MCP，失败即退出。
+mcp_tool() {
+  local name=$1 args=${2:-"{}"} body out
+  [[ -n "${TOKEN:-}" ]] || fail "没有运行级 token"
+  body=$(python3 -c "import json,sys;print(json.dumps({'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':sys.argv[1],'arguments':json.loads(sys.argv[2])}}))" "$name" "$args")
+  out=$(mktemp)
+  curl -fsS -X POST -H "Authorization: Bearer $TOKEN" -H "$CT" -d "$body" "$MCP" > "$out" || { rm -f "$out"; fail "MCP $name 请求失败"; }
+  python3 - "$out" "$name" <<'PY' || { rm -f "$out"; exit 1; }
+import json, sys
+d = json.load(open(sys.argv[1]))
+res = d.get("result") or {}
+if d.get("error"):
+    print("FAIL: %s rpc error %s" % (sys.argv[2], d["error"]), file=sys.stderr)
+    sys.exit(1)
+code = (res.get("structuredContent") or {}).get("code", "")
+print("%s -> isError=%s code=%s" % (sys.argv[2], res.get("isError"), code or "-"))
+if res.get("isError"):
+    sys.exit(1)
+PY
+  rm -f "$out"
+}
 run_status() { run_detail "$1" | json_field 'd["data"].get("run",d["data"])["status"]'; }
 target_attempt() { run_detail "$1" | json_field 'next((t.get("attempt") for t in (d["data"].get("targets") or [])), 0)'; }
 target_status() { run_detail "$1" | json_field 'next((t.get("status") for t in (d["data"].get("targets") or [])), "")'; }
@@ -202,5 +227,56 @@ scenario_storage() {
 
 [[ "$MODE" == "service" || "$MODE" == "both" ]] && scenario_service
 [[ "$MODE" == "executor" || "$MODE" == "both" ]] && scenario_executor
+scenario_storage_exhaust() {
+  pass "场景 D：对象存储持续不可用，尝试次数用尽后收口"
+  local run_id attempt_before status code attempts retries deadline
+  run_id=$(create_run stx | tail -1)
+  wait_target "$run_id" leased 120
+  attempt_before=$(target_attempt "$run_id")
+  pass "目标已被认领（attempt=$attempt_before），8 秒后断开对象存储并保持"
+  sleep 8
+  block_s3
+
+  deadline=$((SECONDS + TIMEOUT))
+  status=""
+  while (( SECONDS < deadline )); do
+    status=$(run_status "$run_id")
+    [[ "$status" == "failed" ]] && break
+    case "$status" in built|published) fail "对象存储一直不可用却完成了（$status）" ;; esac
+    sleep 3
+  done
+  [[ "$status" == "failed" ]] || fail "等待 $TIMEOUT 秒运行仍未 failed（当前 $status）"
+  pass "运行按预期 failed（不再无限重试）"
+  unblock_s3
+  pass "对象存储已恢复"
+
+  code=$(run_detail "$run_id" | json_field 'next((t.get("error_code") for t in (d["data"].get("targets") or [])), "")')
+  attempts=$(target_attempt "$run_id")
+  retries=$(run_detail "$run_id" | json_field 'sum(1 for e in (d["data"].get("events") or []) if e.get("kind")=="target.retry")')
+  [[ "$code" == "artifact_upload_failed" ]] || fail "目标 error_code=$code（期望 artifact_upload_failed）"
+  pass "目标错误码：artifact_upload_failed"
+  [[ "$attempts" -ge 3 ]] || fail "只尝试了 $attempts 次，未跑满上限"
+  pass "共尝试 $attempts 次（上限 3）"
+  [[ "${retries:-0}" -ge 2 ]] || fail "target.retry 事件只有 ${retries:-0} 条"
+  pass "重试事件 ${retries} 条，最后一次失败后不再重排"
+  local arts
+  arts=$(run_detail "$run_id" | json_field 'len(d["data"].get("artifacts") or [])')
+  [[ "$arts" == "0" ]] || fail "失败运行不应登记制品（实际 $arts）"
+  pass "无制品"
+
+  # 运维恢复存储后，用 release MCP 的 build_retry 重试失败目标，运行应重新跑完。
+  TOKEN=$(curl -fsS -X POST -H "$AUTH" -H "$CT" \
+    -d '{"scopes":["release.read","release.write","build.read","artifact.read"],"ttl_seconds":900}' \
+    "$ADMIN/admin/releases/v2/runs/$run_id/agent-token" | json_field 'd["data"]["token"]')
+  [[ "$TOKEN" == rmt_* ]] || fail "签发运行级 token 失败"
+  pass "已签发运行级 token，调用 build_retry"
+  mcp_tool build_retry '{"target":"linux-amd64","reason":"storage restored"}'
+  pass "手工重试已受理"
+  wait_run "$run_id" built "$TIMEOUT"
+  assert_built_with_artifact "$run_id"
+  echo "RECOVERY_OK scenario=storage-exhaust run=$run_id attempts=$attempts"
+}
+
 [[ "$MODE" == "storage" || "$MODE" == "both" ]] && scenario_storage
+[[ "$MODE" == "storage-exhaust" ]] && scenario_storage_exhaust
 echo "RECOVERY_DONE mode=$MODE"
