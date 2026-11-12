@@ -8,8 +8,6 @@ const EMPTY: ReleaseV2Settings = {
   update_credential: "",
   github_api_base: "https://api.github.com",
   github_credential: "",
-  github_owner: "",
-  github_repo: "",
   s3_endpoint: "",
   s3_bucket: "",
   s3_region: "",
@@ -117,14 +115,12 @@ export function ReleaseV2SettingsPage({ notify }: { notify: Notify }) {
         <header className="card-head">
           <div>
             <h3>GitHub 发布</h3>
-            <p className="muted">草稿、附件与公开走这里配置的 API 地址和令牌；仓库填默认 owner/repo。</p>
+            <p className="muted">草稿、附件与公开走这里配置的 API 地址和令牌；仓库 owner/repo 取自项目里绑定的 GitHub 地址。</p>
           </div>
         </header>
         <div className="grid two">
           <label>API 地址<input placeholder="https://api.github.com" value={form.github_api_base} onChange={(e) => patch("github_api_base", e.target.value)} /></label>
           <label>凭据名<input placeholder="github-prod" value={form.github_credential} onChange={(e) => patch("github_credential", e.target.value)} /></label>
-          <label>owner<input placeholder="jacks001314" value={form.github_owner} onChange={(e) => patch("github_owner", e.target.value)} /></label>
-          <label>repo<input placeholder="SmartPipe" value={form.github_repo} onChange={(e) => patch("github_repo", e.target.value)} /></label>
           <label>个人访问令牌<input type="password" placeholder="repo 权限的 PAT，留空表示不修改" value={secrets.github} onChange={(e) => setSecrets((s) => ({ ...s, github: e.target.value }))} /></label>
         </div>
         <p className="muted small">{credLine("github_pat")}</p>

@@ -14,8 +14,6 @@ type releaseSettings struct {
 	UpdateCredential string `json:"update_credential"`
 	GitHubAPIBase    string `json:"github_api_base"`
 	GitHubCredential string `json:"github_credential"`
-	GitHubOwner      string `json:"github_owner"`
-	GitHubRepo       string `json:"github_repo"`
 	S3Endpoint       string `json:"s3_endpoint"`
 	S3Bucket         string `json:"s3_bucket"`
 	S3Region         string `json:"s3_region"`
@@ -31,8 +29,6 @@ var releaseSettingFields = []struct {
 	{"release_update_credential", func(s *releaseSettings) *string { return &s.UpdateCredential }},
 	{"release_github_api_base", func(s *releaseSettings) *string { return &s.GitHubAPIBase }},
 	{"release_github_credential", func(s *releaseSettings) *string { return &s.GitHubCredential }},
-	{"release_github_owner", func(s *releaseSettings) *string { return &s.GitHubOwner }},
-	{"release_github_repo", func(s *releaseSettings) *string { return &s.GitHubRepo }},
 	{"release_s3_endpoint", func(s *releaseSettings) *string { return &s.S3Endpoint }},
 	{"release_s3_bucket", func(s *releaseSettings) *string { return &s.S3Bucket }},
 	{"release_s3_region", func(s *releaseSettings) *string { return &s.S3Region }},
@@ -67,8 +63,6 @@ func (a *API) putReleaseV2Settings(c iris.Context) {
 	in.UpdateCredential = normalize(in.UpdateCredential)
 	in.GitHubAPIBase = normalize(in.GitHubAPIBase)
 	in.GitHubCredential = normalize(in.GitHubCredential)
-	in.GitHubOwner = normalize(in.GitHubOwner)
-	in.GitHubRepo = normalize(in.GitHubRepo)
 	in.S3Endpoint = normalize(in.S3Endpoint)
 	in.S3Bucket = normalize(in.S3Bucket)
 	in.S3Region = normalize(in.S3Region)
@@ -81,10 +75,6 @@ func (a *API) putReleaseV2Settings(c iris.Context) {
 			return
 		}
 	}
-	if (in.GitHubOwner == "") != (in.GitHubRepo == "") {
-		a.badRequest(c, "GitHub 仓库要同时填 owner 和 repo")
-		return
-	}
 
 	ctx := c.Request().Context()
 	for _, f := range releaseSettingFields {
@@ -94,7 +84,7 @@ func (a *API) putReleaseV2Settings(c iris.Context) {
 		}
 	}
 	a.audit(ctx, c, "release.v2.settings", "release_settings", "default", nil, "ok", map[string]any{
-		"update_url": in.UpdateURL, "github_api_base": in.GitHubAPIBase, "github_repo": in.GitHubOwner + "/" + in.GitHubRepo,
+		"update_url": in.UpdateURL, "github_api_base": in.GitHubAPIBase,
 		"s3_endpoint": in.S3Endpoint, "s3_bucket": in.S3Bucket,
 	})
 	c.StatusCode(http.StatusOK)

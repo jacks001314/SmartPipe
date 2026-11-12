@@ -803,8 +803,6 @@ export type ReleaseV2Settings = {
   update_credential: string;
   github_api_base: string;
   github_credential: string;
-  github_owner: string;
-  github_repo: string;
   s3_endpoint: string;
   s3_bucket: string;
   s3_region: string;
