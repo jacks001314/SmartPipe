@@ -57,6 +57,10 @@ func NewServer(cfg ServerConfig, s *Scheduler) *iris.Application {
 			defer cancel()
 			if err := s.HandleMessage(runCtx, msg); err != nil {
 				log.Printf("[scheduler] message failed msgId=%s: %v", msg.PlatformMessageID, err)
+				// 兜底：回复/建单失败时把消息从 processing 落成 failed，界面上能看到原因。
+				if markErr := s.repo.MarkMessageFailedIfPending(runCtx, msg.PlatformMessageID, clamp(err.Error(), 1000)); markErr != nil {
+					log.Printf("[scheduler] mark message failed msgId=%s: %v", msg.PlatformMessageID, markErr)
+				}
 			}
 		}()
 	})

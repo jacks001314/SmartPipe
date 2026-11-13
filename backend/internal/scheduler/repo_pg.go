@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -143,6 +144,21 @@ func (r *PgRepo) MarkMessage(ctx context.Context, platformMessageID, status, rea
  WHERE platform_message_id=$1`, platformMessageID, status, reason, issue, issueURL)
 	if err != nil {
 		return fmt.Errorf("scheduler: mark message: %w", err)
+	}
+	return nil
+}
+
+// MarkMessageFailedIfPending 处理链路返回错误、但没来得及写状态时兜底。仅更新 processing，
+// 这样已经建单/已回复的消息不会被失败的收尾动作覆盖。
+func (r *PgRepo) MarkMessageFailedIfPending(ctx context.Context, platformMessageID, reason string) error {
+	if strings.TrimSpace(platformMessageID) == "" {
+		return nil
+	}
+	_, err := r.db.ExecContext(ctx, `UPDATE lanxin_messages
+ SET status='failed', reason=$2, updated_at=now()
+ WHERE platform_message_id=$1 AND status='processing'`, platformMessageID, reason)
+	if err != nil {
+		return fmt.Errorf("scheduler: mark message failed: %w", err)
 	}
 	return nil
 }

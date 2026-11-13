@@ -122,6 +122,20 @@ func (r *MemoryRepo) RecordMessage(ctx context.Context, m MessageRecord) error {
 	return nil
 }
 
+func (r *MemoryRepo) MarkMessageFailedIfPending(ctx context.Context, platformMessageID, reason string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range r.messages {
+		if r.messages[i].PlatformMessageID == platformMessageID && r.messages[i].Status == "processing" {
+			r.messages[i].Status = "failed"
+			r.messages[i].Reason = reason
+			r.messages[i].UpdatedAt = r.clock()
+			return nil
+		}
+	}
+	return nil
+}
+
 func (r *MemoryRepo) MarkMessage(ctx context.Context, platformMessageID, status, reason string, issue int, issueURL string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
