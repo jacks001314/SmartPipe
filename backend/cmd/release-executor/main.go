@@ -148,11 +148,25 @@ func executeTarget(parent context.Context, client *http.Client, cfg config, env 
 	}
 	defer cleanupCred()
 	cloneArgs := append(gitCloneArgs(cloneEnv), "clone", "--no-hardlinks", "--quiet", env.Run.Repo, repoDir)
-	if err := runCommandEnv(ctx, "", cloneEnv, "git", cloneArgs...); err != nil {
-		return report(targetResult{err: err, output: output.String()}, client, cfg, env)
+	fromArchive := false
+	// 内网构建机连不上代码托管时，git 会在黑洞连接上干等一兩分钟；给 clone 设上限，
+	// 超时就改走控制面的源码包。
+	cloneCtx, cancelClone := context.WithTimeout(ctx, 2*time.Minute)
+	cloneErr := runCommandEnv(cloneCtx, "", cloneEnv, "git", cloneArgs...)
+	cancelClone()
+	if err := cloneErr; err != nil {
+		// 构建机在内网时常常连不上代码托管，改从控制面取同一提交的源码。
+		log.Printf("git clone failed (%v); fetching source archive from %s", err, cfg.ServiceURL)
+		if aerr := fetchSourceArchive(ctx, client, cfg, env, repoDir); aerr != nil {
+			return report(targetResult{err: fmt.Errorf("git clone: %v；从控制面取源码失败：%w", err, aerr), output: output.String()}, client, cfg, env)
+		}
+		fromArchive = true
+		_, _ = output.Write([]byte("源码取自控制面（构建机无法直接 clone）：" + env.Run.ResolvedCommit + "\n"))
 	}
-	if err := runCommandEnv(ctx, repoDir, cloneEnv, "git", "checkout", "--detach", env.Run.ResolvedCommit); err != nil {
-		return report(targetResult{err: err, output: output.String()}, client, cfg, env)
+	if !fromArchive {
+		if err := runCommandEnv(ctx, repoDir, cloneEnv, "git", "checkout", "--detach", env.Run.ResolvedCommit); err != nil {
+			return report(targetResult{err: err, output: output.String()}, client, cfg, env)
+		}
 	}
 	stopHeartbeat := startHeartbeat(ctx, client, cfg, env)
 	defer stopHeartbeat()
@@ -190,8 +204,8 @@ func executeTarget(parent context.Context, client *http.Client, cfg config, env 
 }
 
 type targetResult struct {
-	ok     bool
-	err    error
+	ok  bool
+	err error
 	// code 覆盖默认的 target_failed，便于区分失败类别。
 	code string
 	// retryable 表示这次失败可以重试（服务端会把目标退回队列）。
@@ -449,12 +463,13 @@ func mergeNoProxy(existing string) string {
 
 // gitCloneArgs 注入凭据时禁用系统凭据助手：Windows 的 GCM 会抢走 askpass 并弹出登录窗口。
 func gitCloneArgs(cloneEnv []string) []string {
+	args := []string{"-c", "http.lowSpeedLimit=1024", "-c", "http.lowSpeedTime=20"}
 	for _, kv := range cloneEnv {
 		if strings.HasPrefix(kv, "GIT_ASKPASS=") {
-			return []string{"-c", "credential.helper="}
+			return append(args, "-c", "credential.helper=")
 		}
 	}
-	return nil
+	return args
 }
 
 // credentialEnvName 把引用名转成构建机上的环境变量名（与 releasepublish 的约定一致）。

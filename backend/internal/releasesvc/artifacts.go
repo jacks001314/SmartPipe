@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"smartpipe/backend/internal/releasev2"
+	"smartpipe/backend/internal/store"
 )
 
 // ControlStore is the subset of the durable store used by the executor API.
@@ -23,6 +24,7 @@ type ControlStore interface {
 	UpsertExecutor(context.Context, releasev2.Executor) error
 	ClaimReleaseV2Target(context.Context, string, string, string, time.Duration) (*releasev2.Target, error)
 	GetRun(context.Context, string) (*releasev2.Run, error)
+	GetProject(context.Context, string) (*store.Project, error)
 	GetTarget(context.Context, string, string) (*releasev2.Target, error)
 	HeartbeatReleaseV2Target(context.Context, string, string, string, time.Duration) (bool, error)
 	FinishReleaseV2Target(context.Context, string, string, string, bool, string, string) (bool, error)
