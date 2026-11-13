@@ -1,160 +1,136 @@
 package adminapi
 
 import (
-	"encoding/json"
-	"fmt"
 	"net/http"
-	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 )
 
-// fakeVerifier 记录收到的请求，并按 path 返回成功结果。
-type fakeVerifier struct {
-	mu       sync.Mutex
-	paths    []string
-	payloads []map[string]any
-}
-
-func (f *fakeVerifier) handler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		f.mu.Lock()
-		f.paths = append(f.paths, r.URL.Path)
-		f.payloads = append(f.payloads, body)
-		f.mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/commit":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"ok": true, "branch": "agent/101", "commit": "abc1234567890def",
-				"target_branch": "main", "target_head": "aaa111",
-			})
-		case "/push":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"ok": true, "branch": "agent/101", "remote": "origin", "after": "abc1234567890def",
-			})
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	})
-}
-
-func (f *fakeVerifier) last() (string, map[string]any) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if len(f.paths) == 0 {
-		return "", nil
+func fixtureGit(t *testing.T, repo string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = repo
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
-	return f.paths[len(f.paths)-1], f.payloads[len(f.payloads)-1]
+	return strings.TrimSpace(string(out))
 }
 
-func TestCommitProxiesToVerifierAndRecords(t *testing.T) {
-	fv := &fakeVerifier{}
-	srv := httptest.NewServer(fv.handler())
-	defer srv.Close()
+func mergeFixture(t *testing.T) (string, string) {
+	t.Helper()
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "absent"))
+	repo := t.TempDir()
+	fixtureGit(t, repo, "init", "-q", "-b", "main")
+	fixtureGit(t, repo, "config", "user.name", "test")
+	fixtureGit(t, repo, "config", "user.email", "test@example.invalid")
+	fixtureGit(t, repo, "config", "core.autocrlf", "false")
+	if err := os.WriteFile(filepath.Join(repo, "x.txt"), []byte("before\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fixtureGit(t, repo, "add", "x.txt")
+	fixtureGit(t, repo, "commit", "-q", "-m", "base")
+	return repo, fixtureGit(t, repo, "rev-parse", "HEAD")
+}
 
-	app, st := newTestAPIWith(t, "", func(c *Config) { c.VerifyURL = srv.URL })
+func TestCommitLocallyAndRecords(t *testing.T) {
+	app, st := newTestAPI(t, "")
+	repo, base := mergeFixture(t)
 	rec, body := do(t, app, http.MethodPost, "/admin/commits", "", map[string]any{
-		"repo":          "/tmp/repo",
-		"base_commit":   "deadbeef",
-		"patch":         "diff --git a/x b/x\n",
-		"issue_ref":     "example/app#101",
-		"target_branch": "main",
+		"repo": repo, "base_commit": base, "issue_ref": "example/app#101", "target_branch": "main",
+		"patch": "diff --git a/x.txt b/x.txt\n--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-before\n+after\n",
 	})
 	if rec.Code != http.StatusOK {
-		t.Fatalf("commit status = %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
 	data := body["data"].(map[string]any)
-	if data["ok"] != true || data["branch"] != "agent/101" {
-		t.Fatalf("commit data = %+v", data)
+	sha := fixtureGit(t, repo, "rev-parse", "agent/101")
+	if data["ok"] != true || data["branch"] != "agent/101" || data["commit"] != sha {
+		t.Fatalf("data: %+v", data)
 	}
-	path, payload := fv.last()
-	if path != "/commit" {
-		t.Fatalf("verifier path = %s", path)
+	if fixtureGit(t, repo, "show", "main:x.txt") != "after" {
+		t.Fatal("patch not merged to main")
 	}
-	if payload["branch"] != "agent/101" {
-		t.Fatalf("branch not derived from issue: %v", payload["branch"])
-	}
-
 	ops, err := st.ListRepoOps(t.Context(), 5)
 	if err != nil {
-		t.Fatalf("list repo ops: %v", err)
+		t.Fatal(err)
 	}
-	if len(ops) != 1 || ops[0].Kind != "commit" || !ops[0].OK || ops[0].IssueRef != "example/app#101" {
-		t.Fatalf("repo ops = %+v", ops)
-	}
-	if ops[0].Commit != "abc1234567890def" {
-		t.Fatalf("commit sha not stored: %+v", ops[0])
+	if len(ops) != 1 || ops[0].Kind != "commit" || !ops[0].OK || ops[0].Commit != sha || ops[0].IssueRef != "example/app#101" {
+		t.Fatalf("ops: %+v", ops)
 	}
 }
 
 func TestPushInjectsCredentialWithoutLeaking(t *testing.T) {
-	fv := &fakeVerifier{}
-	srv := httptest.NewServer(fv.handler())
-	defer srv.Close()
-
-	app, _ := newTestAPIWith(t, "", func(c *Config) { c.VerifyURL = srv.URL })
+	app, st := newTestAPI(t, "")
 	rec, body := do(t, app, http.MethodPost, "/admin/projects", "", map[string]any{
-		"name":            "push-project",
-		"github_repo_url": "https://github.com/example/app",
+		"name": "push-project", "github_repo_url": "https://github.com/example/app",
 	})
 	if rec.Code != http.StatusCreated {
-		t.Fatalf("project status = %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("project: %s", rec.Body.String())
 	}
-	projectID := body["data"].(map[string]any)["id"].(string)
-
+	id := body["data"].(map[string]any)["id"].(string)
+	const token = "test-only-fake-token"
 	rec, _ = do(t, app, http.MethodPost, "/admin/credentials", "", map[string]any{
-		"project_id": projectID, "kind": "github_pat", "name": "pat", "value": "ghp_super_secret_token_value",
+		"project_id": id, "kind": "github_pat", "name": "test", "value": token,
 	})
 	if rec.Code != http.StatusCreated {
-		t.Fatalf("credential status = %d: %s", rec.Code, rec.Body.String())
+		t.Fatal("credential fixture failed")
 	}
-
+	project, err := st.GetProject(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote, err := (&API{store: st}).resolvePushRemote(t.Context(), project, "/unused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remote != "https://x-access-token:"+token+"@github.com/example/app" {
+		t.Fatal("credential injection mismatch")
+	}
+	repo, sha := mergeFixture(t)
+	bare := filepath.Join(t.TempDir(), "remote.git")
+	fixtureGit(t, repo, "init", "--bare", "-q", bare)
+	fixtureGit(t, repo, "branch", "agent/101")
+	if _, err := st.DB().Exec("UPDATE projects SET github_repo_url=$1 WHERE id=$2", bare, id); err != nil {
+		t.Fatal(err)
+	}
 	rec, body = do(t, app, http.MethodPost, "/admin/pushes", "", map[string]any{
-		"project_id": projectID, "repo": "/tmp/repo", "branch": "agent/101", "issue_ref": "example/app#101",
+		"project_id": id, "repo": repo, "branch": "agent/101",
 	})
 	if rec.Code != http.StatusOK {
-		t.Fatalf("push status = %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("push: %d %s", rec.Code, rec.Body.String())
 	}
-	if strings.Contains(rec.Body.String(), "ghp_super_secret_token_value") {
-		t.Fatal("push response leaked the git token")
+	if strings.Contains(rec.Body.String(), token) {
+		t.Fatal("token leaked")
 	}
-	path, payload := fv.last()
-	if path != "/push" {
-		t.Fatalf("verifier path = %s", path)
+	if body["data"].(map[string]any)["ok"] != true {
+		t.Fatal("push not successful")
 	}
-	remote, _ := payload["remote_url"].(string)
-	if !strings.Contains(remote, "x-access-token") || !strings.Contains(remote, "ghp_super_secret_token_value") {
-		t.Fatalf("remote_url not credentialed: %s", remote)
+	if fixtureGit(t, repo, "--git-dir="+bare, "rev-parse", "refs/heads/agent/101") != sha {
+		t.Fatal("wrong remote commit")
 	}
-	if !strings.Contains(remote, "github.com/example/app") {
-		t.Fatalf("remote_url lost repo url: %s", remote)
+	ops, err := st.ListRepoOps(t.Context(), 5)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if fmt.Sprint(payload["repo"]) != "/tmp/repo" {
-		t.Fatalf("repo not forwarded: %v", payload["repo"])
+	if len(ops) != 1 || !ops[0].OK || ops[0].Kind != "push" || ops[0].Commit != sha {
+		t.Fatalf("ops: %+v", ops)
 	}
 }
 
 func TestPushWithoutCredentialFailsClosed(t *testing.T) {
-	fv := &fakeVerifier{}
-	srv := httptest.NewServer(fv.handler())
-	defer srv.Close()
-	app, _ := newTestAPIWith(t, "", func(c *Config) { c.VerifyURL = srv.URL })
-
+	app, _ := newTestAPI(t, "")
 	rec, body := do(t, app, http.MethodPost, "/admin/pushes", "", map[string]any{
 		"repo": "https://github.com/example/app", "branch": "agent/1",
 	})
 	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503: %s", rec.Code, rec.Body.String())
+		t.Fatalf("status %d", rec.Code)
 	}
-	errObj, _ := body["error"].(map[string]any)
-	if errObj == nil || errObj["code"] != "git_credential_unavailable" {
-		t.Fatalf("error body = %v", body)
-	}
-	if p, _ := fv.last(); p != "" {
-		t.Fatalf("verifier should not be called, got %s", p)
+	if body["error"].(map[string]any)["code"] != "git_credential_unavailable" {
+		t.Fatalf("body: %+v", body)
 	}
 }

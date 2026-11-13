@@ -1,0 +1,35 @@
+{
+  "status": "READY",
+  "platform": "win32-x64",
+  "node": "24.15.0",
+  "checks": [
+    {
+      "id": "node_24_or_newer",
+      "ok": true
+    },
+    {
+      "id": "absolute_executable",
+      "ok": true
+    },
+    {
+      "id": "executable_exists",
+      "ok": true
+    },
+    {
+      "id": "mcp_connect",
+      "ok": true
+    },
+    {
+      "id": "qwen_js_tool",
+      "ok": true
+    },
+    {
+      "id": "qwen_reset_tool",
+      "ok": true
+    }
+  ],
+  "tools": [
+    "js",
+    "js_reset"
+  ]
+}

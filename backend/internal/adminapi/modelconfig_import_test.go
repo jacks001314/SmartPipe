@@ -244,6 +244,9 @@ func TestModelConfigLocalAPI(t *testing.T) {
 }
 
 func TestModelConfigLocalPreviewReportsMissingFile(t *testing.T) {
+	isolatedHome := t.TempDir()
+	t.Setenv("HOME", isolatedHome)
+	t.Setenv("USERPROFILE", isolatedHome)
 	app, _ := newTestAPI(t, "")
 	t.Setenv("SMARTPIPE_CODEX_CONFIG", t.TempDir()+"/missing.toml")
 	t.Setenv("CODEX_HOME", t.TempDir())
@@ -270,5 +273,22 @@ func TestReadLocalCodexConfigUsesEnvPath(t *testing.T) {
 	}
 	if got != path || !strings.Contains(content, "[model_providers.deepseek]") {
 		t.Fatalf("unexpected config: %s", got)
+	}
+}
+
+func TestLocalConfigCandidatesUseIsolatedHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("CODEX_HOME", home)
+	t.Setenv("SMARTPIPE_CODEX_CONFIG", "")
+	for _, candidate := range localCodexConfigCandidates() {
+		if !strings.HasPrefix(candidate, home+string(os.PathSeparator)) {
+			t.Fatal("candidate escaped isolated home")
+		}
+	}
+	_, _, _, err := readLocalCodexConfig()
+	if err == nil {
+		t.Fatal("empty home unexpectedly contained config")
 	}
 }
