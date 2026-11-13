@@ -66,7 +66,7 @@
     "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:computer-use": "tsc -p computer-use/test/tsconfig.json",
-    "test": "npm run build && node --test computer-use/test/computer-use.test.mjs computer-use/test/platform.test.mjs computer-use/test/runtime.test.mjs computer-use/test/native-cache.test.mjs",
+    "test": "npm run build && node --test computer-use/test/computer-use.test.mjs computer-use/test/platform.test.mjs computer-use/test/runtime.test.mjs computer-use/test/native-cache.test.mjs computer-use/test/offline-native.test.mjs",
     "test:e2e": "node --test computer-use/test/daemon-integration.test.mjs"
   },
   "devDependencies": {

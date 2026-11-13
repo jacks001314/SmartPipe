@@ -24,3 +24,7 @@ node modules/cua-sdk/scripts/provision-native.mjs ABSOLUTE_CACHE_DIRECTORY
 MCP预检仍使用 `node dist/src/preflight-cli.js CONFIG REPORT`，CONFIG 的command为Node绝对路径，args为本地模块入口。READY仅代表js/js_reset协议可用。
 
 2026-11-13：双平台模块构建成功；原生资产下载因fetch failed/timeout未完成。不得更改TLS校验或系统安全设置来解决。Mac仍需用户为实际驱动宿主授予所需系统权限，不能由测试脚本绕过。
+
+Offline installation: node modules/cua-sdk/scripts/provision-native.mjs ABSOLUTE_CACHE_DIRECTORY ABSOLUTE_OFFICIAL_ARCHIVE
+
+Supports official 0.27.0 Windows x64 and macOS universal archives. Preserve the official filename. SHA256 is pinned in offline-native.mjs and checked before extraction; incomplete archives fail without a completion marker. No network or desktop session is opened. Existing complete caches are reused.
