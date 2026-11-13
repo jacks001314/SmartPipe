@@ -27,6 +27,8 @@ type Repo interface {
 
 	RecordMessage(ctx context.Context, m MessageRecord) error
 	MarkMessage(ctx context.Context, platformMessageID, status, reason string, issue int, issueURL string) error
+	// MarkMessageFailedIfPending 只把仍在 processing 的消息标记为失败，避免覆盖已落定的结果。
+	MarkMessageFailedIfPending(ctx context.Context, platformMessageID, reason string) error
 	ListMessages(ctx context.Context, limit int) ([]MessageRecord, error)
 
 	CreateWorker(ctx context.Context, w *Worker) (bool, error)
