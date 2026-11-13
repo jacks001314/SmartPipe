@@ -1,0 +1,11 @@
+{
+  "apiURL": "https://smartpipe.example.invalid",
+  "machineID": "REPLACE_WITH_REGISTERED_MACHINE_ID",
+  "stateRoot": "C:/SmartPipeTest/state",
+  "artifactPath": "C:/SmartPipeTest/artifacts/Syntropy-setup.exe",
+  "app": "Syntropy",
+  "command": "C:/Program Files/nodejs/node.exe",
+  "args": [
+    "C:/SmartPipeTest/qwen/node_modules/@qwen-code/node-repl-mcp/dist/index.js"
+  ]
+}

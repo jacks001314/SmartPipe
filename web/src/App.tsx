@@ -8,6 +8,7 @@ import { GitHubPage } from "./pages/GitHubPage";
 import { ModelsPage } from "./pages/ModelsPage";
 import { LanxinPage } from "./pages/LanxinPage";
 import { AuditPage } from "./pages/AuditPage";
+import { TestLabPage } from "./pages/TestLabPage";
 import { VerificationPage } from "./pages/VerificationPage";
 import { ReleasePage } from "./pages/ReleasePage";
 import { ReleaseV2Page } from "./pages/ReleaseV2Page";
@@ -15,7 +16,7 @@ import { ReleaseV2SettingsPage } from "./pages/ReleaseV2SettingsPage";
 import { CrashPage } from "./pages/CrashPage";
 import { SchedulerPage } from "./pages/SchedulerPage";
 
-type PageKey = "projects" | "resources" | "credentials" | "models" | "lanxin" | "scheduler" | "verify" | "release" | "releaseV2" | "releaseSettings" | "crash" | "audit";
+type PageKey = "testlab" | "projects" | "resources" | "credentials" | "models" | "lanxin" | "scheduler" | "verify" | "release" | "releaseV2" | "releaseSettings" | "crash" | "audit";
 
 type NavItem = { key: PageKey; label: string; icon: string };
 
@@ -28,6 +29,7 @@ const CONFIG_NAV: NavItem[] = [
 ];
 
 const OPS_NAV: NavItem[] = [
+  { key: "testlab", label: "在线测试", icon: "▣" },
   { key: "scheduler", label: "调度器", icon: "⇄" },
   { key: "verify", label: "补丁验证", icon: "✓" },
   { key: "release", label: "发版", icon: "⬆" },
@@ -40,6 +42,7 @@ const OPS_NAV: NavItem[] = [
 const NAV = [...CONFIG_NAV, ...OPS_NAV];
 
 const META: Record<PageKey, { crumb: string; title: string; sub: string }> = {
+  testlab: { crumb: "运行中心 / 在线测试", title: "在线测试", sub: "查看测试机、创建桌面观察任务并核对报告与证据。" },
   projects: { crumb: "配置中心 / 项目", title: "项目", sub: "管理项目、GitHub 仓库、蓝信群和 Codex 模型绑定。" },
   resources: { crumb: "配置中心 / 资源管理", title: "资源管理", sub: "登记可复用的 SSH 硬件平台，测试连接、采集系统画像并供发版等模块选择。" },
   credentials: { crumb: "配置中心 / GitHub 配置", title: "GitHub 配置", sub: "GitHub 账户授权与仓库列表；仓库绑定在项目中完成。" },
@@ -238,6 +241,7 @@ export function App() {
           {page === "models" && <ModelsPage notify={notify} />}
           {page === "lanxin" && <LanxinPage notify={notify} />}
           {page === "scheduler" && <SchedulerPage notify={notify} />}
+          {page === "testlab" && <TestLabPage notify={notify} />}
           {page === "verify" && <VerificationPage notify={notify} />}
           {page === "release" && <ReleasePage notify={notify} />}
           {page === "releaseV2" && <ReleaseV2Page notify={notify} />}

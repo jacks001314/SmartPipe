@@ -72,6 +72,11 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 }
 
 export const api = {
+  listTestRuns: () => request<import('./testlab-types').DesktopRun[]>("/test-runs"),
+  listTestMachines: () => request<import('./testlab-types').DesktopMachine[]>("/test-machines"),
+  setTestMachineEnabled: (id:string,enabled:boolean) => request<void>("/test-machines/"+encodeURIComponent(id)+"/enabled", {method:"POST",body:{enabled}}),
+  createTestRun: (body: import('./testlab-types').DesktopSpec) => request<import('./testlab-types').DesktopRun>("/test-runs", {method:"POST",body}),
+  cancelTestRun: (id:string) => request<import('./testlab-types').DesktopRun>("/test-runs/"+encodeURIComponent(id)+"/cancel", {method:"POST"}),
   health: () => request<Health>("/health"),
   authConfig: () => request<AuthConfig>("/auth-config"),
   session: () => request<AuthSession>("/session"),

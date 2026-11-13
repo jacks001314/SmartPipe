@@ -343,6 +343,9 @@ func (s *Server) promote(ctx context.Context, p *principal, args map[string]any,
 	if err != nil {
 		return nil, err
 	}
+	if err := s.Store.CheckDesktopReleaseGate(ctx, run, targets, artifacts); err != nil {
+		return blockedResult("online_acceptance_required", err.Error()), nil
+	}
 	if blocker := requireReadyTargets(targets); blocker != "" {
 		return blockedResult("targets_not_ready", blocker), nil
 	}

@@ -1,14 +1,13 @@
 // Package testdb 统一集成测试的数据库选择。
-//
-// 这些测试会清空 projects、bridge_links 等表，一旦 DSN 指到开发或生产库就是灾难。
-// 所以只接受名字以 _test 结尾的库，其余直接判失败而不是"帮忙跑一下"。
+// 测试会清空业务表，所以只接受驱动实际解析出的 *_test 数据库。
 package testdb
 
 import (
-	"net/url"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // DSN 返回可安全清理的测试库连接串；未配置时跳过，指错库时失败。
@@ -20,25 +19,17 @@ func DSN(t *testing.T) string {
 	}
 	name := databaseName(dsn)
 	if !strings.HasSuffix(name, "_test") {
-		t.Fatalf("SMARTPIPE_TEST_DSN 必须指向 *_test 库（当前 %q），这些测试会清空业务表", name)
+		t.Fatal("SMARTPIPE_TEST_DSN 必须有效且指向 *_test 库，这些测试会清空业务表")
 	}
 	return dsn
 }
 
 func databaseName(dsn string) string {
-	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
-		if u, err := url.Parse(dsn); err == nil && u.Path != "" {
-			return strings.TrimPrefix(u.Path, "/")
-		}
+	// 与 store 使用同一个驱动解析，尊重 URL 查询覆盖、引用和重复键语义。
+	// 不输出解析错误：错误可能包含连接串中的凭据。
+	config, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return ""
 	}
-	// key=value 形式：取 dbname= 的值。
-	for _, field := range strings.Fields(dsn) {
-		if strings.HasPrefix(field, "dbname=") {
-			return strings.TrimPrefix(field, "dbname=")
-		}
-	}
-	if i := strings.LastIndex(dsn, "/"); i >= 0 {
-		return dsn[i+1:]
-	}
-	return dsn
+	return config.Database
 }

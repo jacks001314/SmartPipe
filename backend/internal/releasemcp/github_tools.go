@@ -190,6 +190,13 @@ func (s *Server) githubDispatch(ctx context.Context, p *principal, name string, 
 		return textResult(asset), true, nil
 
 	case "github_release_publish":
+		gateRun, gateTargets, gateArtifacts, gateErr := s.runSnapshot(ctx, p)
+		if gateErr != nil {
+			return nil, true, gateErr
+		}
+		if gateErr = s.Store.CheckDesktopReleaseGate(ctx, gateRun, gateTargets, gateArtifacts); gateErr != nil {
+			return blockedResult("online_acceptance_required", gateErr.Error()), true, nil
+		}
 		owner, repo, err := s.githubRepo(ctx, p.Run.ProjectID)
 		if err != nil {
 			return blockedResult("github_repo_missing", err.Error()), true, nil
