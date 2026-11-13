@@ -180,6 +180,13 @@ func (t *HTTPTracker) SearchIssues(ctx context.Context, projectID, query string)
 	return issues, nil
 }
 
+// MergePR 让控制面把 PR 合入基线分支。
+func (t *HTTPTracker) MergePR(ctx context.Context, projectID string, issue, pull int, title string) error {
+	return t.do(ctx, http.MethodPost, fmt.Sprintf("/admin/issues/%d/pulls/%d/merge", issue, pull), map[string]any{
+		"project_id": projectID, "title": title,
+	}, nil)
+}
+
 // CreatePR 建 PR。
 func (t *HTTPTracker) CreatePR(ctx context.Context, projectID string, issue int, head, base, title, body string) (PullRequest, error) {
 	var out struct {
@@ -189,7 +196,7 @@ func (t *HTTPTracker) CreatePR(ctx context.Context, projectID string, issue int,
 	}
 	path := fmt.Sprintf("/admin/issues/%d/pulls", issue)
 	err := t.do(ctx, http.MethodPost, path, map[string]any{
-		"project_id": projectID, "head": head, "base": base, "title": title, "body": body, "draft": true,
+		"project_id": projectID, "head": head, "base": base, "title": title, "body": body, "draft": false,
 	}, &out)
 	if err != nil {
 		return PullRequest{}, err

@@ -1,6 +1,7 @@
 package adminapi
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ func (a *API) registerIssues(p iris.Party) {
 	p.Post("/issues/{number}/comments", a.commentIssue)
 	p.Post("/issues/{number}/labels", a.addIssueLabels)
 	p.Post("/issues/{number}/pulls", a.createIssuePull)
+	p.Post("/issues/{number}/pulls/{pull}/merge", a.mergeIssuePull)
 }
 
 func (a *API) issueTarget(c iris.Context) (*store.Project, int, string, bool) {
@@ -319,4 +321,39 @@ func (a *API) createIssuePull(c iris.Context) {
 	}
 	a.audit(c.Request().Context(), c, "pull.create", "pull", strconv.Itoa(pr.Number), &project.ID, "ok", nil)
 	_ = c.JSON(envelope{Data: iris.Map{"number": pr.Number, "url": pr.HTMLURL, "state": pr.State, "draft": pr.Draft, "issue": number}})
+}
+
+// mergeIssuePull 把 worker 的 PR 合入基线分支；失败时把 GitHub 的原因原样返回。
+func (a *API) mergeIssuePull(c iris.Context) {
+	var in struct {
+		ProjectID string `json:"project_id"`
+		Title     string `json:"title"`
+	}
+	_ = decodeBody(c, &in)
+	project, number, repo, ok := a.issueTargetWithBody(c, in.ProjectID)
+	if !ok {
+		return
+	}
+	pull, err := strconv.Atoi(strings.TrimSpace(c.Params().Get("pull")))
+	if err != nil || pull <= 0 {
+		a.badRequest(c, "非法 PR 编号")
+		return
+	}
+	client, err := bridge.ClientForRepo(c.Request().Context(), a.store, &project.ID, repo)
+	if err != nil {
+		c.StatusCode(http.StatusServiceUnavailable)
+		_ = c.JSON(envelope{Err: &apiError{Code: "github_unavailable", Message: err.Error()}})
+		return
+	}
+	title := strings.TrimSpace(in.Title)
+	if title == "" {
+		title = fmt.Sprintf("Issue #%d", number)
+	}
+	if err := client.MergePullRequest(c.Request().Context(), repo, pull, title); err != nil {
+		c.StatusCode(http.StatusBadGateway)
+		_ = c.JSON(envelope{Err: &apiError{Code: "merge_failed", Message: err.Error()}})
+		return
+	}
+	a.audit(c.Request().Context(), c, "pull.merge", "pull", strconv.Itoa(pull), &project.ID, "ok", nil)
+	_ = c.JSON(envelope{Data: iris.Map{"merged": true, "number": pull, "issue": number}})
 }

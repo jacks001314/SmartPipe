@@ -286,6 +286,22 @@ func (h *Handler) handleMessage(ctx context.Context, m *lanxin.InboundMessage) e
 				BotID: h.cfg.BotID, BotName: h.cfg.BotName, GroupName: m.GroupName,
 				SenderID: m.From, SenderName: m.SenderName,
 			})
+			// 建单不再等群里确认：崩溃草稿生成后立刻交给调度器建 Issue 并派 worker。
+			if err == nil && res != nil && strings.EqualFold(res.Status, "awaiting_confirmation") &&
+				strings.TrimSpace(res.DraftID) != "" {
+				confirm := Inbound{
+					Platform: "lanxin", BotID: h.cfg.BotID, BotName: h.cfg.BotName,
+					PlatformMessageID: m.MsgID + ":auto-confirm", ChatType: m.ChatType,
+					SenderID: m.From, SenderName: m.SenderName, GroupID: m.GroupID,
+					GroupName: m.GroupName, ConversationID: m.ConversationID, MsgType: m.MsgType,
+					Text: "确认建单 " + res.DraftID, IsAtMe: true,
+				}
+				if derr := h.disp.Dispatch(ctx, confirm); derr != nil {
+					log.Printf("[bot] auto confirm crash draft %s failed: %v", res.DraftID, derr)
+				} else {
+					msg = "崩溃已解析，正在自动建单；Issue 链接会发到本群。"
+				}
+			}
 			if replyErr := h.reply(ctx, m, msg); replyErr != nil {
 				log.Printf("[bot] crash reply failed: %v", replyErr)
 			}

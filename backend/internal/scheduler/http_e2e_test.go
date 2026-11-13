@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -70,19 +71,6 @@ func TestHTTPEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bot dispatch: %v", err)
 	}
-	draftID := ""
-	waitFor(t, "draft confirmation", func() bool {
-		draftID = issueDraftIDPattern.FindString(strings.Join(h.notifier.all(), "\n"))
-		return draftID != ""
-	})
-	err = dispatcher.Dispatch(context.Background(), bot.Inbound{
-		Platform: "lanxin", PlatformMessageID: "e2e-confirm", ChatType: "group",
-		GroupID: "group-1", GroupName: "研发群", SenderID: "u1", SenderName: "张三",
-		Text: "确认建单 " + draftID, BotID: "bot-1", IsAtMe: true,
-	})
-	if err != nil {
-		t.Fatalf("bot confirm: %v", err)
-	}
 	waitFor(t, "issue + queued worker", func() bool {
 		w, _ := h.repo.ActiveWorker(context.Background(), "prj-1", 1)
 		return w != nil
@@ -91,6 +79,8 @@ func TestHTTPEndToEnd(t *testing.T) {
 		t.Fatalf("issue not created: %#v", h.tracker.issues)
 	}
 
+	// 这一轮模拟分支保护挡住自动合并：PR 建好但停在等待人工处理，后面还能靠评论续跑。
+	h.tracker.mergeErr = errors.New("branch protection requires review")
 	h.runner.fixReply = "修复了超时时间设置。"
 	if err := h.s.DispatchOnce(context.Background()); err != nil {
 		t.Fatal(err)

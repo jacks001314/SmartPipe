@@ -376,7 +376,7 @@ export function LanxinBotDetailPage({
               <div className="field"><label>每小时回复上限</label><input type="number" min="1" value={policyForm.hourly_reply_limit} onChange={(e) => setPolicyForm((p) => ({ ...p, hourly_reply_limit: Number(e.target.value) }))} /></div>
               <div className="field"><label>回复冷却（秒）</label><input type="number" min="0" value={policyForm.reply_cooldown_seconds} onChange={(e) => setPolicyForm((p) => ({ ...p, reply_cooldown_seconds: Number(e.target.value) }))} /></div>
               <div className="field"><label>每日自动建单草稿上限</label><input type="number" min="0" value={policyForm.daily_auto_issue_limit} onChange={(e) => setPolicyForm((p) => ({ ...p, daily_auto_issue_limit: Number(e.target.value) }))} /></div>
-              <div className="field"><label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 400 }}><input type="checkbox" checked={policyForm.auto_issue_enabled} onChange={(e) => setPolicyForm((p) => ({ ...p, auto_issue_enabled: e.target.checked }))} />允许高置信度非 @ 消息自动建单草稿</label><div className="tiny">即使开启，也仍然先发群等待“确认建单”。</div></div>
+              <div className="field"><label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 400 }}><input type="checkbox" checked={policyForm.auto_issue_enabled} onChange={(e) => setPolicyForm((p) => ({ ...p, auto_issue_enabled: e.target.checked }))} />允许高置信度非 @ 消息自动建单草稿</label><div className="tiny">开启后，高置信度的非 @ 消息会直接建单并派发 worker；建单失败时草稿保留，可在群里回复“确认建单”重试。</div></div>
             </div>
           </div>
           <div className="modal-foot">

@@ -25,7 +25,7 @@ var (
 	issueDraftIDPattern   = issuedraft.IDPattern
 )
 
-// IssueDraft 是等待群里确认的建单草稿。确认前不会调用 GitHub，也不会派 worker。
+// IssueDraft 是建单草稿：落库后立即走建单路径；建单失败时保留草稿，群里可以重试。
 type IssueDraft = issuedraft.Draft
 
 // draftSourceInbound 还原建单需要的来源信息；附件不会进入 Issue 正文。
@@ -105,7 +105,8 @@ func (s *Scheduler) replyIssueDraft(ctx context.Context, p *Project, msg Inbound
 	return nil
 }
 
-// answerIssueDraft 处理群里的“确认建单/取消建单”命令。确认是创建 Issue 的唯一出口。
+// answerIssueDraft 处理群里的“确认建单/取消建单”命令。
+// 建单默认自动完成，这条命令用于重试失败的草稿，以及取消还在等待中的草稿。
 func (s *Scheduler) answerIssueDraft(ctx context.Context, p *Project, msg Inbound) (bool, error) {
 	action, explicitID, ok := parseIssueDraftCommand(msg.Text)
 	if !ok {
@@ -136,10 +137,13 @@ func (s *Scheduler) answerIssueDraft(ctx context.Context, p *Project, msg Inboun
 		text := fmt.Sprintf("已取消建单草稿 %s，不会创建 Issue。", draft.ID)
 		return true, s.replyIssueDraft(ctx, p, msg, "issue_draft_cancelled", text, 0, "")
 	}
-	return true, s.confirmIssueDraft(ctx, p, msg, draft)
+	_, _, confirmErr := s.confirmIssueDraft(ctx, p, msg, draft)
+	return true, confirmErr
 }
 
-func (s *Scheduler) confirmIssueDraft(ctx context.Context, p *Project, msg Inbound, draft *IssueDraft) error {
+// confirmIssueDraft 创建 Issue 并把 worker 入队，返回 Issue 编号与地址。
+// 自动建单和群内重试共用这一条路径，保证两种入口的行为一致。
+func (s *Scheduler) confirmIssueDraft(ctx context.Context, p *Project, msg Inbound, draft *IssueDraft) (int, string, error) {
 	source := draftSourceInbound(draft)
 	existing, err := s.findDuplicate(ctx, p.ID, draft.Title)
 	if err != nil {
@@ -161,15 +165,17 @@ func (s *Scheduler) confirmIssueDraft(ctx context.Context, p *Project, msg Inbou
 		existing = &createdIssue
 		if err != nil {
 			_ = s.repo.ReleaseIssueDraft(ctx, draft.ID, s.now())
-			_ = s.replyIssueDraft(ctx, p, msg, "failed", "GitHub 建单失败，草稿仍保留，请稍后再次确认。", 0, "")
-			return err
+			_ = s.replyIssueDraft(ctx, p, msg, "failed",
+				fmt.Sprintf("GitHub 建单失败，草稿 %s 已保留，稍后回复「确认建单 %s」重试。", draft.ID, draft.ID), 0, "")
+			return 0, "", err
 		}
 	} else {
 		if err := s.tracker.Comment(ctx, p.ID, existing.Number,
-			botComment("来自蓝信的新反馈（经群内确认，重复问题）：\n\n"+draft.SourceText)); err != nil {
+			botComment("来自蓝信的新反馈（重复问题）：\n\n"+draft.SourceText)); err != nil {
 			_ = s.repo.ReleaseIssueDraft(ctx, draft.ID, s.now())
-			_ = s.replyIssueDraft(ctx, p, msg, "failed", "补充已有 Issue 失败，草稿仍保留，请稍后重试。", 0, "")
-			return err
+			_ = s.replyIssueDraft(ctx, p, msg, "failed",
+				fmt.Sprintf("补充已有 Issue 失败，草稿 %s 已保留，稍后回复「确认建单 %s」重试。", draft.ID, draft.ID), 0, "")
+			return 0, "", err
 		}
 	}
 
@@ -185,23 +191,26 @@ func (s *Scheduler) confirmIssueDraft(ctx context.Context, p *Project, msg Inbou
 		created, qerr := s.queueWorker(ctx, &Worker{
 			ProjectID: p.ID, Issue: existing.Number, IssueTitle: existing.Title,
 			IssueURL: existing.URL, ChatID: msg.ChatID(), State: StateQueued,
-		}, "群内确认建单，worker 已入队")
+		}, "建单后 worker 已入队")
 		if qerr != nil {
 			_ = s.replyIssueDraft(ctx, p, msg, "issue_created",
 				fmt.Sprintf("Issue #%d 已创建，但 worker 入队失败：%s\n%s", existing.Number, shortErr(qerr), existing.URL),
 				existing.Number, existing.URL)
-			return qerr
+			return existing.Number, existing.URL, qerr
 		}
 		if created {
 			s.Wake()
 		}
 	}
 
-	text := fmt.Sprintf("已确认并创建 Issue #%d：%s\n%s", existing.Number, existing.Title, existing.URL)
+	text := fmt.Sprintf("已创建 Issue #%d：%s\n%s\nworker 已入队。", existing.Number, existing.Title, existing.URL)
 	status := "issue_created"
 	if duplicate {
-		text = fmt.Sprintf("问题已经存在 Issue #%d，已按群内确认补充反馈。\n%s", existing.Number, existing.URL)
+		text = fmt.Sprintf("问题已经存在 Issue #%d，已补充新反馈。\n%s", existing.Number, existing.URL)
 		status = "issue_updated"
 	}
-	return s.replyIssueDraft(ctx, p, msg, status, text, existing.Number, existing.URL)
+	if replyErr := s.replyIssueDraft(ctx, p, msg, status, text, existing.Number, existing.URL); replyErr != nil {
+		return existing.Number, existing.URL, replyErr
+	}
+	return existing.Number, existing.URL, nil
 }
