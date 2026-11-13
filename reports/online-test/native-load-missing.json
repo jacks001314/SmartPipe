@@ -1,0 +1,9 @@
+{
+  "version": "0.27.0",
+  "platform": "win32",
+  "arch": "x64",
+  "node": "v24.15.0",
+  "status": "FAIL",
+  "scope": "native module load only; no desktop session",
+  "error": "Pinned native cache is incomplete"
+}

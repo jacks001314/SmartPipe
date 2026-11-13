@@ -28,3 +28,9 @@ MCP预检仍使用 `node dist/src/preflight-cli.js CONFIG REPORT`，CONFIG 的co
 Offline installation: node modules/cua-sdk/scripts/provision-native.mjs ABSOLUTE_CACHE_DIRECTORY ABSOLUTE_OFFICIAL_ARCHIVE
 
 Supports official 0.27.0 Windows x64 and macOS universal archives. Preserve the official filename. SHA256 is pinned in offline-native.mjs and checked before extraction; incomplete archives fail without a completion marker. No network or desktop session is opened. Existing complete caches are reused.
+
+Load-only verification after provisioning:
+
+node modules/cua-sdk/scripts/check-native.mjs ABSOLUTE_CACHE_DIRECTORY NEW_REPORT_JSON
+
+The report includes platform, Node version, native file hashes and ABI initialization result. It never creates a desktop host. PASS is not desktop permission or product acceptance. Missing or broken payloads exit nonzero. The report path must not already exist.
