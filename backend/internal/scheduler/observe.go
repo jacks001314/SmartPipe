@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 	"time"
+	"unicode"
 
 	"smartpipe/backend/internal/codexrunner"
 )
@@ -90,36 +91,17 @@ func isNaturalControlCommand(text string) bool {
 	return false
 }
 
-// shouldObserve 是进入模型前的低成本预筛。smart 模式只把可能相关的消息送去轻量判断，
-// 所有消息仍然会写入会话历史，供后续上下文使用。
-func shouldObserve(text string, history []ChatMessage) bool {
-	t := strings.ToLower(strings.TrimSpace(text))
+// shouldObserve 只过滤确定没有信息量的消息（单字、纯表情、纯符号）。
+// 其余消息一律交给观察模型判断要不要回应、建单还是沉默——判断权在模型，
+// 关键词只做记录，不用来提前丢弃消息。
+func shouldObserve(text string) bool {
+	t := strings.TrimSpace(text)
 	if len([]rune(t)) < 4 {
 		return false
 	}
-	if referencedIssue(t) > 0 {
-		return true
-	}
-	for _, kw := range []string{
-		"报错", "崩溃", "异常", "失败", "超时", "没反应", "无法", "不能", "bug", "缺陷", "问题",
-		"需求", "建议", "怎么", "为什么", "如何", "能不能", "是否支持", "进度", "worker", "修复", "pr", "issue",
-		"导出", "导入", "登录", "安装", "发布", "版本", "接口", "页面", "桌面", "卡住", "丢失", "丢数据",
-	} {
-		if strings.Contains(t, kw) {
+	for _, r := range t {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			return true
-		}
-	}
-	if strings.ContainsAny(t, "?？") && len([]rune(t)) >= 8 {
-		return true
-	}
-	if len(history) > 0 {
-		last := history[len(history)-1]
-		if last.Role == "assistant" || last.Role == "observer" {
-			for _, kw := range []string{"这个", "那", "还是", "补充", "继续", "然后", "现在"} {
-				if strings.Contains(t, kw) {
-					return true
-				}
-			}
 		}
 	}
 	return false
@@ -179,16 +161,17 @@ func (s *Scheduler) runTriage(ctx context.Context, p *Project, history []ChatMes
 	return ParseTriageDecision(res.FinalResponse)
 }
 
-// handleObserved 处理非 @ 群消息。影子模式只记录判断，不向群里发送任何内容。
+// handleObserved 处理非 @ 群消息：由观察模型逐条判断该回答、建单还是沉默；
+// smart 模式只跳过没有信息的短消息，all 模式连这类也交给模型。
 func (s *Scheduler) handleObserved(ctx context.Context, p *Project, msg Inbound, history []ChatMessage, force bool) error {
 	policy := normalizeChatPolicy(p.Policy)
 	if isNaturalControlCommand(msg.Text) {
 		_ = s.repo.MarkMessage(ctx, msg.PlatformMessageID, "control_blocked", "副作用命令必须 @ 机器人或使用明确命令", 0, "")
 		return nil
 	}
-	if !force && !shouldObserve(msg.Text, history) {
+	if !force && !shouldObserve(msg.Text) {
 		status := "ignored"
-		reason := "未命中观察条件"
+		reason := "消息没有文本信息量（单字/表情/纯符号）"
 		if policy.Shadow {
 			status = "shadow_silent"
 		}

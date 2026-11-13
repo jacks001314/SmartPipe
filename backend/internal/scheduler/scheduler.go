@@ -1161,7 +1161,7 @@ func (s *Scheduler) execute(ctx context.Context, w *Worker, trigger string) erro
 		}
 		_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment(
 			"这一轮没有产生代码改动。需要补充信息或确认方案：\n\n"+clamp(res.FinalResponse, 3000)))
-		s.notifyIssue(ctx, p, w, "需要你补充信息："+clamp(res.FinalResponse, 300))
+		s.notifyIssue(ctx, p, w, "需要补充信息："+clamp(res.FinalResponse, 120))
 		return nil
 	}
 	if err := s.setState(ctx, w, StatePushing, "开始提交并推送", "scheduler"); err != nil {
@@ -1200,17 +1200,17 @@ func (s *Scheduler) execute(ctx context.Context, w *Worker, trigger string) erro
 	// 提交完成后直接合并进基线分支：合并成功就收口，失败才把原因交给人工。
 	merger, canMerge := s.tracker.(PullMerger)
 	if !canMerge {
-		s.notifyIssue(ctx, p, w, fmt.Sprintf("PR #%d 等待 review：%s", w.PRNumber, w.PRURL))
+		s.notifyIssue(ctx, p, w, fmt.Sprintf("PR #%d 待合并：%s", w.PRNumber, w.PRURL))
 		return s.setState(ctx, w, StateAwaitingReview, "PR 已就绪，等待 review", "scheduler")
 	}
 	if mergeErr := merger.MergePR(ctx, p.ID, w.Issue, w.PRNumber, prTitle(issue)); mergeErr != nil {
 		_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment(fmt.Sprintf(
 			"PR #%d 自动合并失败：%s\n需要人工处理：%s", w.PRNumber, shortErr(mergeErr), w.PRURL)))
-		s.notifyIssue(ctx, p, w, fmt.Sprintf("PR #%d 自动合并失败：%s\n%s", w.PRNumber, clamp(shortErr(mergeErr), 180), w.PRURL))
+		s.notifyIssue(ctx, p, w, fmt.Sprintf("PR #%d 合并失败：%s\n%s", w.PRNumber, clamp(shortErr(mergeErr), 80), w.PRURL))
 		return s.setState(ctx, w, StateAwaitingReview, "自动合并失败，等待人工处理", "scheduler")
 	}
 	_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment(fmt.Sprintf("PR #%d 已自动合并进 `%s`。", w.PRNumber, base)))
-	s.notifyIssue(ctx, p, w, fmt.Sprintf("已自动合并 PR #%d 到 %s：%s", w.PRNumber, base, w.PRURL))
+	s.notifyIssue(ctx, p, w, fmt.Sprintf("PR #%d 已合并进 %s：%s", w.PRNumber, base, w.PRURL))
 	return s.setState(ctx, w, StateClosed, "PR 已合并进 "+base, "scheduler")
 }
 
@@ -1331,6 +1331,7 @@ func (s *Scheduler) notify(ctx context.Context, botID, chatID, replyTo, text str
 	if s.notifier == nil {
 		return nil
 	}
+	text = clamp(strings.TrimSpace(text), groupMessageLimit)
 	if err := s.notifier.SendGroup(ctx, botID, chatID, replyTo, text); err != nil {
 		return err
 	}

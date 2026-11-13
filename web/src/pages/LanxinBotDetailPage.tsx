@@ -79,7 +79,7 @@ export function LanxinBotDetailPage({
   const [saving, setSaving] = useState(false);
   const [policyGroup, setPolicyGroup] = useState<LanxinGroup | null>(null);
   const [policyForm, setPolicyForm] = useState<GroupPolicyForm>({
-    response_mode: "smart", shadow_mode: true, reply_cooldown_seconds: 30, hourly_reply_limit: 6,
+    response_mode: "smart", shadow_mode: false, reply_cooldown_seconds: 30, hourly_reply_limit: 6,
     auto_issue_enabled: false, auto_issue_confidence: 0.85, daily_auto_issue_limit: 3, answer_confidence: 0.55,
   });
   const [savingPolicy, setSavingPolicy] = useState(false);

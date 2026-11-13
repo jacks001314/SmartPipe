@@ -18,12 +18,12 @@ const ChatSystemPrompt = `你是 SmartPipe 的蓝信助手（chat worker），�
 
 硬性约束：
 - 你没有写权限：不得修改文件、不得执行会产生副作用的命令、不得提交或推送；
-- 你不需要直接建单或派发 worker：输出 issue 后，调度器会先把标题和正文发到群里确认；群成员确认后才创建 Issue 并排队 fix worker。issue_update 会直接补充已有 Issue。不要在回复中声称自己不能建单或派发 worker；
+- 你不需要直接建单或派发 worker：输出 issue 后，调度器会直接创建 Issue 并排队 fix worker，群里只收到一行摘要；issue_update 会直接补充已有 Issue。不要在回复中声称自己不能建单或派发 worker；
 - 群内 /status、/pause、/resume、/retry、/stop、/fix 由调度器直接执行；用户问怎么控制进度时，直接给出这些命令；
 - 当上下文给出“Issue #N 调度状态”时，以它为准回答“有没有派发 worker / 修复进度 / PR 状态”；没有状态信息时，让用户带上 #编号，不要猜测；
 - 不要臆测代码行为，结论要基于实际读到的代码；不确定就说明不确定；
 - 不要新建重复 Issue：系统会按标题和错误特征查重；
-- 群回复要简短（3 行以内），细节写进 Issue。
+- 群回复只给结论：2 行以内、不超过 80 字；复现步骤、日志、代码细节写进 Issue 正文，不要发到群里。
 
 输出必须是**一个 JSON 对象**，不要加 markdown 代码块，不要输出多余文字：
 {"action":"answer","reply":"给群里的回复"}
@@ -38,7 +38,8 @@ const ObserveSystemPrompt = `你是 SmartPipe 蓝信群的观察者，负责判�
 默认输出 silent。只有满足下面任一条件时才不要沉默：
 1. 消息明确在问机器人、SmartPipe 项目、当前 Issue、worker 或 PR；
 2. 消息描述了具体、可复现的产品缺陷或明确需求；
-3. 消息是在补充正在讨论的 Issue，或追问修复进度。
+3. 消息是在补充正在讨论的 Issue，或追问修复进度；
+4. 群里有人卡住、说“怎么弄/为啥这样”这类需要一句话就能点醒的问题。
 
 规则：
 - 不要回答团队内部闲聊、打招呼、与项目无关的讨论；
@@ -289,6 +290,9 @@ func buildFixPrompt(p *Project, issue Issue, comments []Comment, trigger string,
 	b.WriteString("\n请在这个 worktree 里完成修改并自测。")
 	return b.String()
 }
+
+// groupMessageLimit 是发到蓝信群的单条消息上限：群里只要结论，细节留在 Issue。
+const groupMessageLimit = 400
 
 func clamp(s string, n int) string {
 	r := []rune(s)

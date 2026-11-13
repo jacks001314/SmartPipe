@@ -20,7 +20,7 @@ func TestIssueAutoCreatesAndQueuesWorker(t *testing.T) {
 		t.Fatal("created issue should queue a worker")
 	}
 	sent := strings.Join(h.notifier.all(), "\n")
-	if strings.Contains(sent, "【待确认建单】") || !strings.Contains(sent, "已创建 Issue #1") {
+	if strings.Contains(sent, "【待确认建单】") || !strings.Contains(sent, "已建 Issue #1") {
 		t.Fatalf("group should receive the issue link: %q", sent)
 	}
 }
