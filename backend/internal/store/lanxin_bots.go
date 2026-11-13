@@ -240,8 +240,8 @@ func (s *Store) ReplaceLanxinGroups(ctx context.Context, botID string, groups []
 		}
 		_, err := tx.ExecContext(ctx, `
 INSERT INTO lanxin_groups (id, bot_id, group_id, name, avatar_url, description, owner_id,
-    owner_name, member_count, send_msg_status, active, synced_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,now())
+    owner_name, member_count, send_msg_status, active, synced_at, shadow_mode)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,now(),false)
 ON CONFLICT (bot_id, group_id) DO UPDATE SET
     name=EXCLUDED.name, avatar_url=EXCLUDED.avatar_url, description=EXCLUDED.description,
     owner_id=EXCLUDED.owner_id, owner_name=EXCLUDED.owner_name,
