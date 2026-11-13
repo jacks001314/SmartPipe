@@ -1,0 +1,12 @@
+{
+  "version": "0.27.0",
+  "platform": "win32",
+  "arch": "x64",
+  "node": "v24.15.0",
+  "status": "PASS",
+  "scope": "native module load only; no desktop session",
+  "files": {
+    "cua_driver_sdk.dll": "407257e6db862ffe2b4e6cbde743cdf585b1ddf49457edc51bfc4636ed2126dc",
+    "cua_driver_node_runtime.node": "bf8c2b4cb9cf5dc9c5efa87aa78ed03c6dd3b7812ee1a0fdde6cedb99f51ab76"
+  }
+}
