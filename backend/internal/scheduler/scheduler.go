@@ -62,6 +62,12 @@ type Tracker interface {
 	CreatePR(ctx context.Context, projectID string, issue int, head, base, title, body string) (PullRequest, error)
 }
 
+// PullMerger 是可选能力：PR 就绪后由控制面直接合入基线分支。
+// Tracker 实现它就启用自动合并；测试里的假 tracker 不实现时保持等待 review。
+type PullMerger interface {
+	MergePR(ctx context.Context, projectID string, issue, pull int, title string) error
+}
+
 // RepoSyncer 是可选能力：开跑前把项目本地 clone 拉到远端最新。
 // Tracker 实现它就启用；测试里的假 tracker 不实现也不影响。
 type RepoSyncer interface {
@@ -1175,8 +1181,9 @@ func (s *Scheduler) execute(ctx context.Context, w *Worker, trigger string) erro
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	base := firstNonEmpty(p.DefaultBase, "main")
 	if w.PRNumber == 0 {
-		pr, err := s.tracker.CreatePR(ctx, p.ID, w.Issue, branch, firstNonEmpty(p.DefaultBase, "main"),
+		pr, err := s.tracker.CreatePR(ctx, p.ID, w.Issue, branch, base,
 			prTitle(issue), prBody(issue, commit))
 		if err != nil {
 			return fmt.Errorf("create pr: %w", err)
@@ -1185,14 +1192,26 @@ func (s *Scheduler) execute(ctx context.Context, w *Worker, trigger string) erro
 		w.PRURL = pr.URL
 		_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment(fmt.Sprintf(
 			"已提交 `%s` 并创建 PR #%d。\n%s", shortSHA(commit), pr.Number, pr.URL)))
-		s.notifyIssue(ctx, p, w, fmt.Sprintf("修复完成，PR #%d 等待 review：%s", pr.Number, pr.URL))
 	} else {
 		_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment(fmt.Sprintf(
 			"已追加提交 `%s` 到 PR #%d。", shortSHA(commit), w.PRNumber)))
-		s.notifyIssue(ctx, p, w, fmt.Sprintf("已按你的意见更新 PR #%d。", w.PRNumber))
 	}
 	w.LastError = ""
-	return s.setState(ctx, w, StateAwaitingReview, "PR 已就绪，等待 review", "scheduler")
+	// 提交完成后直接合并进基线分支：合并成功就收口，失败才把原因交给人工。
+	merger, canMerge := s.tracker.(PullMerger)
+	if !canMerge {
+		s.notifyIssue(ctx, p, w, fmt.Sprintf("PR #%d 等待 review：%s", w.PRNumber, w.PRURL))
+		return s.setState(ctx, w, StateAwaitingReview, "PR 已就绪，等待 review", "scheduler")
+	}
+	if mergeErr := merger.MergePR(ctx, p.ID, w.Issue, w.PRNumber, prTitle(issue)); mergeErr != nil {
+		_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment(fmt.Sprintf(
+			"PR #%d 自动合并失败：%s\n需要人工处理：%s", w.PRNumber, shortErr(mergeErr), w.PRURL)))
+		s.notifyIssue(ctx, p, w, fmt.Sprintf("PR #%d 自动合并失败：%s\n%s", w.PRNumber, clamp(shortErr(mergeErr), 180), w.PRURL))
+		return s.setState(ctx, w, StateAwaitingReview, "自动合并失败，等待人工处理", "scheduler")
+	}
+	_ = s.tracker.Comment(ctx, p.ID, w.Issue, botComment(fmt.Sprintf("PR #%d 已自动合并进 `%s`。", w.PRNumber, base)))
+	s.notifyIssue(ctx, p, w, fmt.Sprintf("已自动合并 PR #%d 到 %s：%s", w.PRNumber, base, w.PRURL))
+	return s.setState(ctx, w, StateClosed, "PR 已合并进 "+base, "scheduler")
 }
 
 func commitMessage(issue Issue) string {

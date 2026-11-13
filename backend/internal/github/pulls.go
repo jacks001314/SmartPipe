@@ -126,3 +126,16 @@ func (c *Client) GetPullRequest(ctx context.Context, repo string, number int) (*
 		Draft:   pr.GetDraft(),
 	}, nil
 }
+
+// MergePullRequest 把 PR squash 合入目标分支；分支保护或冲突会让调用返回错误。
+func (c *Client) MergePullRequest(ctx context.Context, repo string, number int, title string) error {
+	owner, name, err := SplitRepo(repo)
+	if err != nil {
+		return err
+	}
+	message := fmt.Sprintf("%s (#%d)", strings.TrimSpace(title), number)
+	if _, _, err := c.gh.PullRequests.Merge(ctx, owner, name, number, message, &gh.PullRequestOptions{MergeMethod: "squash"}); err != nil {
+		return wrapErr(err)
+	}
+	return nil
+}

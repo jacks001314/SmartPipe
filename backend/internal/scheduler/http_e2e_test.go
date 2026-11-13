@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -78,6 +79,8 @@ func TestHTTPEndToEnd(t *testing.T) {
 		t.Fatalf("issue not created: %#v", h.tracker.issues)
 	}
 
+	// 这一轮模拟分支保护挡住自动合并：PR 建好但停在等待人工处理，后面还能靠评论续跑。
+	h.tracker.mergeErr = errors.New("branch protection requires review")
 	h.runner.fixReply = "修复了超时时间设置。"
 	if err := h.s.DispatchOnce(context.Background()); err != nil {
 		t.Fatal(err)
