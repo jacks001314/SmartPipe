@@ -83,6 +83,27 @@ func TestDesktopMachineHTTPProtocol(t *testing.T) {
 	expect(call("report", assignment, token), 200)
 	expect(call("report", assignment, token), 409)
 	expect(call("release", assignment, token), 204)
+	// Exercise the same authenticated evidence download route used by the UI.
+	download := func(runID string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/admin/test-runs/"+runID+"/evidence/"+digest, nil)
+		rr := httptest.NewRecorder()
+		app.ServeHTTP(rr, req)
+		return rr
+	}
+	evidence := download(run)
+	expect(evidence, http.StatusOK)
+	if !bytes.Equal(evidence.Body.Bytes(), payload) {
+		t.Fatal("download changed evidence bytes")
+	}
+	for key, want := range map[string]string{"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Content-Disposition": "attachment"} {
+		if evidence.Header().Get(key) != want {
+			t.Fatalf("%s=%q", key, evidence.Header().Get(key))
+		}
+	}
+	if rr := download("different-run"); rr.Code == http.StatusOK {
+		t.Fatal("evidence leaked across runs")
+	}
+
 	persisted, err := st.GetDesktopTestRun(ctx, run)
 	if err != nil {
 		t.Fatal(err)
