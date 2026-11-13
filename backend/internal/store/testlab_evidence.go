@@ -12,8 +12,8 @@ import (
 const MaxDesktopEvidenceBytes = 8 << 20
 
 func init() {
-	migrations = append(migrations, migration{version: 46, name: "desktop_test_evidence", sql: `
-CREATE TABLE desktop_test_evidence (
+	migrations = append(migrations, migration{version: 50, name: "desktop_test_evidence", sql: `
+CREATE TABLE IF NOT EXISTS desktop_test_evidence (
  run_id TEXT NOT NULL REFERENCES desktop_test_runs(id) ON DELETE CASCADE,
  sha256 TEXT NOT NULL,
  mime_type TEXT NOT NULL,

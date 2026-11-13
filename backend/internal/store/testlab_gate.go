@@ -18,8 +18,8 @@ type DesktopGatePolicy struct {
 }
 
 func init() {
-	migrations = append(migrations, migration{version: 47, name: "desktop_gate_policy", sql: `
-CREATE TABLE desktop_gate_policies(project_id TEXT PRIMARY KEY REFERENCES projects(id), policies JSONB NOT NULL);
+	migrations = append(migrations, migration{version: 51, name: "desktop_gate_policy", sql: `
+CREATE TABLE IF NOT EXISTS desktop_gate_policies(project_id TEXT PRIMARY KEY REFERENCES projects(id), policies JSONB NOT NULL);
 `})
 }
 func (s *Store) SetDesktopGatePolicies(ctx context.Context, projectID string, policies []DesktopGatePolicy) error {

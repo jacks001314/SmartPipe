@@ -11,8 +11,8 @@ import (
 )
 
 func init() {
-	migrations = append(migrations, migration{version: 45, name: "desktop_test_machines", sql: `
-CREATE TABLE desktop_test_machines (
+	migrations = append(migrations, migration{version: 49, name: "desktop_test_machines", sql: `
+CREATE TABLE IF NOT EXISTS desktop_test_machines (
  id TEXT PRIMARY KEY,
  platform TEXT NOT NULL,
  token_sha256 TEXT NOT NULL,
@@ -22,9 +22,9 @@ CREATE TABLE desktop_test_machines (
  lease_until TIMESTAMPTZ,
  last_seen TIMESTAMPTZ
 );
-ALTER TABLE desktop_test_runs ADD COLUMN machine_id TEXT NOT NULL DEFAULT '';
-ALTER TABLE desktop_test_runs ADD COLUMN lease_generation BIGINT NOT NULL DEFAULT 0;
-CREATE UNIQUE INDEX desktop_test_machine_run_unique ON desktop_test_machines(run_id) WHERE run_id <> '';
+ALTER TABLE desktop_test_runs ADD COLUMN IF NOT EXISTS machine_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE desktop_test_runs ADD COLUMN IF NOT EXISTS lease_generation BIGINT NOT NULL DEFAULT 0;
+CREATE UNIQUE INDEX IF NOT EXISTS desktop_test_machine_run_unique ON desktop_test_machines(run_id) WHERE run_id <> '';
 `})
 }
 func (s *Store) RegisterDesktopMachine(ctx context.Context, id, platform, digest string) error {

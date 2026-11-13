@@ -11,7 +11,7 @@ import (
 )
 
 func init() {
-	migrations = append(migrations, migration{version: 44, name: "desktop_test_runs", sql: `
+	migrations = append(migrations, migration{version: 48, name: "desktop_test_runs", sql: `
 CREATE TABLE IF NOT EXISTS desktop_test_runs (
  id TEXT PRIMARY KEY,
  project_id TEXT NOT NULL REFERENCES projects(id),
