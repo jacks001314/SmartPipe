@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"smartpipe/backend/internal/releasev2"
 	"smartpipe/backend/internal/testlab"
+	"strings"
 )
 
 type DesktopGatePolicy struct {
@@ -77,11 +78,11 @@ func (s *Store) CheckDesktopReleaseGate(ctx context.Context, run *releasev2.Run,
 				continue
 			}
 			found = true
-			expected := testlab.Spec{ProjectID: run.ProjectID, SourceSHA: run.ResolvedCommit, ArtifactSHA256: artifact.SHA256, Scenario: policy.Scenario, ScenarioVersion: policy.Version, Platform: policy.Platform, RequiredChecks: policy.RequiredChecks}
+			expected := testlab.Spec{ProjectID: run.ProjectID, SourceSHA: run.ResolvedCommit, ArtifactSHA256: desktopArtifactDigest(artifact.SHA256), Scenario: policy.Scenario, ScenarioVersion: policy.Version, Platform: policy.Platform, RequiredChecks: policy.RequiredChecks}
 			if err = expected.Validate(); err != nil {
 				return err
 			}
-			rows, qerr := s.db.QueryContext(ctx, `SELECT id FROM desktop_test_runs WHERE project_id=$1 AND status='PASS' AND machine_id<>'' AND spec->>'source_sha'=$2 AND spec->>'artifact_sha256'=$3 AND spec->>'scenario'=$4 AND spec->>'scenario_version'=$5 AND spec->>'platform'=$6 ORDER BY created_at DESC LIMIT 100`, run.ProjectID, expected.SourceSHA, artifact.SHA256, policy.Scenario, policy.Version, policy.Platform)
+			rows, qerr := s.db.QueryContext(ctx, `SELECT id FROM desktop_test_runs WHERE project_id=$1 AND status='PASS' AND machine_id<>'' AND spec->>'source_sha'=$2 AND spec->>'artifact_sha256'=$3 AND spec->>'scenario'=$4 AND spec->>'scenario_version'=$5 AND spec->>'platform'=$6 ORDER BY created_at DESC LIMIT 100`, run.ProjectID, expected.SourceSHA, expected.ArtifactSHA256, policy.Scenario, policy.Version, policy.Platform)
 			if qerr != nil {
 				return qerr
 			}
@@ -137,3 +138,6 @@ func (s *Store) CheckDesktopReleaseGate(ctx context.Context, run *releasev2.Run,
 	}
 	return nil
 }
+
+// Release storage uses algorithm-prefixed digests; test specs use raw SHA256.
+func desktopArtifactDigest(value string) string { return strings.TrimPrefix(value, "sha256:") }
