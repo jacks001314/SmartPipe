@@ -1,0 +1,13 @@
+{
+  "version": "0.27.0",
+  "platform": "darwin",
+  "arch": "x64",
+  "node": "v24.21.0",
+  "status": "FAIL",
+  "scope": "native module load only; no desktop session",
+  "files": {
+    "libcua_driver_sdk.dylib": "af889c64799f0a1675af9e55ec61f2580d05eb978591b6b8906546728dde9b58",
+    "cua_driver_node_runtime.node": "fccc5d47353412acbb454c720320b72161a906d1a2bc4c5f0896872e3172b282"
+  },
+  "error": "library open failed: /Users/malama/smartpipe-test-assets/native-cache/0.27.0/darwin-universal/libcua_driver_sdk.dylib: Could not open library: dlopen(/Users/malama/smartpipe-test-assets/native-cache/0.27.0/darwin-universal/libcua_driver_sdk.dylib, 0x0005): Symbol not found: _$s10Foundation22_convertErrorToNSErrorySo0E0Cs0C0_pF\n  Referenced from: /Users/malama/smartpipe-test-assets/native-cache/0.27.0/darwin-universal/libcua_driver_sdk.dylib\n  Expected in: /System/Library/Frameworks/Foundation.framework/Versions/C/Foundation"
+}

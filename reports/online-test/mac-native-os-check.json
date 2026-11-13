@@ -1,0 +1,12 @@
+{
+  "version": "0.27.0",
+  "platform": "darwin",
+  "arch": "x64",
+  "node": "v24.21.0",
+  "status": "FAIL",
+  "scope": "native module load only; no desktop session",
+  "osVersion": "12.4",
+  "minimumOSVersion": "13.0",
+  "code": "UNSUPPORTED_OS_VERSION",
+  "error": "Pinned native driver 0.27.0 requires macOS 13.0 or newer; host is 12.4"
+}

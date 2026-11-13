@@ -34,3 +34,5 @@ Load-only verification after provisioning:
 node modules/cua-sdk/scripts/check-native.mjs ABSOLUTE_CACHE_DIRECTORY NEW_REPORT_JSON
 
 The report includes platform, Node version, native file hashes and ABI initialization result. It never creates a desktop host. PASS is not desktop permission or product acceptance. Missing or broken payloads exit nonzero. The report path must not already exist.
+
+macOS compatibility: the pinned 0.27.0 native library declares minimum macOS 13.0 (otool LC_BUILD_VERSION). macOS 12.4 was tested and cannot load it. check-native now reports UNSUPPORTED_OS_VERSION before loading. macOS 13+ still requires an actual successful ABI check; the minimum alone is not an acceptance result.
