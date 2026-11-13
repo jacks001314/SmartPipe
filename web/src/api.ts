@@ -1,4 +1,4 @@
-import type { AuditEntry, AuthConfig, AuthSession, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Health, IssueAttempt, Project, ReleaseCandidate, ReleaseRecord, ReleaseRun, ReleaseV2AgentView, ReleaseV2AgentSession, ReleaseV2Approval, ReleaseV2Bundle, ReleaseV2Executor, ReleaseV2Plan, ReleaseV2Run, ReleaseV2Settings, ReleaseV2Probe, ReleaseV2ExecutorBootstrap, RepoOp, TestResult, UserIdentity, VerificationRecord, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubTunnelView, GitHubPATView, GitHubRepoCatalog, GitHubRepo, SchedulerOverview, SchedulerWorkerDetail, SchedulerWorker, SchedulerMessage, SchedulerOutputFrame, SchedulerOutputRawPage } from "./types";
+import type { AuditEntry, AuthConfig, AuthSession, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Health, IssueAttempt, Project, ReleaseCandidate, ReleaseRecord, ReleaseRun, ReleaseV2AgentView, ReleaseV2AgentSession, ReleaseV2Approval, ReleaseV2Bundle, ReleaseV2Executor, ReleaseV2Plan, ReleaseV2Run, ReleaseV2Settings, ReleaseV2Probe, ReleaseV2ExecutorBootstrap, ReleaseV2ExecutorDeployResult, ReleaseV2ExecutorRemoveResult, RepoOp, TestResult, UserIdentity, VerificationRecord, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubTunnelView, GitHubPATView, GitHubRepoCatalog, GitHubRepo, SchedulerOverview, SchedulerWorkerDetail, SchedulerWorker, SchedulerMessage, SchedulerOutputFrame, SchedulerOutputRawPage } from "./types";
 import type { ResourceInspectionResult, ResourceProbeResult, RuntimeResource } from "./types";
 
 const TOKEN_KEY = "smartpipe.adminToken";
@@ -295,6 +295,14 @@ export const api = {
     request<ReleaseV2ExecutorBootstrap>(
       "/releases/v2/executors/bootstrap?os=" + encodeURIComponent(os) + "&arch=" + encodeURIComponent(arch) + "&id=" + encodeURIComponent(id),
     ),
+  deployReleaseV2Executor: (body: {
+    id: string; os: string; arch: string;
+    host?: string; port?: number; username?: string;
+    auth_type?: string; secret?: string; passphrase?: string;
+    resource_id?: string; install_dir?: string; save_resource?: boolean;
+  }) => request<ReleaseV2ExecutorDeployResult>("/releases/v2/executors/deploy", { method: "POST", body }),
+  deleteReleaseV2Executor: (id: string, body?: { force?: boolean; resource_id?: string; install_dir?: string }) =>
+    request<ReleaseV2ExecutorRemoveResult>("/releases/v2/executors/" + encodeURIComponent(id), { method: "DELETE", body: body ?? {} }),
   listReleaseV2Approvals: (id: string) => request<ReleaseV2Approval[]>("/releases/v2/runs/" + encodeURIComponent(id) + "/approvals"),
   approveReleaseV2Run: (id: string, reason: string, ttlSeconds = 7200) =>
     request<ReleaseV2Approval>("/releases/v2/runs/" + encodeURIComponent(id) + "/approvals", { method: "POST", body: { reason, ttl_seconds: ttlSeconds } }),

@@ -38,6 +38,8 @@ func (a *API) registerReleaseV2(p iris.Party) {
 	p.Get("/v2/executors", a.listReleaseV2Executors)
 	p.Post("/v2/executors", a.upsertReleaseV2Executor)
 	p.Get("/v2/executors/bootstrap", a.getReleaseV2ExecutorBootstrap)
+	p.Post("/v2/executors/deploy", a.deployReleaseV2Executor)
+	p.Delete("/v2/executors/{id}", a.removeReleaseV2Executor)
 }
 
 type releaseV2PlanRequest struct {

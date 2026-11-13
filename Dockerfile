@@ -34,7 +34,13 @@ RUN LDFLAGS="-s -w -X main.version=${VERSION}" \
  && go build -ldflags="$LDFLAGS" -o /out/release-service ./cmd/release-service \
  && go build -ldflags="$LDFLAGS" -o /out/release-mcp ./cmd/release-mcp \
  && go build -ldflags="$LDFLAGS" -o /out/release-executor ./cmd/release-executor \
- && printf '%s\n' "version=${VERSION}" "commit=${COMMIT}" "built_at=${BUILD_TIME}" > /out/BUILD-INFO
+ && printf '%s\n' "version=${VERSION}" "commit=${COMMIT}" "built_at=${BUILD_TIME}" > /out/BUILD-INFO \
+ && for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do \
+      goos=${target%/*}; goarch=${target#*/}; name=release-executor; \
+      if [ "$goos" = windows ]; then name=release-executor.exe; fi; \
+      mkdir -p /out/executors/${goos}-${goarch}; \
+      GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build -ldflags="$LDFLAGS" -o /out/executors/${goos}-${goarch}/$name ./cmd/release-executor; \
+    done
 
 FROM golang:1.26-alpine
 ARG CODEX_VERSION=0.166.0

@@ -842,6 +842,40 @@ export type ReleaseV2ExecutorBootstrap = {
   command: string;
 };
 
+export type ReleaseV2ExecutorDeployStep = {
+  name: string;
+  ok: boolean;
+  detail: string;
+};
+
+export type ReleaseV2ExecutorDeployResult = {
+  ok: boolean;
+  error?: string;
+  executor_id: string;
+  os: string;
+  arch: string;
+  host: string;
+  port: number;
+  username: string;
+  install_dir: string;
+  fingerprint?: string;
+  resource_id?: string;
+  registered: boolean;
+  status?: string;
+  log_tail?: string;
+  steps: ReleaseV2ExecutorDeployStep[];
+};
+
+export type ReleaseV2ExecutorRemoveResult = {
+  ok: boolean;
+  error?: string;
+  executor_id: string;
+  host?: string;
+  install_dir?: string;
+  remote_cleaned: boolean;
+  steps: ReleaseV2ExecutorDeployStep[];
+};
+
 export type ReleaseV2Executor = {
   id: string;
   os: string;
