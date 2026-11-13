@@ -118,8 +118,17 @@ export function TestLabPage({notify}:{notify:Notify}){
   {detail&&<div className="card"><h3>{detail.id}</h3>
    <p>源码：{detail.spec.source_sha}</p><p>制品：{detail.spec.artifact_sha256}</p>
    <p>场景：{detail.spec.scenario} / {detail.spec.scenario_version}</p>
-   <p>必需检查项：{detail.spec.required_checks.join("、")}</p>
-   {detail.report?.checks.map(c=><p key={c.id}>{c.id}：{c.status} {c.evidence&&<button onClick={()=>void download(detail.id,c.evidence)}>下载证据</button>}</p>)}
+   <p>运行状态：{detail.status} · 创建时间：{new Date(detail.created_at).toLocaleString()}{detail.finished_at&&<> · 完成时间：{new Date(detail.finished_at).toLocaleString()}</>}</p>
+   <h4>必需检查项</h4>
+   <table><thead><tr><th>检查项</th><th>结果</th><th>证据</th></tr></thead><tbody>
+    {detail.spec.required_checks.map(id=>{
+     const check=detail.report?.checks.find(c=>c.id===id);
+     const uploaded=!!check&&/^sha256:[a-f0-9]{64}$/.test(check.evidence);
+     return <tr key={id}><td>{id}</td><td>{check?.status??"未返回"}</td><td>{uploaded?<button onClick={()=>void download(detail.id,check!.evidence)}>下载证据</button>:"无已上传证据"}</td></tr>;
+    })}
+   </tbody></table>
+   {detail.report?.checks.filter(c=>!detail.spec.required_checks.includes(c.id)).map(c=><p key={c.id}>附加检查 {c.id}：{c.status} {/^sha256:[a-f0-9]{64}$/.test(c.evidence)&&<button onClick={()=>void download(detail.id,c.evidence)}>下载证据</button>}</p>)}
+   {detail.spec.scenario==="desktop-observe"&&<p>此结果仅用于桌面观察，不满足发布验收门禁。</p>}
    {!detail.report&&<p>尚未提交报告。</p>}
   </div>}
  </>;
