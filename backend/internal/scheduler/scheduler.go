@@ -373,13 +373,18 @@ func (s *Scheduler) HandleMessage(ctx context.Context, msg Inbound) error {
 	}
 	p, err := s.resolver.ByChat(ctx, msg.ChatID())
 	if err != nil {
-		_ = s.repo.RecordMessage(ctx, messageRecord(msg, "", "unbound", "群未绑定项目"))
+		if recErr := s.repo.RecordMessage(ctx, messageRecord(msg, "", "unbound", "群未绑定项目")); recErr != nil {
+			log.Printf("[scheduler] record unbound message %s: %v", msg.PlatformMessageID, recErr)
+		}
 		if isDirectMessage(msg) {
 			_ = s.notify(ctx, "", msg.ChatID(), "", "这个群还没有绑定项目，请管理员在配置台完成绑定。")
 		}
 		return ErrUnbound
 	}
-	_ = s.repo.RecordMessage(ctx, messageRecord(msg, p.ID, "processing", ""))
+	if recErr := s.repo.RecordMessage(ctx, messageRecord(msg, p.ID, "processing", "")); recErr != nil {
+		// 记录失败必须留痕：消息流水是排查“为什么没反应”的唯一入口。
+		log.Printf("[scheduler] record message %s: %v", msg.PlatformMessageID, recErr)
+	}
 	history, _ := s.repo.RecentChat(ctx, msg.ChatID(), s.cfg.ChatHistorySize)
 	referenced := referencedIssue(msg.Text)
 	_ = s.repo.AppendChat(ctx, ChatMessage{ChatID: msg.ChatID(), ProjectID: p.ID, Role: "user", Body: msg.Text})
