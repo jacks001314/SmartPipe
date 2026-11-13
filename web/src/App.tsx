@@ -43,8 +43,8 @@ const META: Record<PageKey, { crumb: string; title: string; sub: string }> = {
   lanxin: { crumb: "配置中心 / 蓝信机器人", title: "蓝信机器人", sub: "管理多个机器人、自动同步所在群，并查看每个机器人的聊天消息与连接状态。" },
   scheduler: { crumb: "运行中心 / 调度器", title: "调度器", sub: "查看 worker 当前阶段、心跳和事件时间线，并暂停、恢复、重试或停止单个任务。" },
   verify: { crumb: "配置中心 / 补丁验证", title: "补丁验证", sub: "手动验证：在干净副本上应用补丁并执行 smartpipe.yaml 声明的验证命令，可查看历史验证记录；不再作为 Issue 修复的合并门禁。" },
-  releaseCenter: { crumb: "运行中心 / 发版", title: "发版", sub: "计划、运行、构建机、旧版发版与发布设置集中在一个入口。" },
-  release: { crumb: "运行中心 / 发版", title: "旧版发版", sub: "标签候选、每日发版、完整构建与回滚；保留给旧链路和群通知。" },
+  releaseCenter: { crumb: "运行中心 / 发版", title: "发版", sub: "计划、运行、构建机与发布设置集中在一个入口。" },
+  release: { crumb: "运行中心 / 发版", title: "发版", sub: "旧链接 #release 已并入发版运行。" },
   releaseSettings: { crumb: "配置中心 / 发版设置", title: "发版设置", sub: "在这里填写真实升级服务、GitHub 与对象存储的参数；保存后立即生效。" },
   releaseV2: { crumb: "运行中心 / 发版 v2", title: "发版运行 v2", sub: "计划、构建机、目标进度、制品摘要、升级渠道与 GitHub 发布状态。" },
   crash: { crumb: "配置中心 / 崩溃上报", title: "崩溃上报", sub: "客户端 crash_bundle 脱敏、指纹去重、限流与自动建单。" },
@@ -240,7 +240,7 @@ export function App() {
           {(page === "releaseCenter" || page === "release" || page === "releaseV2" || page === "releaseSettings") && (
             <ReleaseCenterPage
               notify={notify}
-              initialTab={page === "releaseSettings" ? "settings" : page === "release" ? "legacy" : "runs"}
+              initialTab={page === "releaseSettings" ? "settings" : "runs"}
             />
           )}
           {page === "crash" && <CrashPage notify={notify} />}

@@ -1,14 +1,12 @@
 import { useEffect, useState } from "react";
 import type { Notify } from "../App";
-import { ReleasePage } from "./ReleasePage";
 import { ReleaseV2Page } from "./ReleaseV2Page";
 import { ReleaseV2SettingsPage } from "./ReleaseV2SettingsPage";
 
-export type ReleaseTab = "runs" | "legacy" | "settings";
+export type ReleaseTab = "runs" | "settings";
 
 const TABS: { key: ReleaseTab; label: string; hint: string }[] = [
   { key: "runs", label: "发版运行", hint: "计划、构建机、制品与发布状态" },
-  { key: "legacy", label: "旧版发版", hint: "标签候选、每日发版与回滚" },
   { key: "settings", label: "发版设置", hint: "升级服务、GitHub 与对象存储" },
 ];
 
@@ -38,7 +36,6 @@ export function ReleaseCenterPage({ notify, initialTab = "runs" }: { notify: Not
         ))}
       </div>
       {tab === "runs" && <ReleaseV2Page notify={notify} />}
-      {tab === "legacy" && <ReleasePage notify={notify} />}
       {tab === "settings" && <ReleaseV2SettingsPage notify={notify} />}
     </>
   );
