@@ -1,0 +1,14 @@
+{
+  "counts": {
+    "pass": 113,
+    "fail": 0,
+    "skip": 4
+  },
+  "failures": [
+    "desktop-adminapi: skipped TestDesktopTypeScriptWorker",
+    "desktop-adminapi: skipped TestDesktopTypeScriptWorkerCancellation",
+    "full-adminapi: skipped TestDesktopTypeScriptWorker",
+    "full-adminapi: skipped TestDesktopTypeScriptWorkerCancellation"
+  ],
+  "status": "FAIL"
+}
