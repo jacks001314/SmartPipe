@@ -82,9 +82,9 @@ func Prompt(d *Draft) string {
 	if d == nil {
 		return ""
 	}
-	body := clamp(strings.TrimSpace(d.Body), 900)
-	return fmt.Sprintf("【待确认建单】%s\n标题：%s\n级别：%s\n摘要：%s\n\n请在本群回复：\n@机器人 确认建单 %s\n@机器人 取消建单 %s\n确认前不会创建 Issue，也不会派发 worker；草稿 30 分钟内有效。",
-		d.ID, d.Title, d.Severity, body, d.ID, d.ID)
+	body := clamp(strings.TrimSpace(d.Body), 80)
+	return fmt.Sprintf("建单失败，草稿 %s 已保留。\n标题：%s（%s）\n摘要：%s\n回复「确认建单 %s」重试，或「取消建单 %s」丢弃；30 分钟内有效。",
+		d.ID, clamp(d.Title, 40), d.Severity, body, d.ID, d.ID)
 }
 
 // ParseCommand 只接受消息开头（可带 @ 机器人）的明确命令，避免普通讨论误触发建单。

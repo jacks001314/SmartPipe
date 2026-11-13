@@ -203,10 +203,10 @@ func (s *Scheduler) confirmIssueDraft(ctx context.Context, p *Project, msg Inbou
 		}
 	}
 
-	text := fmt.Sprintf("已创建 Issue #%d：%s\n%s\nworker 已入队。", existing.Number, existing.Title, existing.URL)
+	text := fmt.Sprintf("已建 Issue #%d：%s\n%s", existing.Number, clamp(existing.Title, 40), existing.URL)
 	status := "issue_created"
 	if duplicate {
-		text = fmt.Sprintf("问题已经存在 Issue #%d，已补充新反馈。\n%s", existing.Number, existing.URL)
+		text = fmt.Sprintf("已并入 Issue #%d 的讨论：%s", existing.Number, existing.URL)
 		status = "issue_updated"
 	}
 	if replyErr := s.replyIssueDraft(ctx, p, msg, status, text, existing.Number, existing.URL); replyErr != nil {

@@ -154,7 +154,7 @@ func TestAutoTriageCreatesIssueOnlyWhenEnabled(t *testing.T) {
 	if h.tracker.issueCount() != 1 {
 		t.Fatalf("auto triage should create the issue directly, got %d", h.tracker.issueCount())
 	}
-	if sent := strings.Join(h.notifier.all(), "\n"); !strings.Contains(sent, "已创建 Issue #1") {
+	if sent := strings.Join(h.notifier.all(), "\n"); !strings.Contains(sent, "已建 Issue #1") {
 		t.Fatalf("issue link missing: %s", sent)
 	}
 	count, _ := h.repo.CountAutoIssueDrafts(context.Background(), "prj-1", "group-1", time.Now().Add(-24*time.Hour))
