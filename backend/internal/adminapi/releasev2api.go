@@ -3,6 +3,7 @@ package adminapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -82,7 +83,7 @@ func (a *API) createReleaseV2Plan(c iris.Context) {
 	if branch == "" {
 		branch = firstNonEmpty(project.GitHubDefaultBranch, "main")
 	}
-	profilePath, profile, err := releaseV2ProfilePath(project)
+	profilePath, profile, err := a.resolveReleaseProfile(ctx, project, branch)
 	if err != nil {
 		c.StatusCode(http.StatusUnprocessableEntity)
 		_ = c.JSON(envelope{Err: &apiError{Code: "release_profile_missing", Message: err.Error()}})
@@ -342,27 +343,111 @@ func (a *API) releaseV2Error(c iris.Context, err error) {
 	}
 }
 
-func releaseV2ProfilePath(project *store.Project) (string, *releasev2.Profile, error) {
-	path := strings.TrimSpace(project.ReleaseProfile)
-	if path == "" {
-		path = "smartpipe.yaml"
+// releaseProfileFallbacks 是项目没显式配置「发版配置路径」时依次尝试的位置。
+// 仓库根的 smartpipe.yaml 最常见，其余是分开放的约定位置。
+var releaseProfileFallbacks = []string{
+	"smartpipe.yaml",
+	".smartpipe/release.yaml",
+	".smartpipe/release.yml",
+	"deploy/smartpipe.yaml",
+	"release/smartpipe.yaml",
+}
+
+// resolveReleaseProfile 读取项目的发版配置。
+//
+// 读之前先尽力把本地 clone 拉到远端：发版配置和构建命令都随代码走，镜像停在
+// 克隆那天会让人对着旧文件排查（比如仓库里已经有 release.targets，本地却只有
+// 验证契约）。同步失败不阻塞计划，读取本地现有文件并在错误里带上原因。
+func (a *API) resolveReleaseProfile(ctx context.Context, project *store.Project, branch string) (string, *releasev2.Profile, error) {
+	base := strings.TrimSpace(project.LocalRepoPath)
+	configured := strings.TrimSpace(project.ReleaseProfile)
+	note := ""
+	if configured == "" || !filepath.IsAbs(configured) {
+		note = a.refreshProjectClone(ctx, project, branch)
 	}
-	if !filepath.IsAbs(path) {
-		base := strings.TrimSpace(project.LocalRepoPath)
-		if base == "" {
-			return path, nil, errors.New("项目未配置本地仓库目录，无法读取发版配置")
+	if configured != "" {
+		path := configured
+		if !filepath.IsAbs(path) {
+			if base == "" {
+				return path, nil, errors.New("项目未配置本地仓库目录，无法读取发版配置")
+			}
+			path = filepath.Join(base, path)
 		}
-		path = filepath.Join(base, path)
+		return readReleaseProfile(path, note)
 	}
+	if base == "" {
+		return "smartpipe.yaml", nil, errors.New("项目未配置本地仓库目录，无法读取发版配置")
+	}
+	for _, rel := range releaseProfileFallbacks {
+		path := filepath.Join(base, rel)
+		if st, err := os.Stat(path); err != nil || st.IsDir() {
+			continue
+		}
+		return readReleaseProfile(path, note)
+	}
+	return filepath.Join(base, releaseProfileFallbacks[0]), nil, fmt.Errorf(
+		"仓库里没有发版配置：%s 下试过 %s。请在仓库里加一份含 release.targets 的 smartpipe.yaml，或在项目设置的「发版配置路径」里指定已有文件%s",
+		base, strings.Join(releaseProfileFallbacks, "、"), withProfileNote(note))
+}
+
+func readReleaseProfile(path, note string) (string, *releasev2.Profile, error) {
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() {
-		return path, nil, errors.New("发版配置不可读取：" + path)
+		return path, nil, fmt.Errorf("发版配置不可读取：%s%s", path, withProfileNote(note))
 	}
 	profile, err := releasev2.LoadProfile(path)
-	if err != nil {
-		return path, nil, err
+	switch {
+	case err == nil:
+		return path, profile, nil
+	case errors.Is(err, releasev2.ErrNoReleaseProfile):
+		return path, nil, fmt.Errorf(
+			"发版配置 %s 里没有 release.targets：它可能只写了验证契约。请补上发版目标（构建/校验命令与制品），或把「发版配置路径」指向含 release.targets 的文件%s",
+			path, withProfileNote(note))
+	case errors.Is(err, releasev2.ErrInvalid):
+		return path, nil, fmt.Errorf("发版配置 %s 不合法：%v%s", path, strings.TrimPrefix(err.Error(), "releasev2: "), withProfileNote(note))
+	default:
+		return path, nil, fmt.Errorf("读取发版配置 %s 失败：%v%s", path, err, withProfileNote(note))
 	}
-	return path, profile, nil
+}
+
+// refreshProjectClone 在生成计划前把本地镜像快进到远端分支，返回一句可附在错误里的说明。
+func (a *API) refreshProjectClone(ctx context.Context, project *store.Project, branch string) string {
+	dir := strings.TrimSpace(project.LocalRepoPath)
+	remote := strings.TrimSpace(project.GitHubRepoURL)
+	if dir == "" || remote == "" {
+		return ""
+	}
+	if st, err := os.Stat(filepath.Join(dir, ".git")); err != nil || !st.IsDir() {
+		return ""
+	}
+	token := ""
+	if tok, err := gitToken(ctx, a.store, &project.ID); err == nil {
+		token = tok
+	}
+	if strings.TrimSpace(branch) == "" {
+		branch = firstNonEmpty(project.GitHubDefaultBranch, "main")
+	}
+	sctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	res, err := syncLocalClone(sctx, dir, remote, token, branch)
+	if err != nil {
+		return "本地仓库同步失败，按现有文件判断：" + unwrapGitOutput(err).Error()
+	}
+	if res.Updated {
+		head := res.Head
+		if len(head) > 8 {
+			head = head[:8]
+		}
+		return "已先把本地仓库快进到 " + head
+	}
+	return ""
+}
+
+func withProfileNote(note string) string {
+	if strings.TrimSpace(note) == "" {
+		return ""
+	}
+	return "（" + note + "）"
 }
 
 func sortedExecutorIDs(items []releasev2.Executor) []string {

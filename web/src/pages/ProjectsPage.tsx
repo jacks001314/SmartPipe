@@ -13,6 +13,7 @@ type FormState = {
   bluex_group_ids: string;
   lanxin_bot_id: string;
   verify_profile_path: string;
+  release_profile: string;
   codex_model_provider: string;
   codex_model: string;
   codex_reasoning_effort: string;
@@ -29,6 +30,7 @@ const EMPTY: FormState = {
   bluex_group_ids: "",
   lanxin_bot_id: "",
   verify_profile_path: "smartpipe.yaml",
+  release_profile: "",
   codex_model_provider: "",
   codex_model: "",
   codex_reasoning_effort: "",
@@ -130,6 +132,7 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
       bluex_group_ids: p.bluex_group_ids,
       lanxin_bot_id: p.lanxin_bot_id || lanxinGroups.find((g) => g.group_id === p.bluex_group_ids.split(",")[0])?.bot_id || "",
       verify_profile_path: p.verify_profile_path,
+      release_profile: p.release_profile || "",
       codex_model_provider: p.codex_model_provider,
       codex_model: p.codex_model,
       codex_reasoning_effort: p.codex_reasoning_effort,
@@ -524,6 +527,15 @@ export function ProjectsPage({ notify }: { notify: Notify }) {
                 <div className="field">
                   <label>验证契约路径</label>
                   <input value={form.verify_profile_path} onChange={(e) => set("verify_profile_path", e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>发版配置路径</label>
+                  <input
+                    value={form.release_profile}
+                    placeholder="留空则用仓库根的 smartpipe.yaml"
+                    onChange={(e) => set("release_profile", e.target.value)}
+                  />
+                  <span className="tiny">相对路径按本地仓库目录解析；文件里必须有 release.targets。</span>
                 </div>
                 <div className="field">
                   <label>审批要求</label>

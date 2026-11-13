@@ -36,6 +36,7 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
   const [error, setError] = useState("");
   const [detail, setDetail] = useState<ReleaseV2Bundle | null>(null);
   const [plan, setPlan] = useState<ReleaseV2Plan | null>(null);
+  const [planError, setPlanError] = useState("");
   const [token, setToken] = useState("");
   const [approvals, setApprovals] = useState<ReleaseV2Approval[]>([]);
   const [agent, setAgent] = useState<ReleaseV2AgentView | null>(null);
@@ -257,6 +258,7 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
 
   async function createPlan() {
     setBusy(true);
+    setPlanError("");
     try {
       const created = await api.createReleaseV2Plan({
         project_id: form.project_id,
@@ -270,7 +272,9 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
       setPlan(created);
       notify("已生成发布计划 " + created.id, "ok");
     } catch (err) {
-      notify(err instanceof ApiError ? err.message : "生成计划失败", "error");
+      const message = err instanceof ApiError ? err.message : "生成计划失败";
+      setPlanError(message);
+      notify(message, "error");
     } finally {
       setBusy(false);
     }
@@ -384,6 +388,13 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
               {busy ? "处理中…" : "生成计划"}
             </button>
           </div>
+          {planError && (
+            <div className="notice bad" style={{ marginTop: 12 }}>
+              <div><b>生成计划失败</b></div>
+              <div className="tiny">{planError}</div>
+              <div className="tiny">若提示缺少发版配置，可在「项目」页的项目设置里填写发版配置路径，或在仓库里提交含 release.targets 的 smartpipe.yaml；仓库有更新时生成计划会自动同步本地镜像。</div>
+            </div>
+          )}
           {plan && (
             <div className="notice" style={{ marginTop: 12 }}>
               <div><b>计划 {plan.id}</b> · {plan.version} · {plan.mode} · {plan.channel} · 状态 {plan.status}</div>
