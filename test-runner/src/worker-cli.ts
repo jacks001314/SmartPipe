@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { RunnerClient } from './worker.js';
-import { ObserveScenario, type ObserveConfig } from './observe-scenario.js';
-import { CommandScenario, type CommandScenarioConfig } from './command-scenario.js';
+import type { ObserveConfig } from './observe-scenario.js';
+import type { CommandScenarioConfig } from './command-scenario.js';
 
 const path=process.argv[2];
 if(!path)throw new Error('Usage: node worker-cli.js CONFIG.json');
@@ -13,7 +13,9 @@ process.once('SIGINT',()=>abort.abort(new Error('Interrupted')));
 process.once('SIGTERM',()=>abort.abort(new Error('Terminated')));
 const runner=new RunnerClient(config.apiURL,config.machineID,token);
 try {
- const scenario=config.commandScenario?new CommandScenario(config.commandScenario):new ObserveScenario(config);
+ const scenario=config.commandScenario
+  ?new (await import('./command-scenario.js')).CommandScenario(config.commandScenario)
+  :new (await import('./observe-scenario.js')).ObserveScenario(config);
  const claimed=await runner.runOnce(scenario,abort.signal);
  console.log(JSON.stringify({status:claimed?'reported':'idle'}));
 } catch(error){
