@@ -1,0 +1,152 @@
+{"Time":"2026-11-13T23:38:50.652720864+08:00","Action":"start","Package":"smartpipe/backend/internal/adminapi"}
+{"Time":"2026-11-13T23:38:50.66325497+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestHealthReportsDatabase"}
+{"Time":"2026-11-13T23:38:50.663289117+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestHealthReportsDatabase","Output":"=== RUN   TestHealthReportsDatabase\n"}
+{"Time":"2026-11-13T23:38:50.676162175+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestHealthReportsDatabase","Output":"--- PASS: TestHealthReportsDatabase (0.01s)\n"}
+{"Time":"2026-11-13T23:38:50.676198474+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestHealthReportsDatabase","Elapsed":0.01}
+{"Time":"2026-11-13T23:38:50.676207752+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestProjectAndCredentialFlow"}
+{"Time":"2026-11-13T23:38:50.676210891+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestProjectAndCredentialFlow","Output":"=== RUN   TestProjectAndCredentialFlow\n"}
+{"Time":"2026-11-13T23:38:50.702585458+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestProjectAndCredentialFlow","Output":"--- PASS: TestProjectAndCredentialFlow (0.03s)\n"}
+{"Time":"2026-11-13T23:38:50.702635973+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestProjectAndCredentialFlow","Elapsed":0.03}
+{"Time":"2026-11-13T23:38:50.702651677+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestAuthRequiredWhenTokenConfigured"}
+{"Time":"2026-11-13T23:38:50.702659648+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestAuthRequiredWhenTokenConfigured","Output":"=== RUN   TestAuthRequiredWhenTokenConfigured\n"}
+{"Time":"2026-11-13T23:38:50.725056583+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestAuthRequiredWhenTokenConfigured","Output":"--- PASS: TestAuthRequiredWhenTokenConfigured (0.02s)\n"}
+{"Time":"2026-11-13T23:38:50.725109262+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestAuthRequiredWhenTokenConfigured","Elapsed":0.02}
+{"Time":"2026-11-13T23:38:50.725121822+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestValidationErrors"}
+{"Time":"2026-11-13T23:38:50.725126959+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestValidationErrors","Output":"=== RUN   TestValidationErrors\n"}
+{"Time":"2026-11-13T23:38:50.745175887+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestValidationErrors","Output":"--- PASS: TestValidationErrors (0.02s)\n"}
+{"Time":"2026-11-13T23:38:50.745221398+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestValidationErrors","Elapsed":0.02}
+{"Time":"2026-11-13T23:38:50.745232956+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestExchangeGitHubAppManifest"}
+{"Time":"2026-11-13T23:38:50.745237602+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestExchangeGitHubAppManifest","Output":"=== RUN   TestExchangeGitHubAppManifest\n"}
+{"Time":"2026-11-13T23:38:50.747239802+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestExchangeGitHubAppManifest","Output":"--- PASS: TestExchangeGitHubAppManifest (0.00s)\n"}
+{"Time":"2026-11-13T23:38:50.74728067+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestExchangeGitHubAppManifest","Elapsed":0}
+{"Time":"2026-11-13T23:38:50.747290819+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestParseGitProgress"}
+{"Time":"2026-11-13T23:38:50.747295566+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestParseGitProgress","Output":"=== RUN   TestParseGitProgress\n"}
+{"Time":"2026-11-13T23:38:50.747406775+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestParseGitProgress","Output":"--- PASS: TestParseGitProgress (0.00s)\n"}
+{"Time":"2026-11-13T23:38:50.747432091+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestParseGitProgress","Elapsed":0}
+{"Time":"2026-11-13T23:38:50.747678411+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestOverallCloneProgress"}
+{"Time":"2026-11-13T23:38:50.747684484+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestOverallCloneProgress","Output":"=== RUN   TestOverallCloneProgress\n"}
+{"Time":"2026-11-13T23:38:50.747704969+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestOverallCloneProgress","Output":"--- PASS: TestOverallCloneProgress (0.00s)\n"}
+{"Time":"2026-11-13T23:38:50.747711061+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestOverallCloneProgress","Elapsed":0}
+{"Time":"2026-11-13T23:38:50.747717776+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestGitHubOAuthHelpers"}
+{"Time":"2026-11-13T23:38:50.747722185+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestGitHubOAuthHelpers","Output":"=== RUN   TestGitHubOAuthHelpers\n"}
+{"Time":"2026-11-13T23:38:50.74869893+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestGitHubOAuthHelpers","Output":"--- PASS: TestGitHubOAuthHelpers (0.00s)\n"}
+{"Time":"2026-11-13T23:38:50.748722177+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestGitHubOAuthHelpers","Elapsed":0}
+{"Time":"2026-11-13T23:38:50.74873327+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestGitHubRepoViewMapsBasicFields"}
+{"Time":"2026-11-13T23:38:50.74873838+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestGitHubRepoViewMapsBasicFields","Output":"=== RUN   TestGitHubRepoViewMapsBasicFields\n"}
+{"Time":"2026-11-13T23:38:50.748744951+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestGitHubRepoViewMapsBasicFields","Output":"--- PASS: TestGitHubRepoViewMapsBasicFields (0.00s)\n"}
+{"Time":"2026-11-13T23:38:50.748750583+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestGitHubRepoViewMapsBasicFields","Elapsed":0}
+{"Time":"2026-11-13T23:38:50.748756469+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestMergeGitHubRepoViewsPrefersAppAndDedupes"}
+{"Time":"2026-11-13T23:38:50.748760891+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestMergeGitHubRepoViewsPrefersAppAndDedupes","Output":"=== RUN   TestMergeGitHubRepoViewsPrefersAppAndDedupes\n"}
+{"Time":"2026-11-13T23:38:50.748768287+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestMergeGitHubRepoViewsPrefersAppAndDedupes","Output":"--- PASS: TestMergeGitHubRepoViewsPrefersAppAndDedupes (0.00s)\n"}
+{"Time":"2026-11-13T23:38:50.748773751+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestMergeGitHubRepoViewsPrefersAppAndDedupes","Elapsed":0}
+{"Time":"2026-11-13T23:38:50.748781858+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestSplitGroupsTrimsAndDropsEmpty"}
+{"Time":"2026-11-13T23:38:50.748786305+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestSplitGroupsTrimsAndDropsEmpty","Output":"=== RUN   TestSplitGroupsTrimsAndDropsEmpty\n"}
+{"Time":"2026-11-13T23:38:50.748795952+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestSplitGroupsTrimsAndDropsEmpty","Output":"--- PASS: TestSplitGroupsTrimsAndDropsEmpty (0.00s)\n"}
+{"Time":"2026-11-13T23:38:50.748801427+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestSplitGroupsTrimsAndDropsEmpty","Elapsed":0}
+{"Time":"2026-11-13T23:38:50.748806111+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestRemoveGroupKeepsOthers"}
+{"Time":"2026-11-13T23:38:50.748821515+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestRemoveGroupKeepsOthers","Output":"=== RUN   TestRemoveGroupKeepsOthers\n"}
+{"Time":"2026-11-13T23:38:50.748830122+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestRemoveGroupKeepsOthers","Output":"--- PASS: TestRemoveGroupKeepsOthers (0.00s)\n"}
+{"Time":"2026-11-13T23:38:50.748835756+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestRemoveGroupKeepsOthers","Elapsed":0}
+{"Time":"2026-11-13T23:38:50.74884063+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestLanxinBotCRUDSyncsGroups"}
+{"Time":"2026-11-13T23:38:50.748844805+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestLanxinBotCRUDSyncsGroups","Output":"=== RUN   TestLanxinBotCRUDSyncsGroups\n"}
+{"Time":"2026-11-13T23:38:50.800497844+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestLanxinBotCRUDSyncsGroups","Output":"--- PASS: TestLanxinBotCRUDSyncsGroups (0.05s)\n"}
+{"Time":"2026-11-13T23:38:50.800545043+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestLanxinBotCRUDSyncsGroups","Elapsed":0.05}
+{"Time":"2026-11-13T23:38:50.800560658+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestCommitLocallyAndRecords"}
+{"Time":"2026-11-13T23:38:50.800567738+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestCommitLocallyAndRecords","Output":"=== RUN   TestCommitLocallyAndRecords\n"}
+{"Time":"2026-11-13T23:38:50.875024212+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestCommitLocallyAndRecords","Output":"--- PASS: TestCommitLocallyAndRecords (0.07s)\n"}
+{"Time":"2026-11-13T23:38:50.875064257+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestCommitLocallyAndRecords","Elapsed":0.07}
+{"Time":"2026-11-13T23:38:50.875073938+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestPushInjectsCredentialWithoutLeaking"}
+{"Time":"2026-11-13T23:38:50.875077663+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestPushInjectsCredentialWithoutLeaking","Output":"=== RUN   TestPushInjectsCredentialWithoutLeaking\n"}
+{"Time":"2026-11-13T23:38:50.94295922+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestPushInjectsCredentialWithoutLeaking","Output":"--- PASS: TestPushInjectsCredentialWithoutLeaking (0.07s)\n"}
+{"Time":"2026-11-13T23:38:50.943006499+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestPushInjectsCredentialWithoutLeaking","Elapsed":0.07}
+{"Time":"2026-11-13T23:38:50.943020578+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestPushWithoutCredentialFailsClosed"}
+{"Time":"2026-11-13T23:38:50.943027506+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestPushWithoutCredentialFailsClosed","Output":"=== RUN   TestPushWithoutCredentialFailsClosed\n"}
+{"Time":"2026-11-13T23:38:50.966517448+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestPushWithoutCredentialFailsClosed","Output":"--- PASS: TestPushWithoutCredentialFailsClosed (0.02s)\n"}
+{"Time":"2026-11-13T23:38:50.966566726+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestPushWithoutCredentialFailsClosed","Elapsed":0.02}
+{"Time":"2026-11-13T23:38:50.966579368+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestProbeModelSuccess"}
+{"Time":"2026-11-13T23:38:50.966584816+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestProbeModelSuccess","Output":"=== RUN   TestProbeModelSuccess\n"}
+{"Time":"2026-11-13T23:38:50.96729667+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestProbeModelSuccess","Output":"--- PASS: TestProbeModelSuccess (0.00s)\n"}
+{"Time":"2026-11-13T23:38:50.967329657+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestProbeModelSuccess","Elapsed":0}
+{"Time":"2026-11-13T23:38:50.967345037+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestProbeModelSurfacesUpstreamError"}
+{"Time":"2026-11-13T23:38:50.967349615+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestProbeModelSurfacesUpstreamError","Output":"=== RUN   TestProbeModelSurfacesUpstreamError\n"}
+{"Time":"2026-11-13T23:38:50.967832986+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestProbeModelSurfacesUpstreamError","Output":"--- PASS: TestProbeModelSurfacesUpstreamError (0.00s)\n"}
+{"Time":"2026-11-13T23:38:50.967853+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestProbeModelSurfacesUpstreamError","Elapsed":0}
+{"Time":"2026-11-13T23:38:50.967863495+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestParseCodexModelConfig"}
+{"Time":"2026-11-13T23:38:50.967868455+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestParseCodexModelConfig","Output":"=== RUN   TestParseCodexModelConfig\n"}
+{"Time":"2026-11-13T23:38:50.96819693+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestParseCodexModelConfig","Output":"--- PASS: TestParseCodexModelConfig (0.00s)\n"}
+{"Time":"2026-11-13T23:38:50.968208553+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestParseCodexModelConfig","Elapsed":0}
+{"Time":"2026-11-13T23:38:50.968214653+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestParseCodexModelConfigRejectsInvalidProvider"}
+{"Time":"2026-11-13T23:38:50.968218606+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestParseCodexModelConfigRejectsInvalidProvider","Output":"=== RUN   TestParseCodexModelConfigRejectsInvalidProvider\n"}
+{"Time":"2026-11-13T23:38:50.968260536+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestParseCodexModelConfigRejectsInvalidProvider","Output":"--- PASS: TestParseCodexModelConfigRejectsInvalidProvider (0.00s)\n"}
+{"Time":"2026-11-13T23:38:50.968267724+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestParseCodexModelConfigRejectsInvalidProvider","Elapsed":0}
+{"Time":"2026-11-13T23:38:50.968272134+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestModelConfigImportAPI"}
+{"Time":"2026-11-13T23:38:50.968275573+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestModelConfigImportAPI","Output":"=== RUN   TestModelConfigImportAPI\n"}
+{"Time":"2026-11-13T23:38:51.007203309+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestModelConfigImportAPI","Output":"--- PASS: TestModelConfigImportAPI (0.04s)\n"}
+{"Time":"2026-11-13T23:38:51.00724998+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestModelConfigImportAPI","Elapsed":0.04}
+{"Time":"2026-11-13T23:38:51.00726387+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestModelConfigLocalAPI"}
+{"Time":"2026-11-13T23:38:51.007276176+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestModelConfigLocalAPI","Output":"=== RUN   TestModelConfigLocalAPI\n"}
+{"Time":"2026-11-13T23:38:51.051061232+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestModelConfigLocalAPI","Output":"--- PASS: TestModelConfigLocalAPI (0.04s)\n"}
+{"Time":"2026-11-13T23:38:51.051122411+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestModelConfigLocalAPI","Elapsed":0.04}
+{"Time":"2026-11-13T23:38:51.051141182+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestModelConfigLocalPreviewReportsMissingFile"}
+{"Time":"2026-11-13T23:38:51.051150126+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestModelConfigLocalPreviewReportsMissingFile","Output":"=== RUN   TestModelConfigLocalPreviewReportsMissingFile\n"}
+{"Time":"2026-11-13T23:38:51.072798086+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestModelConfigLocalPreviewReportsMissingFile","Output":"--- PASS: TestModelConfigLocalPreviewReportsMissingFile (0.02s)\n"}
+{"Time":"2026-11-13T23:38:51.072838371+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestModelConfigLocalPreviewReportsMissingFile","Elapsed":0.02}
+{"Time":"2026-11-13T23:38:51.072848441+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestReadLocalCodexConfigUsesEnvPath"}
+{"Time":"2026-11-13T23:38:51.072853301+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestReadLocalCodexConfigUsesEnvPath","Output":"=== RUN   TestReadLocalCodexConfigUsesEnvPath\n"}
+{"Time":"2026-11-13T23:38:51.072897649+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestReadLocalCodexConfigUsesEnvPath","Output":"--- PASS: TestReadLocalCodexConfigUsesEnvPath (0.00s)\n"}
+{"Time":"2026-11-13T23:38:51.072907207+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestReadLocalCodexConfigUsesEnvPath","Elapsed":0}
+{"Time":"2026-11-13T23:38:51.072914692+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestLocalConfigCandidatesUseIsolatedHome"}
+{"Time":"2026-11-13T23:38:51.072919131+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestLocalConfigCandidatesUseIsolatedHome","Output":"=== RUN   TestLocalConfigCandidatesUseIsolatedHome\n"}
+{"Time":"2026-11-13T23:38:51.072988571+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestLocalConfigCandidatesUseIsolatedHome","Output":"--- PASS: TestLocalConfigCandidatesUseIsolatedHome (0.00s)\n"}
+{"Time":"2026-11-13T23:38:51.072995048+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestLocalConfigCandidatesUseIsolatedHome","Elapsed":0}
+{"Time":"2026-11-13T23:38:51.073001393+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestEventTicketIsSingleUseAndRunBound"}
+{"Time":"2026-11-13T23:38:51.073005629+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestEventTicketIsSingleUseAndRunBound","Output":"=== RUN   TestEventTicketIsSingleUseAndRunBound\n"}
+{"Time":"2026-11-13T23:38:51.073012146+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestEventTicketIsSingleUseAndRunBound","Output":"--- PASS: TestEventTicketIsSingleUseAndRunBound (0.00s)\n"}
+{"Time":"2026-11-13T23:38:51.073017139+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestEventTicketIsSingleUseAndRunBound","Elapsed":0}
+{"Time":"2026-11-13T23:38:51.073022244+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestEventTicketExpires"}
+{"Time":"2026-11-13T23:38:51.073026346+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestEventTicketExpires","Output":"=== RUN   TestEventTicketExpires\n"}
+{"Time":"2026-11-13T23:38:51.07303262+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestEventTicketExpires","Output":"--- PASS: TestEventTicketExpires (0.00s)\n"}
+{"Time":"2026-11-13T23:38:51.073037636+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestEventTicketExpires","Elapsed":0}
+{"Time":"2026-11-13T23:38:51.073042224+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestSyncLocalCloneFastForwardsFromRemote"}
+{"Time":"2026-11-13T23:38:51.073046344+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestSyncLocalCloneFastForwardsFromRemote","Output":"=== RUN   TestSyncLocalCloneFastForwardsFromRemote\n"}
+{"Time":"2026-11-13T23:38:51.185959858+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestSyncLocalCloneFastForwardsFromRemote","Output":"--- PASS: TestSyncLocalCloneFastForwardsFromRemote (0.11s)\n"}
+{"Time":"2026-11-13T23:38:51.186015883+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestSyncLocalCloneFastForwardsFromRemote","Elapsed":0.11}
+{"Time":"2026-11-13T23:38:51.186026266+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestSyncLocalCloneRejectsMissingRepo"}
+{"Time":"2026-11-13T23:38:51.186030967+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestSyncLocalCloneRejectsMissingRepo","Output":"=== RUN   TestSyncLocalCloneRejectsMissingRepo\n"}
+{"Time":"2026-11-13T23:38:51.186040625+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestSyncLocalCloneRejectsMissingRepo","Output":"--- PASS: TestSyncLocalCloneRejectsMissingRepo (0.00s)\n"}
+{"Time":"2026-11-13T23:38:51.186045763+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestSyncLocalCloneRejectsMissingRepo","Elapsed":0}
+{"Time":"2026-11-13T23:38:51.186052805+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopCommandCLI"}
+{"Time":"2026-11-13T23:38:51.186057119+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopCommandCLI","Output":"=== RUN   TestDesktopCommandCLI\n"}
+{"Time":"2026-11-13T23:38:51.794348361+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopCommandCLI","Output":"--- PASS: TestDesktopCommandCLI (0.61s)\n"}
+{"Time":"2026-11-13T23:38:51.794388656+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopCommandCLI","Elapsed":0.61}
+{"Time":"2026-11-13T23:38:51.794397704+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestMachineEndpointsNeverUseAdminDevOpen"}
+{"Time":"2026-11-13T23:38:51.794400448+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestMachineEndpointsNeverUseAdminDevOpen","Output":"=== RUN   TestMachineEndpointsNeverUseAdminDevOpen\n"}
+{"Time":"2026-11-13T23:38:51.794680767+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestMachineEndpointsNeverUseAdminDevOpen","Output":"--- PASS: TestMachineEndpointsNeverUseAdminDevOpen (0.00s)\n"}
+{"Time":"2026-11-13T23:38:51.794690101+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestMachineEndpointsNeverUseAdminDevOpen","Elapsed":0}
+{"Time":"2026-11-13T23:38:51.794694594+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopMachineHTTPProtocol"}
+{"Time":"2026-11-13T23:38:51.794697176+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopMachineHTTPProtocol","Output":"=== RUN   TestDesktopMachineHTTPProtocol\n"}
+{"Time":"2026-11-13T23:38:51.825012784+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopMachineHTTPProtocol","Output":"--- PASS: TestDesktopMachineHTTPProtocol (0.03s)\n"}
+{"Time":"2026-11-13T23:38:51.825039215+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopMachineHTTPProtocol","Elapsed":0.03}
+{"Time":"2026-11-13T23:38:51.825044684+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopRecoveryHTTPRequiresConfirmationAndCurrentGeneration"}
+{"Time":"2026-11-13T23:38:51.825046454+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopRecoveryHTTPRequiresConfirmationAndCurrentGeneration","Output":"=== RUN   TestDesktopRecoveryHTTPRequiresConfirmationAndCurrentGeneration\n"}
+{"Time":"2026-11-13T23:38:51.845294994+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopRecoveryHTTPRequiresConfirmationAndCurrentGeneration","Output":"--- PASS: TestDesktopRecoveryHTTPRequiresConfirmationAndCurrentGeneration (0.02s)\n"}
+{"Time":"2026-11-13T23:38:51.845329093+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopRecoveryHTTPRequiresConfirmationAndCurrentGeneration","Elapsed":0.02}
+{"Time":"2026-11-13T23:38:51.845353981+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestTestLabRequiresAdmin"}
+{"Time":"2026-11-13T23:38:51.845360129+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestTestLabRequiresAdmin","Output":"=== RUN   TestTestLabRequiresAdmin\n"}
+{"Time":"2026-11-13T23:38:51.845609361+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestTestLabRequiresAdmin","Output":"--- PASS: TestTestLabRequiresAdmin (0.00s)\n"}
+{"Time":"2026-11-13T23:38:51.845618639+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestTestLabRequiresAdmin","Elapsed":0}
+{"Time":"2026-11-13T23:38:51.845626843+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestTestLabRejectsMalformedReport"}
+{"Time":"2026-11-13T23:38:51.845631335+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestTestLabRejectsMalformedReport","Output":"=== RUN   TestTestLabRejectsMalformedReport\n"}
+{"Time":"2026-11-13T23:38:51.845851606+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestTestLabRejectsMalformedReport","Output":"--- PASS: TestTestLabRejectsMalformedReport (0.00s)\n"}
+{"Time":"2026-11-13T23:38:51.845859034+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestTestLabRejectsMalformedReport","Elapsed":0}
+{"Time":"2026-11-13T23:38:51.845866226+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopTypeScriptWorker"}
+{"Time":"2026-11-13T23:38:51.845870498+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopTypeScriptWorker","Output":"=== RUN   TestDesktopTypeScriptWorker\n"}
+{"Time":"2026-11-13T23:38:52.07016665+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopTypeScriptWorker","Output":"--- PASS: TestDesktopTypeScriptWorker (0.22s)\n"}
+{"Time":"2026-11-13T23:38:52.070197029+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopTypeScriptWorker","Elapsed":0.22}
+{"Time":"2026-11-13T23:38:52.070206544+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopTypeScriptWorkerCancellation"}
+{"Time":"2026-11-13T23:38:52.070209353+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopTypeScriptWorkerCancellation","Output":"=== RUN   TestDesktopTypeScriptWorkerCancellation\n"}
+{"Time":"2026-11-13T23:38:52.264303826+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopTypeScriptWorkerCancellation","Output":"--- PASS: TestDesktopTypeScriptWorkerCancellation (0.19s)\n"}
+{"Time":"2026-11-13T23:38:52.264348832+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopTypeScriptWorkerCancellation","Elapsed":0.19}
+{"Time":"2026-11-13T23:38:52.264361164+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Output":"PASS\n"}
+{"Time":"2026-11-13T23:38:52.265967607+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Output":"ok  \tsmartpipe/backend/internal/adminapi\t1.613s\n"}
+{"Time":"2026-11-13T23:38:52.265992274+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Elapsed":1.613}
