@@ -71,7 +71,7 @@ export function ReleaseV2SettingsPage({ notify }: { notify: Notify }) {
     setServiceSecrets({});
   };
 
-  const persist = async (label: string, next: ReleaseV2Settings, cred?: { kind: string; name: string; value: string; metadata?: Record<string, unknown> }) => {
+  const persist = async (label: string, next: ReleaseV2Settings, cred?: { kind: string; name: string; value: string; metadata?: Record<string, unknown> }): Promise<boolean> => {
     setBusy(true);
     setError("");
     try {
@@ -83,24 +83,45 @@ export function ReleaseV2SettingsPage({ notify }: { notify: Notify }) {
       setSecrets({ s3Secret: "", s3Access: "" });
       setServiceSecrets({});
       await load();
+      return true;
     } catch (e) {
       const message = e instanceof ApiError ? e.message : String(e);
       setError(message);
       notify(label + " 保存失败：" + message, "error");
+      return false;
     } finally {
       setBusy(false);
     }
   };
 
-  const saveUpdate = async () => {
+  const hasCredential = (kind: string, name: string) =>
+    creds.some((c) => c.kind === kind && c.name === name.trim() && !c.project_id);
+
+  const saveUpdate = async (): Promise<boolean> => {
     const services = form.update_services.filter((s) => s.url.trim() !== "");
     for (const [index, service] of form.update_services.entries()) {
-      const secret = serviceSecrets[index]?.trim();
-      if (secret && service.credential.trim()) {
-        await saveCredential(creds, "release_update", service.credential.trim(), secret);
+      if (service.url.trim() === "") continue;
+      const name = service.credential.trim();
+      const secret = serviceSecrets[index]?.trim() ?? "";
+      if (!name) {
+        notify(`升级服务 ${service.name || index + 1} 需要填写凭据名`, "error");
+        return false;
+      }
+      if (!secret && !hasCredential("release_update", name)) {
+        notify(`凭据 ${name} 还没有保存过管理令牌，请在“管理令牌”里填写后再保存`, "error");
+        return false;
+      }
+      if (secret) {
+        await saveCredential(creds, "release_update", name, secret);
       }
     }
-    await persist("升级服务", { ...form, update_services: services });
+    return persist("升级服务", { ...form, update_services: services });
+  };
+
+  // 测试使用服务端已保存的配置，所以先保存当前表单再探测。
+  const testUpdate = async (name = "") => {
+    if (!(await saveUpdate())) return;
+    await probe("update", name);
   };
 
   const saveS3 = () =>
@@ -144,7 +165,7 @@ export function ReleaseV2SettingsPage({ notify }: { notify: Notify }) {
         <header className="card-head">
           <div>
             <h3>升级服务（syntropy_update）</h3>
-            <p className="muted">可以配置多台：stage 会把同一份制品灌到每一台，promote 会逐台推进渠道并回读校验。</p>
+            <p className="muted">可以配置多台：stage 会把同一份制品灌到每一台，promote 会逐台推进渠道并回读校验。管理令牌只在首次配置或轮换时填写；测试会先保存当前表单，再用令牌校验。</p>
           </div>
           <button className="btn" onClick={addService} disabled={busy}>＋ 添加升级服务</button>
         </header>
@@ -172,7 +193,7 @@ export function ReleaseV2SettingsPage({ notify }: { notify: Notify }) {
                 管理令牌
                 <input
                   type="password"
-                  placeholder="留空表示不修改"
+                  placeholder={hasCredential("release_update", service.credential) ? "留空表示不修改" : "首次配置必须填写"}
                   value={serviceSecrets[index] ?? ""}
                   onChange={(e) => setServiceSecrets((s) => ({ ...s, [index]: e.target.value }))}
                 />
@@ -182,7 +203,7 @@ export function ReleaseV2SettingsPage({ notify }: { notify: Notify }) {
                   <input type="checkbox" checked={service.enabled} onChange={(e) => patchService(index, { enabled: e.target.checked })} />
                   启用
                 </label>
-                <button className="btn" disabled={busy || probing !== ""} onClick={() => void probe("update", service.name)}>
+                <button className="btn" disabled={busy || probing !== ""} onClick={() => void testUpdate(service.name)}>
                   {probing === "update:" + service.name ? "测试中…" : "测试"}
                 </button>
                 <button className="btn danger-ghost" disabled={busy} onClick={() => removeService(index)}>移除</button>
@@ -194,7 +215,7 @@ export function ReleaseV2SettingsPage({ notify }: { notify: Notify }) {
         <p className="muted small">{credLine("release_update")}</p>
         <div className="actions">
           <button className="btn primary" disabled={busy} onClick={() => void saveUpdate()}>保存升级服务</button>
-          <button className="btn" disabled={busy || probing !== "" || form.update_services.length === 0} onClick={() => void probe("update")}>
+          <button className="btn" disabled={busy || probing !== "" || form.update_services.length === 0} onClick={() => void testUpdate("")}>
             {probing === "update:" ? "测试中…" : "全部测试"}
           </button>
         </div>

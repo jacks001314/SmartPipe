@@ -95,7 +95,10 @@ func (a *API) probeUpdateService(ctx context.Context, c iris.Context, only strin
 				entry.Detail = fmt.Sprintf("/v1/pubkey 返回 HTTP %d", resp.StatusCode)
 			} else if strings.TrimSpace(service.Credential) == "" {
 				entry.OK = true
-				entry.Detail = "服务可达；还没有配置管理令牌"
+				entry.Detail = "服务可达；还没有填写凭据名和管理令牌"
+			} else if _, secret, _, cerr := a.store.ResolveCredentialByName(ctx, service.Credential); cerr != nil || strings.TrimSpace(secret) == "" {
+				entry.OK = true
+				entry.Detail = fmt.Sprintf("服务可达；凭据 %s 还没有保存管理令牌，填写后保存再测试", service.Credential)
 			} else {
 				update := &releasepublish.UpdateClient{
 					BaseURL: service.URL, Creds: settingsCredentialProvider{store: a.store}, HTTP: adminClient,
