@@ -10,7 +10,7 @@ const npm=process.platform==='win32'?'npm.cmd':'npm';
 const stages=[
  {name:'runner',cwd:'test-runner',command:npm,args:['test']},
  {name:'web',cwd:'web',command:npm,args:['run','build']},
- {name:'backend',cwd:'backend',command:'go',args:['test','./internal/testlab','./internal/store','./internal/adminapi','./internal/releasemcp','-json','-count=1']},
+ {name:'backend',cwd:'backend',command:'go',args:['test','-p=1','./internal/testdb','./internal/patch','./internal/testlab','./internal/store','./internal/adminapi','./internal/releasemcp','-json','-count=1']},
 ];
 const results=[];
 for(const stage of stages){
@@ -19,7 +19,7 @@ for(const stage of stages){
   // Windows npm.cmd requires cmd.exe; all shell text here is fixed, not input.
   const windowsNpm=process.platform==='win32'&&stage.command==='npm.cmd';
   const child=spawn(windowsNpm?'cmd.exe':stage.command,windowsNpm?['/d','/s','/c',stage.args[0]==='test'?'npm.cmd test':'npm.cmd run build']:stage.args,{
-   cwd:join(root,stage.cwd),env:{...process.env,GOSUMDB:process.env.GOSUMDB==='off'?'sum.golang.org':process.env.GOSUMDB??'sum.golang.org'},windowsHide:true,
+   cwd:join(root,stage.cwd),env:{...process.env,SMARTPIPE_WORKER_JS:join(root,'test-runner','dist','src','worker.js'),GOSUMDB:process.env.GOSUMDB==='off'?'sum.golang.org':process.env.GOSUMDB??'sum.golang.org'},windowsHide:true,
    stdio:['ignore','pipe','pipe']
   });
   let stdout='',stderr='';

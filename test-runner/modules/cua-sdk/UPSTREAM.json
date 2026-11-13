@@ -1,0 +1,127 @@
+{
+  "commit": "84b5b53f1738ef154bca3b3bd8bb40f4f3378510",
+  "originalFiles": [
+    {
+      "source": "packages/cua-driver/typescript/LICENSE.md",
+      "sha256": "c0779290c1d4783169aa3dbfb55feb505e563ef8a004bbf55298ceffcfbda8d9"
+    },
+    {
+      "source": "packages/cua-driver/typescript/NOTICE.md",
+      "sha256": "7feb22a97c227f3c9ecb257e7bece88951d50e9a1109a5f8e554f448facb786e"
+    },
+    {
+      "source": "packages/cua-driver/typescript/computer-use/README.md",
+      "sha256": "749f8340a58b8b2485d96e84620bfaeb807c82a642f8d242e107ae89707827e1"
+    },
+    {
+      "source": "packages/cua-driver/typescript/computer-use/app.js",
+      "sha256": "a97badf1fca6eceb132d3911faa9899e955391a0e0526ebb0f39cb8fec1bca31"
+    },
+    {
+      "source": "packages/cua-driver/typescript/computer-use/documentation.js",
+      "sha256": "b59acb83c3c9fdb6f2304433e1d9919750a1b0850af7c8607791a10f91b6a2a5"
+    },
+    {
+      "source": "packages/cua-driver/typescript/computer-use/index.d.ts",
+      "sha256": "6deec3ab43cf99482bfc07fd3d04de8cefff121f60b961e7228f9a2586734507"
+    },
+    {
+      "source": "packages/cua-driver/typescript/computer-use/index.js",
+      "sha256": "f9dac814653b6274d1fbb6159edadc75b318f690319adf69579c7058276b8ebe"
+    },
+    {
+      "source": "packages/cua-driver/typescript/computer-use/interface.json",
+      "sha256": "238f2b90a85d77f43f3eb84e55b7ddbd137c6a374fb01fde5b9a5c8d8a0eeda7"
+    },
+    {
+      "source": "packages/cua-driver/typescript/computer-use/runtime.d.ts",
+      "sha256": "8d8b806553923e88d18252817b8cc9acffcd65c1c60c887906217eca5ddfb681"
+    },
+    {
+      "source": "packages/cua-driver/typescript/computer-use/runtime.js",
+      "sha256": "bb9d717539add123c6249a86ce61ed856c41ba1b8234dd49e22f4fd2226b7e7b"
+    },
+    {
+      "source": "packages/cua-driver/typescript/computer-use/test/computer-use.test.mjs",
+      "sha256": "47c667c784567e8fae1363260e1a5b2d7bc9de07d2a1cb804494628f4327d3af"
+    },
+    {
+      "source": "packages/cua-driver/typescript/computer-use/test/daemon-integration.test.mjs",
+      "sha256": "c87a08fa59182ca8a3b9d1cf1a5dd9b982ed3b73b094926786b47d44efb25ff5"
+    },
+    {
+      "source": "packages/cua-driver/typescript/computer-use/test/platform.test.mjs",
+      "sha256": "9f7f5abfc2a36de28f594aa6c975ca86227b40e3ff038878efc401cd041935ea"
+    },
+    {
+      "source": "packages/cua-driver/typescript/computer-use/test/runtime.test.mjs",
+      "sha256": "4521cf60b0b68f5a1db2c3143c0e57f1501fe6812a2d3da5d53daaf7bc387dce"
+    },
+    {
+      "source": "packages/cua-driver/typescript/computer-use/test/tsconfig.json",
+      "sha256": "6290b4650f53563e2d61ea5e2de97349ca25f92b91b479996f95dfee204ce5c2"
+    },
+    {
+      "source": "packages/cua-driver/typescript/computer-use/test/types.test.ts",
+      "sha256": "a2f12d60a771c28952eb17cbc0cec07dd22020f1a85006b4b644c2adb07aaea9"
+    },
+    {
+      "source": "packages/cua-driver/typescript/package.json",
+      "sha256": "d24eb759a9d5c838a42a3ff9fa8df7a6db7a5246544cb9ec451268972a73dcc9"
+    },
+    {
+      "source": "packages/cua-driver/typescript/scripts/install-native.mjs",
+      "sha256": "8338263c934d99357840d1bc7cf6e99f8f8740a42739ba99c9f133c9886794e0"
+    },
+    {
+      "source": "packages/cua-driver/typescript/src/electron.ts",
+      "sha256": "ee9294be49e99cf887615e98c42e9817e2279ce8738335e1ccf663627cdcb37c"
+    },
+    {
+      "source": "packages/cua-driver/typescript/src/embedded.ts",
+      "sha256": "500280a7929f20ef1cddd025b1a67f2e15b680d628ab643334549d2dd3adcbdc"
+    },
+    {
+      "source": "packages/cua-driver/typescript/src/index.ts",
+      "sha256": "af77faa0d3f2144fcc9867d3192b97d6d8ba6cbaa8b1edc284b07777fe7c4e17"
+    },
+    {
+      "source": "packages/cua-driver/typescript/src/native-assets.ts",
+      "sha256": "e77d1c4387e5fd7f42a1a1e0d612838dd2b0343326abb4712d3c0e652a709432"
+    },
+    {
+      "source": "packages/cua-driver/typescript/src/native/cua_driver_contract-ffi.ts",
+      "sha256": "ff20fedb744e9e3db032b3c7bf87ee2a580dde67a3ace28e788eeec82ac259f4"
+    },
+    {
+      "source": "packages/cua-driver/typescript/src/native/cua_driver_contract.ts",
+      "sha256": "3fdae0285d5008a4f0f79df4abe0ad5d4ad9570dd283ef59ceab3ee48e71ef2c"
+    },
+    {
+      "source": "packages/cua-driver/typescript/src/native/cua_driver_sdk-ffi.ts",
+      "sha256": "e5d219b30c378572f0653853f1231106919c07fb3c4200cf2bf73142d4a61a05"
+    },
+    {
+      "source": "packages/cua-driver/typescript/src/native/cua_driver_sdk.ts",
+      "sha256": "1ccc57df6d90f1e2b38805be98a055716b4ece605dda5990690f746da1b93017"
+    },
+    {
+      "source": "packages/cua-driver/typescript/src/native/index.ts",
+      "sha256": "0b03ec4b1a17162a81f26cd4042e4fa8bea9a10b9b5def0878567748ce11ff12"
+    },
+    {
+      "source": "packages/cua-driver/typescript/src/native/node-runtime.ts",
+      "sha256": "1ed5324671596c0d5bdca903199946306749e5c42013b8cf1463bb93618721bf"
+    },
+    {
+      "source": "packages/cua-driver/typescript/tsconfig.json",
+      "sha256": "969e6224c8eebddaca5e780789c5a64139e351ce3f14fba864c336291efae9d8"
+    }
+  ],
+  "changes": [
+    "Private @smartpipe/cua-sdk package",
+    "Removed browser runtime methods and browser-use dependency",
+    "Disabled implicit native download postinstall; explicit provisioning required"
+  ],
+  "status": "source extraction; declarations and tests require adaptation"
+}

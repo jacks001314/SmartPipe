@@ -1,3 +1,4 @@
+import { runtimeEnv } from './runtime-env.js';
 import { createReadStream } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { isAbsolute, join } from 'node:path';
@@ -36,10 +37,7 @@ export class ObserveScenario implements Scenario {
   });
   this.client=new Client({name:'smartpipe-observer',version:'0.1.0'});
   // The machine API token must not be inherited by the REPL child.
-  const env: Record<string,string>={};
-  for(const key of ['PATH','SystemRoot','WINDIR','TEMP','TMP','HOME','USERPROFILE','LOCALAPPDATA','APPDATA','DISPLAY','XAUTHORITY','DBUS_SESSION_BUS_ADDRESS','XDG_RUNTIME_DIR']){
-   if(process.env[key])env[key]=process.env[key]!;
-  }
+ const env = runtimeEnv();
   const stop=()=>{void this.client?.close();};
   signal.addEventListener('abort',stop,{once:true});
   try {

@@ -1,3 +1,4 @@
+import { runtimeEnv } from './runtime-env.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -39,7 +40,7 @@ server.onclose = () => { void close(); };
 const deadline = setTimeout(() => { void close(); }, 20 * 60 * 1000);
 deadline.unref();
 try {
-  await client.connect(new StdioClientTransport({ command, args: args.slice(separator + 2), stderr: 'inherit' }));
+  await client.connect(new StdioClientTransport({ command, args: args.slice(separator + 2), env: runtimeEnv(), stderr: 'inherit' }));
   const tools: Awaited<ReturnType<Client['listTools']>>['tools'] = [];
   let cursor: string | undefined;
   do {

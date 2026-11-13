@@ -1,3 +1,4 @@
+import { runtimeEnv } from './runtime-env.js';
 import { access, realpath } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -18,10 +19,7 @@ export async function preflight(config: PreflightConfig): Promise<PreflightResul
  if(!check('absolute_executable',isAbsolute(config.command))) return result;
  try { await access(await realpath(config.command)); } catch { check('executable_exists',false); return result; }
  check('executable_exists',true);
- const env: Record<string,string>={};
- for(const key of ['PATH','SystemRoot','WINDIR','TEMP','TMP','HOME','USERPROFILE','LOCALAPPDATA','APPDATA']){
-  if(process.env[key]) env[key]=process.env[key]!;
- }
+ const env = runtimeEnv();
  const client=new Client({name:'smartpipe-preflight',version:'0.1.0'});
  const transport=new StdioClientTransport({command:config.command,args:config.args,env,stderr:'ignore'});
  const abort=new AbortController();

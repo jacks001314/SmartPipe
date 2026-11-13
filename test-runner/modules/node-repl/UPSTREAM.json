@@ -1,0 +1,139 @@
+{
+  "repository": "https://github.com/QwenLM/qwen-code",
+  "commit": "84b5b53f1738ef154bca3b3bd8bb40f4f3378510",
+  "scope": "Node REPL only; excludes desktop-relay and native test fixtures",
+  "originalFiles": [
+    {
+      "source": "packages/node-repl/src/cell-bindings.ts",
+      "sha256": "b3f06dd940379e7d07a65e097fa0cf35a97362f89fb22b25fad6f9f33c3e8436"
+    },
+    {
+      "source": "packages/node-repl/src/cell-transform.test.ts",
+      "sha256": "66f29ec2d81a054091b21df37e56f7b3384bb8f27d9ca9156a0b4a972da737de"
+    },
+    {
+      "source": "packages/node-repl/src/cell-transform.ts",
+      "sha256": "ea634791e0d6f58e641cff3f992f698c7cafe90601060ac2b4bb9267c1923e7c"
+    },
+    {
+      "source": "packages/node-repl/src/debug-log.test.ts",
+      "sha256": "6f5002755e050a0afa35df84d8e32f5f795d1652e1e50787692a685c553bc13b"
+    },
+    {
+      "source": "packages/node-repl/src/debug-log.ts",
+      "sha256": "817d781688e548e90028ef98f2ff00ef3e5e4526d81da281d9d662a2a8962c47"
+    },
+    {
+      "source": "packages/node-repl/src/index.ts",
+      "sha256": "3c142b735c98add1e91d763569db3fa4df6075026695df9e4f637c9e81abcbbf"
+    },
+    {
+      "source": "packages/node-repl/src/kernel-manager.test.ts",
+      "sha256": "d6650549ae4d6f9a225c3b7d88603c4603827bd8a6e492695800dc6810bcfb38"
+    },
+    {
+      "source": "packages/node-repl/src/kernel-manager.ts",
+      "sha256": "2ff1c243f819727b59f8386d0c110bb84bd2dedb197611229ad7520fd05b91f6"
+    },
+    {
+      "source": "packages/node-repl/src/mcp-server.test.ts",
+      "sha256": "ee769b6011c2f54f0005946eb38f83afa1d67188441b140c63f126bb67208fc6"
+    },
+    {
+      "source": "packages/node-repl/src/mcp-server.ts",
+      "sha256": "10df4d7501823c57b02a67b8b2c65b48f24be4164a345cf83968b4e923ad9890"
+    },
+    {
+      "source": "packages/node-repl/src/node-repl.lines.test.ts",
+      "sha256": "994f242bd7b0d8b089055581eedcf7fed16e30d958c653cf96560bfe319b3c8f"
+    },
+    {
+      "source": "packages/node-repl/src/node-repl.napi.test.ts",
+      "sha256": "99b6625032ada6107fa4eb6eafade61c45568abbcb327af0358bf34c98620db0"
+    },
+    {
+      "source": "packages/node-repl/src/node-repl.reload.test.ts",
+      "sha256": "c62523e4ed4cbeb0c9f4cdd8cf2914fec68cae574b34981c76218d0f9003a708"
+    },
+    {
+      "source": "packages/node-repl/src/node-repl.scale.test.ts",
+      "sha256": "ae061d8538cb215c24a3b7ec9ad8b5000d35b5dde4990c8657775649c8b5bc31"
+    },
+    {
+      "source": "packages/node-repl/src/node-repl.semantics.test.ts",
+      "sha256": "9669ea79325756fd3704da08876f80b0b5e3a93221f9d32ff6b7b43ff048894d"
+    },
+    {
+      "source": "packages/node-repl/src/output-adapter.test.ts",
+      "sha256": "99c3412aa17fbaa44bbc8db4cba6777bc70a1b6af771db731d58cd3cfa26e33f"
+    },
+    {
+      "source": "packages/node-repl/src/output-adapter.ts",
+      "sha256": "7c719365de4e45327b889bd4dd8e7a3715aac2f81642e6b697b4631ff0adf837"
+    },
+    {
+      "source": "packages/node-repl/src/protocol.test.ts",
+      "sha256": "428b4a98bb183c724df2d9c1546975b759476b20a4350c83b601b2bbe0bf4556"
+    },
+    {
+      "source": "packages/node-repl/src/protocol.ts",
+      "sha256": "2f151abeb158a0b5302239127db716f4b6f83aa4c6b61e08b93af45d8e39bd67"
+    },
+    {
+      "source": "packages/node-repl/src/runtime/kernel.mjs",
+      "sha256": "122962ea320a2a9707c9cb99273c4b8ec4a3cddfe5a7637c1d3b15e74c39b0fc"
+    },
+    {
+      "source": "packages/node-repl/src/runtime/module-loader.mjs",
+      "sha256": "ccde86160bf63fd193b4fda134d750ae6b454ba67fdbe9148b64fca774530af2"
+    },
+    {
+      "source": "packages/node-repl/src/security-policy.test.ts",
+      "sha256": "269634e14ea1d9e91b417ba5008585e6d05315d9196fe3abc1dd3fe521a97e5c"
+    },
+    {
+      "source": "packages/node-repl/src/security-policy.ts",
+      "sha256": "a72e5213357caa51d7999c1a09139f11a2c252e65275049ed342e6ff5e9b82b7"
+    },
+    {
+      "source": "packages/node-repl/src/tokenizer.test.ts",
+      "sha256": "ddce0e567209b36d6aa84390e7aac717e813e88e0cb5e3a8438c0b79e8f7fbf8"
+    },
+    {
+      "source": "packages/node-repl/src/tokenizer.ts",
+      "sha256": "c1e1491207cc0526bc302dac64998f28045140c859bcf271f42414621cf71d8c"
+    },
+    {
+      "source": "packages/node-repl/src/win-path.test.ts",
+      "sha256": "ffae715dbdec3bdb78ebbefe01ebae4c623c51d34713d8d0cab8fa20c68a1828"
+    },
+    {
+      "source": "packages/node-repl/src/win-path.ts",
+      "sha256": "ad8294a8451576b2525b4eaa987433bccf5d331cee6164fe09f903d6cbcccc61"
+    },
+    {
+      "source": "packages/node-repl/LICENSE",
+      "sha256": "6ad909ab730416ad472f9153fa1d3679321012883c1c6d38f803aab402e40a40"
+    },
+    {
+      "source": "packages/node-repl/build.mjs",
+      "sha256": "6a0802b36f5fd9e1418d7733203971d89f46e93345db07c5dcf734ba79f3c940"
+    },
+    {
+      "source": "packages/node-repl/tsconfig.json",
+      "sha256": "20f1cac4c1bbd838a4f990a7625197cc68b15b626ffc727bd603113a7a6984d4"
+    },
+    {
+      "source": "packages/node-repl/tsconfig.build.json",
+      "sha256": "1690e0fcabe267c4911ace339c407630cf3b969899cc555f170f967404f43902"
+    },
+    {
+      "source": "packages/node-repl/package.json",
+      "sha256": "c02be41f619130a8fe5b555e8b6b270d58ab4a6611d73e01f16a3f3400c0257c"
+    }
+  ],
+  "modifications": [
+    "Renamed package to @smartpipe/node-repl, private",
+    "Removed desktop-relay CLI dispatch"
+  ]
+}
