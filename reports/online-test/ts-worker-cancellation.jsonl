@@ -1,0 +1,16 @@
+{"Time":"2026-11-13T15:41:59.349858173+08:00","Action":"start","Package":"smartpipe/backend/internal/adminapi"}
+{"Time":"2026-11-13T15:41:59.362863846+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopMachineHTTPProtocol"}
+{"Time":"2026-11-13T15:41:59.362904397+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopMachineHTTPProtocol","Output":"=== RUN   TestDesktopMachineHTTPProtocol\n"}
+{"Time":"2026-11-13T15:41:59.380520515+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopMachineHTTPProtocol","Output":"--- PASS: TestDesktopMachineHTTPProtocol (0.02s)\n"}
+{"Time":"2026-11-13T15:41:59.380548791+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopMachineHTTPProtocol","Elapsed":0.02}
+{"Time":"2026-11-13T15:41:59.380556288+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopTypeScriptWorker"}
+{"Time":"2026-11-13T15:41:59.380560157+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopTypeScriptWorker","Output":"=== RUN   TestDesktopTypeScriptWorker\n"}
+{"Time":"2026-11-13T15:41:59.59497441+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopTypeScriptWorker","Output":"--- PASS: TestDesktopTypeScriptWorker (0.21s)\n"}
+{"Time":"2026-11-13T15:41:59.595005518+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopTypeScriptWorker","Elapsed":0.21}
+{"Time":"2026-11-13T15:41:59.595014363+08:00","Action":"run","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopTypeScriptWorkerCancellation"}
+{"Time":"2026-11-13T15:41:59.595017903+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopTypeScriptWorkerCancellation","Output":"=== RUN   TestDesktopTypeScriptWorkerCancellation\n"}
+{"Time":"2026-11-13T15:41:59.756935216+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopTypeScriptWorkerCancellation","Output":"--- PASS: TestDesktopTypeScriptWorkerCancellation (0.16s)\n"}
+{"Time":"2026-11-13T15:41:59.756964528+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Test":"TestDesktopTypeScriptWorkerCancellation","Elapsed":0.16}
+{"Time":"2026-11-13T15:41:59.756984758+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Output":"PASS\n"}
+{"Time":"2026-11-13T15:41:59.757976097+08:00","Action":"output","Package":"smartpipe/backend/internal/adminapi","Output":"ok  \tsmartpipe/backend/internal/adminapi\t0.408s\n"}
+{"Time":"2026-11-13T15:41:59.757993634+08:00","Action":"pass","Package":"smartpipe/backend/internal/adminapi","Elapsed":0.408}
