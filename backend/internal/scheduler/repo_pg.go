@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // PgRepo 是 Postgres 实现，表结构见 store/migrate.go 的 scheduler_core 迁移。
@@ -117,6 +120,37 @@ func (r *PgRepo) RecentChat(ctx context.Context, chatID string, limit int) ([]Ch
 }
 
 func (r *PgRepo) RecordMessage(ctx context.Context, m MessageRecord) error {
+	err := r.recordMessageOnce(ctx, m)
+	if err == nil {
+		return nil
+	}
+	// 历史数据按显式 id 导入过，序列可能落后于 max(id)。此时所有新消息都会撞主键，
+	// 表现为群里“没有反应”。这里识别该错误、修一次序列再重试。
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "lanxin_messages_pkey" {
+		if fixErr := r.repairMessageSequence(ctx); fixErr != nil {
+			return fmt.Errorf("scheduler: record message: %w (repair sequence: %v)", err, fixErr)
+		}
+		if retryErr := r.recordMessageOnce(ctx, m); retryErr != nil {
+			return fmt.Errorf("scheduler: record message retry: %w", retryErr)
+		}
+		log.Printf("[scheduler] lanxin_messages 主键序列落后，已自动修复并写入 msgId=%s", m.PlatformMessageID)
+		return nil
+	}
+	return fmt.Errorf("scheduler: record message: %w", err)
+}
+
+// repairMessageSequence 把 id 序列对齐到当前最大值，下一次取值是 max+1。
+func (r *PgRepo) repairMessageSequence(ctx context.Context) error {
+	_, err := r.db.ExecContext(ctx, `SELECT setval(pg_get_serial_sequence('lanxin_messages','id'),
+ GREATEST(COALESCE((SELECT MAX(id) FROM lanxin_messages), 0), 1), true)`)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *PgRepo) recordMessageOnce(ctx context.Context, m MessageRecord) error {
 	_, err := r.db.ExecContext(ctx, `
 INSERT INTO lanxin_messages
  (platform_message_id, bot_id, bot_name, chat_type, chat_id, user_id, sender_name, group_name,
@@ -132,10 +166,7 @@ ON CONFLICT (platform_message_id) DO UPDATE SET
  issue_url=EXCLUDED.issue_url, updated_at=now()`,
 		m.PlatformMessageID, m.BotID, m.BotName, m.ChatType, m.ChatID, m.SenderID, m.SenderName,
 		m.GroupName, m.MsgType, m.Text, m.IsAtMe, m.ProjectID, m.Status, m.Reason, m.Issue, m.IssueURL)
-	if err != nil {
-		return fmt.Errorf("scheduler: record message: %w", err)
-	}
-	return nil
+	return err
 }
 
 func (r *PgRepo) MarkMessage(ctx context.Context, platformMessageID, status, reason string, issue int, issueURL string) error {
