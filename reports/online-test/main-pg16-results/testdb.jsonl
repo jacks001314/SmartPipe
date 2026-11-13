@@ -1,0 +1,48 @@
+{"Time":"2026-11-13T16:04:17.733890093+08:00","Action":"start","Package":"smartpipe/backend/internal/testdb"}
+{"Time":"2026-11-13T16:04:17.735950635+08:00","Action":"run","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName"}
+{"Time":"2026-11-13T16:04:17.735962055+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName","Output":"=== RUN   TestDatabaseName\n"}
+{"Time":"2026-11-13T16:04:17.735986323+08:00","Action":"run","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/url"}
+{"Time":"2026-11-13T16:04:17.735989081+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/url","Output":"=== RUN   TestDatabaseName/url\n"}
+{"Time":"2026-11-13T16:04:17.736156269+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/url","Output":"--- PASS: TestDatabaseName/url (0.00s)\n"}
+{"Time":"2026-11-13T16:04:17.736165138+08:00","Action":"pass","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/url","Elapsed":0}
+{"Time":"2026-11-13T16:04:17.736170393+08:00","Action":"run","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/production"}
+{"Time":"2026-11-13T16:04:17.736173238+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/production","Output":"=== RUN   TestDatabaseName/production\n"}
+{"Time":"2026-11-13T16:04:17.736176356+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/production","Output":"--- PASS: TestDatabaseName/production (0.00s)\n"}
+{"Time":"2026-11-13T16:04:17.736179+08:00","Action":"pass","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/production","Elapsed":0}
+{"Time":"2026-11-13T16:04:17.736181569+08:00","Action":"run","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/keyword"}
+{"Time":"2026-11-13T16:04:17.736183744+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/keyword","Output":"=== RUN   TestDatabaseName/keyword\n"}
+{"Time":"2026-11-13T16:04:17.736192035+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/keyword","Output":"--- PASS: TestDatabaseName/keyword (0.00s)\n"}
+{"Time":"2026-11-13T16:04:17.736194664+08:00","Action":"pass","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/keyword","Elapsed":0}
+{"Time":"2026-11-13T16:04:17.736197106+08:00","Action":"run","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/url_override_rejects"}
+{"Time":"2026-11-13T16:04:17.736199236+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/url_override_rejects","Output":"=== RUN   TestDatabaseName/url_override_rejects\n"}
+{"Time":"2026-11-13T16:04:17.736203703+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/url_override_rejects","Output":"--- PASS: TestDatabaseName/url_override_rejects (0.00s)\n"}
+{"Time":"2026-11-13T16:04:17.736214028+08:00","Action":"pass","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/url_override_rejects","Elapsed":0}
+{"Time":"2026-11-13T16:04:17.736216662+08:00","Action":"run","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/url_override_accepts"}
+{"Time":"2026-11-13T16:04:17.73621873+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/url_override_accepts","Output":"=== RUN   TestDatabaseName/url_override_accepts\n"}
+{"Time":"2026-11-13T16:04:17.736229238+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/url_override_accepts","Output":"--- PASS: TestDatabaseName/url_override_accepts (0.00s)\n"}
+{"Time":"2026-11-13T16:04:17.736234082+08:00","Action":"pass","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/url_override_accepts","Elapsed":0}
+{"Time":"2026-11-13T16:04:17.736237611+08:00","Action":"run","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/duplicate_keyword_rejects"}
+{"Time":"2026-11-13T16:04:17.736245009+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/duplicate_keyword_rejects","Output":"=== RUN   TestDatabaseName/duplicate_keyword_rejects\n"}
+{"Time":"2026-11-13T16:04:17.736314855+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/duplicate_keyword_rejects","Output":"--- PASS: TestDatabaseName/duplicate_keyword_rejects (0.00s)\n"}
+{"Time":"2026-11-13T16:04:17.736322499+08:00","Action":"pass","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/duplicate_keyword_rejects","Elapsed":0}
+{"Time":"2026-11-13T16:04:17.736325957+08:00","Action":"run","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/duplicate_keyword_accepts"}
+{"Time":"2026-11-13T16:04:17.736328372+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/duplicate_keyword_accepts","Output":"=== RUN   TestDatabaseName/duplicate_keyword_accepts\n"}
+{"Time":"2026-11-13T16:04:17.736332594+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/duplicate_keyword_accepts","Output":"--- PASS: TestDatabaseName/duplicate_keyword_accepts (0.00s)\n"}
+{"Time":"2026-11-13T16:04:17.736335178+08:00","Action":"pass","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/duplicate_keyword_accepts","Elapsed":0}
+{"Time":"2026-11-13T16:04:17.736337494+08:00","Action":"run","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/quoted_value"}
+{"Time":"2026-11-13T16:04:17.736339483+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/quoted_value","Output":"=== RUN   TestDatabaseName/quoted_value\n"}
+{"Time":"2026-11-13T16:04:17.736354226+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/quoted_value","Output":"--- PASS: TestDatabaseName/quoted_value (0.00s)\n"}
+{"Time":"2026-11-13T16:04:17.736357644+08:00","Action":"pass","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/quoted_value","Elapsed":0}
+{"Time":"2026-11-13T16:04:17.736360888+08:00","Action":"run","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/invalid_quote"}
+{"Time":"2026-11-13T16:04:17.736363058+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/invalid_quote","Output":"=== RUN   TestDatabaseName/invalid_quote\n"}
+{"Time":"2026-11-13T16:04:17.736429889+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/invalid_quote","Output":"--- PASS: TestDatabaseName/invalid_quote (0.00s)\n"}
+{"Time":"2026-11-13T16:04:17.736436982+08:00","Action":"pass","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/invalid_quote","Elapsed":0}
+{"Time":"2026-11-13T16:04:17.736444882+08:00","Action":"run","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/invalid_url"}
+{"Time":"2026-11-13T16:04:17.736447183+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/invalid_url","Output":"=== RUN   TestDatabaseName/invalid_url\n"}
+{"Time":"2026-11-13T16:04:17.736450216+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/invalid_url","Output":"--- PASS: TestDatabaseName/invalid_url (0.00s)\n"}
+{"Time":"2026-11-13T16:04:17.736452905+08:00","Action":"pass","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName/invalid_url","Elapsed":0}
+{"Time":"2026-11-13T16:04:17.736455743+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName","Output":"--- PASS: TestDatabaseName (0.00s)\n"}
+{"Time":"2026-11-13T16:04:17.736458251+08:00","Action":"pass","Package":"smartpipe/backend/internal/testdb","Test":"TestDatabaseName","Elapsed":0}
+{"Time":"2026-11-13T16:04:17.736460531+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Output":"PASS\n"}
+{"Time":"2026-11-13T16:04:17.73668418+08:00","Action":"output","Package":"smartpipe/backend/internal/testdb","Output":"ok  \tsmartpipe/backend/internal/testdb\t0.003s\n"}
+{"Time":"2026-11-13T16:04:17.73669748+08:00","Action":"pass","Package":"smartpipe/backend/internal/testdb","Elapsed":0.003}

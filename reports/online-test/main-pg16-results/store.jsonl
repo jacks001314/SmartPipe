@@ -1,0 +1,81 @@
+{"Time":"2026-11-13T16:04:18.313637666+08:00","Action":"start","Package":"smartpipe/backend/internal/store"}
+{"Time":"2026-11-13T16:04:18.316559392+08:00","Action":"run","Package":"smartpipe/backend/internal/store","Test":"TestCrashSimilarRoundtrip"}
+{"Time":"2026-11-13T16:04:18.316567987+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestCrashSimilarRoundtrip","Output":"=== RUN   TestCrashSimilarRoundtrip\n"}
+{"Time":"2026-11-13T16:04:18.932661041+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestCrashSimilarRoundtrip","Output":"--- PASS: TestCrashSimilarRoundtrip (0.62s)\n"}
+{"Time":"2026-11-13T16:04:18.932709907+08:00","Action":"pass","Package":"smartpipe/backend/internal/store","Test":"TestCrashSimilarRoundtrip","Elapsed":0.62}
+{"Time":"2026-11-13T16:04:18.932725308+08:00","Action":"run","Package":"smartpipe/backend/internal/store","Test":"TestUserIdentityLifecycle"}
+{"Time":"2026-11-13T16:04:18.932731359+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestUserIdentityLifecycle","Output":"=== RUN   TestUserIdentityLifecycle\n"}
+{"Time":"2026-11-13T16:04:18.970460301+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestUserIdentityLifecycle","Output":"--- PASS: TestUserIdentityLifecycle (0.04s)\n"}
+{"Time":"2026-11-13T16:04:18.970493246+08:00","Action":"pass","Package":"smartpipe/backend/internal/store","Test":"TestUserIdentityLifecycle","Elapsed":0.04}
+{"Time":"2026-11-13T16:04:18.970516078+08:00","Action":"run","Package":"smartpipe/backend/internal/store","Test":"TestLanxinBotLifecycleAndProjectGroupRouting"}
+{"Time":"2026-11-13T16:04:18.970525412+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestLanxinBotLifecycleAndProjectGroupRouting","Output":"=== RUN   TestLanxinBotLifecycleAndProjectGroupRouting\n"}
+{"Time":"2026-11-13T16:04:19.015644583+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestLanxinBotLifecycleAndProjectGroupRouting","Output":"--- PASS: TestLanxinBotLifecycleAndProjectGroupRouting (0.05s)\n"}
+{"Time":"2026-11-13T16:04:19.015677654+08:00","Action":"pass","Package":"smartpipe/backend/internal/store","Test":"TestLanxinBotLifecycleAndProjectGroupRouting","Elapsed":0.05}
+{"Time":"2026-11-13T16:04:19.015702351+08:00","Action":"run","Package":"smartpipe/backend/internal/store","Test":"TestLanxinInboxLifecycle"}
+{"Time":"2026-11-13T16:04:19.015709148+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestLanxinInboxLifecycle","Output":"=== RUN   TestLanxinInboxLifecycle\n"}
+{"Time":"2026-11-13T16:04:19.041146121+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestLanxinInboxLifecycle","Output":"--- PASS: TestLanxinInboxLifecycle (0.03s)\n"}
+{"Time":"2026-11-13T16:04:19.041175529+08:00","Action":"pass","Package":"smartpipe/backend/internal/store","Test":"TestLanxinInboxLifecycle","Elapsed":0.03}
+{"Time":"2026-11-13T16:04:19.041184867+08:00","Action":"run","Package":"smartpipe/backend/internal/store","Test":"TestOrderedMigrationsAscending"}
+{"Time":"2026-11-13T16:04:19.04118925+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestOrderedMigrationsAscending","Output":"=== RUN   TestOrderedMigrationsAscending\n"}
+{"Time":"2026-11-13T16:04:19.041197811+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestOrderedMigrationsAscending","Output":"--- PASS: TestOrderedMigrationsAscending (0.00s)\n"}
+{"Time":"2026-11-13T16:04:19.041208508+08:00","Action":"pass","Package":"smartpipe/backend/internal/store","Test":"TestOrderedMigrationsAscending","Elapsed":0}
+{"Time":"2026-11-13T16:04:19.041213938+08:00","Action":"run","Package":"smartpipe/backend/internal/store","Test":"TestCrashRetentionPurge"}
+{"Time":"2026-11-13T16:04:19.041218138+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestCrashRetentionPurge","Output":"=== RUN   TestCrashRetentionPurge\n"}
+{"Time":"2026-11-13T16:04:19.068438076+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestCrashRetentionPurge","Output":"--- PASS: TestCrashRetentionPurge (0.03s)\n"}
+{"Time":"2026-11-13T16:04:19.068491239+08:00","Action":"pass","Package":"smartpipe/backend/internal/store","Test":"TestCrashRetentionPurge","Elapsed":0.03}
+{"Time":"2026-11-13T16:04:19.068511257+08:00","Action":"run","Package":"smartpipe/backend/internal/store","Test":"TestProjectLifecycle"}
+{"Time":"2026-11-13T16:04:19.068520501+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestProjectLifecycle","Output":"=== RUN   TestProjectLifecycle\n"}
+{"Time":"2026-11-13T16:04:19.096071194+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestProjectLifecycle","Output":"--- PASS: TestProjectLifecycle (0.03s)\n"}
+{"Time":"2026-11-13T16:04:19.09610546+08:00","Action":"pass","Package":"smartpipe/backend/internal/store","Test":"TestProjectLifecycle","Elapsed":0.03}
+{"Time":"2026-11-13T16:04:19.096117422+08:00","Action":"run","Package":"smartpipe/backend/internal/store","Test":"TestCredentialLifecycle"}
+{"Time":"2026-11-13T16:04:19.096123049+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestCredentialLifecycle","Output":"=== RUN   TestCredentialLifecycle\n"}
+{"Time":"2026-11-13T16:04:19.121770697+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestCredentialLifecycle","Output":"--- PASS: TestCredentialLifecycle (0.03s)\n"}
+{"Time":"2026-11-13T16:04:19.121806415+08:00","Action":"pass","Package":"smartpipe/backend/internal/store","Test":"TestCredentialLifecycle","Elapsed":0.03}
+{"Time":"2026-11-13T16:04:19.121821429+08:00","Action":"run","Package":"smartpipe/backend/internal/store","Test":"TestAuditAppendAndList"}
+{"Time":"2026-11-13T16:04:19.121828722+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestAuditAppendAndList","Output":"=== RUN   TestAuditAppendAndList\n"}
+{"Time":"2026-11-13T16:04:19.142933862+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestAuditAppendAndList","Output":"    store_test.go:202: trace id empty (allowed for manual append)\n"}
+{"Time":"2026-11-13T16:04:19.145230612+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestAuditAppendAndList","Output":"--- PASS: TestAuditAppendAndList (0.02s)\n"}
+{"Time":"2026-11-13T16:04:19.145248573+08:00","Action":"pass","Package":"smartpipe/backend/internal/store","Test":"TestAuditAppendAndList","Elapsed":0.02}
+{"Time":"2026-11-13T16:04:19.145262575+08:00","Action":"run","Package":"smartpipe/backend/internal/store","Test":"TestFindProjectByGroup"}
+{"Time":"2026-11-13T16:04:19.145268813+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestFindProjectByGroup","Output":"=== RUN   TestFindProjectByGroup\n"}
+{"Time":"2026-11-13T16:04:19.166287202+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestFindProjectByGroup","Output":"--- PASS: TestFindProjectByGroup (0.02s)\n"}
+{"Time":"2026-11-13T16:04:19.166316822+08:00","Action":"pass","Package":"smartpipe/backend/internal/store","Test":"TestFindProjectByGroup","Elapsed":0.02}
+{"Time":"2026-11-13T16:04:19.166372786+08:00","Action":"run","Package":"smartpipe/backend/internal/store","Test":"TestDesktopEvidenceRequiredForMachinePass"}
+{"Time":"2026-11-13T16:04:19.166385356+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestDesktopEvidenceRequiredForMachinePass","Output":"=== RUN   TestDesktopEvidenceRequiredForMachinePass\n"}
+{"Time":"2026-11-13T16:04:19.208479179+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestDesktopEvidenceRequiredForMachinePass","Output":"--- PASS: TestDesktopEvidenceRequiredForMachinePass (0.04s)\n"}
+{"Time":"2026-11-13T16:04:19.208518243+08:00","Action":"pass","Package":"smartpipe/backend/internal/store","Test":"TestDesktopEvidenceRequiredForMachinePass","Elapsed":0.04}
+{"Time":"2026-11-13T16:04:19.208536587+08:00","Action":"run","Package":"smartpipe/backend/internal/store","Test":"TestValidateDesktopEvidence"}
+{"Time":"2026-11-13T16:04:19.208555817+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestValidateDesktopEvidence","Output":"=== RUN   TestValidateDesktopEvidence\n"}
+{"Time":"2026-11-13T16:04:19.209127668+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestValidateDesktopEvidence","Output":"--- PASS: TestValidateDesktopEvidence (0.00s)\n"}
+{"Time":"2026-11-13T16:04:19.20916244+08:00","Action":"pass","Package":"smartpipe/backend/internal/store","Test":"TestValidateDesktopEvidence","Elapsed":0}
+{"Time":"2026-11-13T16:04:19.209174864+08:00","Action":"run","Package":"smartpipe/backend/internal/store","Test":"TestDesktopReleaseGateRequiresMatchingUploadedProof"}
+{"Time":"2026-11-13T16:04:19.209182579+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestDesktopReleaseGateRequiresMatchingUploadedProof","Output":"=== RUN   TestDesktopReleaseGateRequiresMatchingUploadedProof\n"}
+{"Time":"2026-11-13T16:04:19.249920786+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestDesktopReleaseGateRequiresMatchingUploadedProof","Output":"--- PASS: TestDesktopReleaseGateRequiresMatchingUploadedProof (0.04s)\n"}
+{"Time":"2026-11-13T16:04:19.249965482+08:00","Action":"pass","Package":"smartpipe/backend/internal/store","Test":"TestDesktopReleaseGateRequiresMatchingUploadedProof","Elapsed":0.04}
+{"Time":"2026-11-13T16:04:19.249984274+08:00","Action":"run","Package":"smartpipe/backend/internal/store","Test":"TestObservationCannotEnableReleaseGate"}
+{"Time":"2026-11-13T16:04:19.249992123+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestObservationCannotEnableReleaseGate","Output":"=== RUN   TestObservationCannotEnableReleaseGate\n"}
+{"Time":"2026-11-13T16:04:19.250001805+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestObservationCannotEnableReleaseGate","Output":"--- PASS: TestObservationCannotEnableReleaseGate (0.00s)\n"}
+{"Time":"2026-11-13T16:04:19.250009843+08:00","Action":"pass","Package":"smartpipe/backend/internal/store","Test":"TestObservationCannotEnableReleaseGate","Elapsed":0}
+{"Time":"2026-11-13T16:04:19.25001753+08:00","Action":"run","Package":"smartpipe/backend/internal/store","Test":"TestDuplicateGateChecksRejected"}
+{"Time":"2026-11-13T16:04:19.250023455+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestDuplicateGateChecksRejected","Output":"=== RUN   TestDuplicateGateChecksRejected\n"}
+{"Time":"2026-11-13T16:04:19.250031479+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestDuplicateGateChecksRejected","Output":"--- PASS: TestDuplicateGateChecksRejected (0.00s)\n"}
+{"Time":"2026-11-13T16:04:19.250040458+08:00","Action":"pass","Package":"smartpipe/backend/internal/store","Test":"TestDuplicateGateChecksRejected","Elapsed":0}
+{"Time":"2026-11-13T16:04:19.250048561+08:00","Action":"run","Package":"smartpipe/backend/internal/store","Test":"TestDesktopMachineFencing"}
+{"Time":"2026-11-13T16:04:19.250054449+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestDesktopMachineFencing","Output":"=== RUN   TestDesktopMachineFencing\n"}
+{"Time":"2026-11-13T16:04:19.284791485+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestDesktopMachineFencing","Output":"--- PASS: TestDesktopMachineFencing (0.03s)\n"}
+{"Time":"2026-11-13T16:04:19.284832694+08:00","Action":"pass","Package":"smartpipe/backend/internal/store","Test":"TestDesktopMachineFencing","Elapsed":0.03}
+{"Time":"2026-11-13T16:04:19.284847558+08:00","Action":"run","Package":"smartpipe/backend/internal/store","Test":"TestDesktopLegacyMigrationUpgrade"}
+{"Time":"2026-11-13T16:04:19.284856148+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestDesktopLegacyMigrationUpgrade","Output":"=== RUN   TestDesktopLegacyMigrationUpgrade\n"}
+{"Time":"2026-11-13T16:04:19.33509678+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestDesktopLegacyMigrationUpgrade","Output":"--- PASS: TestDesktopLegacyMigrationUpgrade (0.05s)\n"}
+{"Time":"2026-11-13T16:04:19.335130308+08:00","Action":"pass","Package":"smartpipe/backend/internal/store","Test":"TestDesktopLegacyMigrationUpgrade","Elapsed":0.05}
+{"Time":"2026-11-13T16:04:19.33513965+08:00","Action":"run","Package":"smartpipe/backend/internal/store","Test":"TestDesktopDisableAndRecovery"}
+{"Time":"2026-11-13T16:04:19.335143937+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestDesktopDisableAndRecovery","Output":"=== RUN   TestDesktopDisableAndRecovery\n"}
+{"Time":"2026-11-13T16:04:19.368190713+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestDesktopDisableAndRecovery","Output":"--- PASS: TestDesktopDisableAndRecovery (0.03s)\n"}
+{"Time":"2026-11-13T16:04:19.368344187+08:00","Action":"pass","Package":"smartpipe/backend/internal/store","Test":"TestDesktopDisableAndRecovery","Elapsed":0.03}
+{"Time":"2026-11-13T16:04:19.368359557+08:00","Action":"run","Package":"smartpipe/backend/internal/store","Test":"TestDesktopTestRunLifecycle"}
+{"Time":"2026-11-13T16:04:19.368367212+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestDesktopTestRunLifecycle","Output":"=== RUN   TestDesktopTestRunLifecycle\n"}
+{"Time":"2026-11-13T16:04:19.397960848+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Test":"TestDesktopTestRunLifecycle","Output":"--- PASS: TestDesktopTestRunLifecycle (0.03s)\n"}
+{"Time":"2026-11-13T16:04:19.397986882+08:00","Action":"pass","Package":"smartpipe/backend/internal/store","Test":"TestDesktopTestRunLifecycle","Elapsed":0.03}
+{"Time":"2026-11-13T16:04:19.397993385+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Output":"PASS\n"}
+{"Time":"2026-11-13T16:04:19.398894229+08:00","Action":"output","Package":"smartpipe/backend/internal/store","Output":"ok  \tsmartpipe/backend/internal/store\t1.085s\n"}
+{"Time":"2026-11-13T16:04:19.39891782+08:00","Action":"pass","Package":"smartpipe/backend/internal/store","Elapsed":1.085}

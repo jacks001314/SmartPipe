@@ -1,0 +1,48 @@
+{"Time":"2026-11-13T16:04:19.552051695+08:00","Action":"start","Package":"smartpipe/backend/internal/testlab"}
+{"Time":"2026-11-13T16:04:19.553869596+08:00","Action":"run","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate"}
+{"Time":"2026-11-13T16:04:19.553901405+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate","Output":"=== RUN   TestEvaluate\n"}
+{"Time":"2026-11-13T16:04:19.553915726+08:00","Action":"run","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/pass"}
+{"Time":"2026-11-13T16:04:19.553918697+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/pass","Output":"=== RUN   TestEvaluate/pass\n"}
+{"Time":"2026-11-13T16:04:19.553924627+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/pass","Output":"--- PASS: TestEvaluate/pass (0.00s)\n"}
+{"Time":"2026-11-13T16:04:19.553927744+08:00","Action":"pass","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/pass","Elapsed":0}
+{"Time":"2026-11-13T16:04:19.553932343+08:00","Action":"run","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/missing"}
+{"Time":"2026-11-13T16:04:19.553934641+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/missing","Output":"=== RUN   TestEvaluate/missing\n"}
+{"Time":"2026-11-13T16:04:19.553939294+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/missing","Output":"--- PASS: TestEvaluate/missing (0.00s)\n"}
+{"Time":"2026-11-13T16:04:19.553942726+08:00","Action":"pass","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/missing","Elapsed":0}
+{"Time":"2026-11-13T16:04:19.553945318+08:00","Action":"run","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/skip"}
+{"Time":"2026-11-13T16:04:19.553947437+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/skip","Output":"=== RUN   TestEvaluate/skip\n"}
+{"Time":"2026-11-13T16:04:19.553950114+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/skip","Output":"--- PASS: TestEvaluate/skip (0.00s)\n"}
+{"Time":"2026-11-13T16:04:19.55395261+08:00","Action":"pass","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/skip","Elapsed":0}
+{"Time":"2026-11-13T16:04:19.553955024+08:00","Action":"run","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/no_evidence"}
+{"Time":"2026-11-13T16:04:19.55395722+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/no_evidence","Output":"=== RUN   TestEvaluate/no_evidence\n"}
+{"Time":"2026-11-13T16:04:19.553961062+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/no_evidence","Output":"--- PASS: TestEvaluate/no_evidence (0.00s)\n"}
+{"Time":"2026-11-13T16:04:19.553963698+08:00","Action":"pass","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/no_evidence","Elapsed":0}
+{"Time":"2026-11-13T16:04:19.553966109+08:00","Action":"run","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/fail"}
+{"Time":"2026-11-13T16:04:19.553968226+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/fail","Output":"=== RUN   TestEvaluate/fail\n"}
+{"Time":"2026-11-13T16:04:19.553970884+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/fail","Output":"--- PASS: TestEvaluate/fail (0.00s)\n"}
+{"Time":"2026-11-13T16:04:19.553973348+08:00","Action":"pass","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/fail","Elapsed":0}
+{"Time":"2026-11-13T16:04:19.553975843+08:00","Action":"run","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/wrong_artifact"}
+{"Time":"2026-11-13T16:04:19.553978018+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/wrong_artifact","Output":"=== RUN   TestEvaluate/wrong_artifact\n"}
+{"Time":"2026-11-13T16:04:19.553980672+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/wrong_artifact","Output":"--- PASS: TestEvaluate/wrong_artifact (0.00s)\n"}
+{"Time":"2026-11-13T16:04:19.553987846+08:00","Action":"pass","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/wrong_artifact","Elapsed":0}
+{"Time":"2026-11-13T16:04:19.553990896+08:00","Action":"run","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/wrong_platform"}
+{"Time":"2026-11-13T16:04:19.553993149+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/wrong_platform","Output":"=== RUN   TestEvaluate/wrong_platform\n"}
+{"Time":"2026-11-13T16:04:19.55399789+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/wrong_platform","Output":"--- PASS: TestEvaluate/wrong_platform (0.00s)\n"}
+{"Time":"2026-11-13T16:04:19.554000721+08:00","Action":"pass","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/wrong_platform","Elapsed":0}
+{"Time":"2026-11-13T16:04:19.554003206+08:00","Action":"run","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/duplicate"}
+{"Time":"2026-11-13T16:04:19.554005377+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/duplicate","Output":"=== RUN   TestEvaluate/duplicate\n"}
+{"Time":"2026-11-13T16:04:19.554008123+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/duplicate","Output":"--- PASS: TestEvaluate/duplicate (0.00s)\n"}
+{"Time":"2026-11-13T16:04:19.554010737+08:00","Action":"pass","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate/duplicate","Elapsed":0}
+{"Time":"2026-11-13T16:04:19.554014716+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate","Output":"--- PASS: TestEvaluate (0.00s)\n"}
+{"Time":"2026-11-13T16:04:19.55401765+08:00","Action":"pass","Package":"smartpipe/backend/internal/testlab","Test":"TestEvaluate","Elapsed":0}
+{"Time":"2026-11-13T16:04:19.554020339+08:00","Action":"run","Package":"smartpipe/backend/internal/testlab","Test":"TestGateUsesCurrentPolicy"}
+{"Time":"2026-11-13T16:04:19.55402271+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestGateUsesCurrentPolicy","Output":"=== RUN   TestGateUsesCurrentPolicy\n"}
+{"Time":"2026-11-13T16:04:19.554025556+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestGateUsesCurrentPolicy","Output":"--- PASS: TestGateUsesCurrentPolicy (0.00s)\n"}
+{"Time":"2026-11-13T16:04:19.554028146+08:00","Action":"pass","Package":"smartpipe/backend/internal/testlab","Test":"TestGateUsesCurrentPolicy","Elapsed":0}
+{"Time":"2026-11-13T16:04:19.554030566+08:00","Action":"run","Package":"smartpipe/backend/internal/testlab","Test":"TestRejectEmptyPolicy"}
+{"Time":"2026-11-13T16:04:19.554032673+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestRejectEmptyPolicy","Output":"=== RUN   TestRejectEmptyPolicy\n"}
+{"Time":"2026-11-13T16:04:19.554037824+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Test":"TestRejectEmptyPolicy","Output":"--- PASS: TestRejectEmptyPolicy (0.00s)\n"}
+{"Time":"2026-11-13T16:04:19.554040533+08:00","Action":"pass","Package":"smartpipe/backend/internal/testlab","Test":"TestRejectEmptyPolicy","Elapsed":0}
+{"Time":"2026-11-13T16:04:19.554042842+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Output":"PASS\n"}
+{"Time":"2026-11-13T16:04:19.554187471+08:00","Action":"output","Package":"smartpipe/backend/internal/testlab","Output":"ok  \tsmartpipe/backend/internal/testlab\t0.002s\n"}
+{"Time":"2026-11-13T16:04:19.554202314+08:00","Action":"pass","Package":"smartpipe/backend/internal/testlab","Elapsed":0.002}

@@ -1,0 +1,76 @@
+{"Time":"2026-11-13T16:04:22.50365532+08:00","Action":"start","Package":"smartpipe/backend/internal/patch"}
+{"Time":"2026-11-13T16:04:22.505661007+08:00","Action":"run","Package":"smartpipe/backend/internal/patch","Test":"TestCommitAndMerge"}
+{"Time":"2026-11-13T16:04:22.505699396+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestCommitAndMerge","Output":"=== RUN   TestCommitAndMerge\n"}
+{"Time":"2026-11-13T16:04:22.560228505+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestCommitAndMerge","Output":"--- PASS: TestCommitAndMerge (0.05s)\n"}
+{"Time":"2026-11-13T16:04:22.560254419+08:00","Action":"pass","Package":"smartpipe/backend/internal/patch","Test":"TestCommitAndMerge","Elapsed":0.05}
+{"Time":"2026-11-13T16:04:22.560265859+08:00","Action":"run","Package":"smartpipe/backend/internal/patch","Test":"TestCommitRejectsDirtyWorktree"}
+{"Time":"2026-11-13T16:04:22.560269545+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestCommitRejectsDirtyWorktree","Output":"=== RUN   TestCommitRejectsDirtyWorktree\n"}
+{"Time":"2026-11-13T16:04:22.598917979+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestCommitRejectsDirtyWorktree","Output":"--- PASS: TestCommitRejectsDirtyWorktree (0.04s)\n"}
+{"Time":"2026-11-13T16:04:22.598951127+08:00","Action":"pass","Package":"smartpipe/backend/internal/patch","Test":"TestCommitRejectsDirtyWorktree","Elapsed":0.04}
+{"Time":"2026-11-13T16:04:22.59896026+08:00","Action":"run","Package":"smartpipe/backend/internal/patch","Test":"TestCommitRejectsUnsafePatch"}
+{"Time":"2026-11-13T16:04:22.598964351+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestCommitRejectsUnsafePatch","Output":"=== RUN   TestCommitRejectsUnsafePatch\n"}
+{"Time":"2026-11-13T16:04:22.626874385+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestCommitRejectsUnsafePatch","Output":"--- PASS: TestCommitRejectsUnsafePatch (0.03s)\n"}
+{"Time":"2026-11-13T16:04:22.626896624+08:00","Action":"pass","Package":"smartpipe/backend/internal/patch","Test":"TestCommitRejectsUnsafePatch","Elapsed":0.03}
+{"Time":"2026-11-13T16:04:22.626904882+08:00","Action":"run","Package":"smartpipe/backend/internal/patch","Test":"TestParseRefSHAIgnoresWarnings"}
+{"Time":"2026-11-13T16:04:22.626908735+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestParseRefSHAIgnoresWarnings","Output":"=== RUN   TestParseRefSHAIgnoresWarnings\n"}
+{"Time":"2026-11-13T16:04:22.626913713+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestParseRefSHAIgnoresWarnings","Output":"--- PASS: TestParseRefSHAIgnoresWarnings (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.626918036+08:00","Action":"pass","Package":"smartpipe/backend/internal/patch","Test":"TestParseRefSHAIgnoresWarnings","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.626922411+08:00","Action":"run","Package":"smartpipe/backend/internal/patch","Test":"TestPushForceWithLeaseOverwritesStaleBranch"}
+{"Time":"2026-11-13T16:04:22.62692574+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestPushForceWithLeaseOverwritesStaleBranch","Output":"=== RUN   TestPushForceWithLeaseOverwritesStaleBranch\n"}
+{"Time":"2026-11-13T16:04:22.741922796+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestPushForceWithLeaseOverwritesStaleBranch","Output":"--- PASS: TestPushForceWithLeaseOverwritesStaleBranch (0.12s)\n"}
+{"Time":"2026-11-13T16:04:22.741958029+08:00","Action":"pass","Package":"smartpipe/backend/internal/patch","Test":"TestPushForceWithLeaseOverwritesStaleBranch","Elapsed":0.12}
+{"Time":"2026-11-13T16:04:22.741973227+08:00","Action":"run","Package":"smartpipe/backend/internal/patch","Test":"TestValidateAcceptsNormalPatch"}
+{"Time":"2026-11-13T16:04:22.741978433+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestValidateAcceptsNormalPatch","Output":"=== RUN   TestValidateAcceptsNormalPatch\n"}
+{"Time":"2026-11-13T16:04:22.742103319+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestValidateAcceptsNormalPatch","Output":"--- PASS: TestValidateAcceptsNormalPatch (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.742128221+08:00","Action":"pass","Package":"smartpipe/backend/internal/patch","Test":"TestValidateAcceptsNormalPatch","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.742135796+08:00","Action":"run","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches"}
+{"Time":"2026-11-13T16:04:22.742139939+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches","Output":"=== RUN   TestValidateRejectsUnsafePatches\n"}
+{"Time":"2026-11-13T16:04:22.742146004+08:00","Action":"run","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches/traversal"}
+{"Time":"2026-11-13T16:04:22.742150025+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches/traversal","Output":"=== RUN   TestValidateRejectsUnsafePatches/traversal\n"}
+{"Time":"2026-11-13T16:04:22.742416901+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches/traversal","Output":"--- PASS: TestValidateRejectsUnsafePatches/traversal (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.742429297+08:00","Action":"pass","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches/traversal","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.742436484+08:00","Action":"run","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches/workflow"}
+{"Time":"2026-11-13T16:04:22.742440523+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches/workflow","Output":"=== RUN   TestValidateRejectsUnsafePatches/workflow\n"}
+{"Time":"2026-11-13T16:04:22.742582307+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches/workflow","Output":"--- PASS: TestValidateRejectsUnsafePatches/workflow (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.74259054+08:00","Action":"pass","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches/workflow","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.742596698+08:00","Action":"run","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches/absolute"}
+{"Time":"2026-11-13T16:04:22.742600995+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches/absolute","Output":"=== RUN   TestValidateRejectsUnsafePatches/absolute\n"}
+{"Time":"2026-11-13T16:04:22.742730949+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches/absolute","Output":"--- PASS: TestValidateRejectsUnsafePatches/absolute (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.742739628+08:00","Action":"pass","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches/absolute","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.742744612+08:00","Action":"run","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches/secret"}
+{"Time":"2026-11-13T16:04:22.742748533+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches/secret","Output":"=== RUN   TestValidateRejectsUnsafePatches/secret\n"}
+{"Time":"2026-11-13T16:04:22.742912431+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches/secret","Output":"--- PASS: TestValidateRejectsUnsafePatches/secret (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.742928668+08:00","Action":"pass","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches/secret","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.742934169+08:00","Action":"run","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches/binary"}
+{"Time":"2026-11-13T16:04:22.742938063+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches/binary","Output":"=== RUN   TestValidateRejectsUnsafePatches/binary\n"}
+{"Time":"2026-11-13T16:04:22.743032122+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches/binary","Output":"--- PASS: TestValidateRejectsUnsafePatches/binary (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.743040086+08:00","Action":"pass","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches/binary","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.743044889+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches","Output":"--- PASS: TestValidateRejectsUnsafePatches (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.743050402+08:00","Action":"pass","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsUnsafePatches","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.743054429+08:00","Action":"run","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsTooManyLines"}
+{"Time":"2026-11-13T16:04:22.743057812+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsTooManyLines","Output":"=== RUN   TestValidateRejectsTooManyLines\n"}
+{"Time":"2026-11-13T16:04:22.74324257+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsTooManyLines","Output":"--- PASS: TestValidateRejectsTooManyLines (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.743249466+08:00","Action":"pass","Package":"smartpipe/backend/internal/patch","Test":"TestValidateRejectsTooManyLines","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.743255467+08:00","Action":"run","Package":"smartpipe/backend/internal/patch","Test":"TestVerifierRunsCleanCopy"}
+{"Time":"2026-11-13T16:04:22.743259285+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestVerifierRunsCleanCopy","Output":"=== RUN   TestVerifierRunsCleanCopy\n"}
+{"Time":"2026-11-13T16:04:22.767853433+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestVerifierRunsCleanCopy","Output":"--- PASS: TestVerifierRunsCleanCopy (0.02s)\n"}
+{"Time":"2026-11-13T16:04:22.767875727+08:00","Action":"pass","Package":"smartpipe/backend/internal/patch","Test":"TestVerifierRunsCleanCopy","Elapsed":0.02}
+{"Time":"2026-11-13T16:04:22.76788483+08:00","Action":"run","Package":"smartpipe/backend/internal/patch","Test":"TestVerifierBaseMismatch"}
+{"Time":"2026-11-13T16:04:22.767887688+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestVerifierBaseMismatch","Output":"=== RUN   TestVerifierBaseMismatch\n"}
+{"Time":"2026-11-13T16:04:22.785877534+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestVerifierBaseMismatch","Output":"--- PASS: TestVerifierBaseMismatch (0.02s)\n"}
+{"Time":"2026-11-13T16:04:22.785899274+08:00","Action":"pass","Package":"smartpipe/backend/internal/patch","Test":"TestVerifierBaseMismatch","Elapsed":0.02}
+{"Time":"2026-11-13T16:04:22.785909511+08:00","Action":"run","Package":"smartpipe/backend/internal/patch","Test":"TestVerifierFailingCommand"}
+{"Time":"2026-11-13T16:04:22.785912134+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestVerifierFailingCommand","Output":"=== RUN   TestVerifierFailingCommand\n"}
+{"Time":"2026-11-13T16:04:22.824369533+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestVerifierFailingCommand","Output":"--- PASS: TestVerifierFailingCommand (0.04s)\n"}
+{"Time":"2026-11-13T16:04:22.824396066+08:00","Action":"pass","Package":"smartpipe/backend/internal/patch","Test":"TestVerifierFailingCommand","Elapsed":0.04}
+{"Time":"2026-11-13T16:04:22.824405499+08:00","Action":"run","Package":"smartpipe/backend/internal/patch","Test":"TestParseProfile"}
+{"Time":"2026-11-13T16:04:22.824409643+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestParseProfile","Output":"=== RUN   TestParseProfile\n"}
+{"Time":"2026-11-13T16:04:22.824519795+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestParseProfile","Output":"--- PASS: TestParseProfile (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.824541099+08:00","Action":"pass","Package":"smartpipe/backend/internal/patch","Test":"TestParseProfile","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.824548413+08:00","Action":"run","Package":"smartpipe/backend/internal/patch","Test":"TestVerifierCreatesWorkRoot"}
+{"Time":"2026-11-13T16:04:22.824552456+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestVerifierCreatesWorkRoot","Output":"=== RUN   TestVerifierCreatesWorkRoot\n"}
+{"Time":"2026-11-13T16:04:22.861714505+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Test":"TestVerifierCreatesWorkRoot","Output":"--- PASS: TestVerifierCreatesWorkRoot (0.04s)\n"}
+{"Time":"2026-11-13T16:04:22.861744887+08:00","Action":"pass","Package":"smartpipe/backend/internal/patch","Test":"TestVerifierCreatesWorkRoot","Elapsed":0.04}
+{"Time":"2026-11-13T16:04:22.861753659+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Output":"PASS\n"}
+{"Time":"2026-11-13T16:04:22.862094211+08:00","Action":"output","Package":"smartpipe/backend/internal/patch","Output":"ok  \tsmartpipe/backend/internal/patch\t0.358s\n"}
+{"Time":"2026-11-13T16:04:22.862112424+08:00","Action":"pass","Package":"smartpipe/backend/internal/patch","Elapsed":0.358}

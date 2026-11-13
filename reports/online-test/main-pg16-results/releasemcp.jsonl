@@ -1,0 +1,60 @@
+{"Time":"2026-11-13T16:04:22.32571314+08:00","Action":"start","Package":"smartpipe/backend/internal/releasemcp"}
+{"Time":"2026-11-13T16:04:22.328860746+08:00","Action":"run","Package":"smartpipe/backend/internal/releasemcp","Test":"TestArtifactGapsDetectMissingRoles"}
+{"Time":"2026-11-13T16:04:22.328891601+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestArtifactGapsDetectMissingRoles","Output":"=== RUN   TestArtifactGapsDetectMissingRoles\n"}
+{"Time":"2026-11-13T16:04:22.32890125+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestArtifactGapsDetectMissingRoles","Output":"--- PASS: TestArtifactGapsDetectMissingRoles (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.328904648+08:00","Action":"pass","Package":"smartpipe/backend/internal/releasemcp","Test":"TestArtifactGapsDetectMissingRoles","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.328909184+08:00","Action":"run","Package":"smartpipe/backend/internal/releasemcp","Test":"TestRepoSlugParsesCommonURLs"}
+{"Time":"2026-11-13T16:04:22.328911487+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestRepoSlugParsesCommonURLs","Output":"=== RUN   TestRepoSlugParsesCommonURLs\n"}
+{"Time":"2026-11-13T16:04:22.328916958+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestRepoSlugParsesCommonURLs","Output":"--- PASS: TestRepoSlugParsesCommonURLs (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.328919633+08:00","Action":"pass","Package":"smartpipe/backend/internal/releasemcp","Test":"TestRepoSlugParsesCommonURLs","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.328922131+08:00","Action":"run","Package":"smartpipe/backend/internal/releasemcp","Test":"TestVerifyGitHubAssetsDetectsGaps"}
+{"Time":"2026-11-13T16:04:22.328924193+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestVerifyGitHubAssetsDetectsGaps","Output":"=== RUN   TestVerifyGitHubAssetsDetectsGaps\n"}
+{"Time":"2026-11-13T16:04:22.328926961+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestVerifyGitHubAssetsDetectsGaps","Output":"--- PASS: TestVerifyGitHubAssetsDetectsGaps (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.328929643+08:00","Action":"pass","Package":"smartpipe/backend/internal/releasemcp","Test":"TestVerifyGitHubAssetsDetectsGaps","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.328932636+08:00","Action":"run","Package":"smartpipe/backend/internal/releasemcp","Test":"TestVerifyGitHubAssets"}
+{"Time":"2026-11-13T16:04:22.328935046+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestVerifyGitHubAssets","Output":"=== RUN   TestVerifyGitHubAssets\n"}
+{"Time":"2026-11-13T16:04:22.32893922+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestVerifyGitHubAssets","Output":"--- PASS: TestVerifyGitHubAssets (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.328941678+08:00","Action":"pass","Package":"smartpipe/backend/internal/releasemcp","Test":"TestVerifyGitHubAssets","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.328944567+08:00","Action":"run","Package":"smartpipe/backend/internal/releasemcp","Test":"TestPickArtifact"}
+{"Time":"2026-11-13T16:04:22.328946645+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestPickArtifact","Output":"=== RUN   TestPickArtifact\n"}
+{"Time":"2026-11-13T16:04:22.328949134+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestPickArtifact","Output":"--- PASS: TestPickArtifact (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.328951401+08:00","Action":"pass","Package":"smartpipe/backend/internal/releasemcp","Test":"TestPickArtifact","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.328953603+08:00","Action":"run","Package":"smartpipe/backend/internal/releasemcp","Test":"TestToolsForScopes"}
+{"Time":"2026-11-13T16:04:22.328955589+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestToolsForScopes","Output":"=== RUN   TestToolsForScopes\n"}
+{"Time":"2026-11-13T16:04:22.328959612+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestToolsForScopes","Output":"--- PASS: TestToolsForScopes (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.328966902+08:00","Action":"pass","Package":"smartpipe/backend/internal/releasemcp","Test":"TestToolsForScopes","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.328969788+08:00","Action":"run","Package":"smartpipe/backend/internal/releasemcp","Test":"TestRedactArguments"}
+{"Time":"2026-11-13T16:04:22.328971835+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestRedactArguments","Output":"=== RUN   TestRedactArguments\n"}
+{"Time":"2026-11-13T16:04:22.32897462+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestRedactArguments","Output":"--- PASS: TestRedactArguments (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.32897697+08:00","Action":"pass","Package":"smartpipe/backend/internal/releasemcp","Test":"TestRedactArguments","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.328979256+08:00","Action":"run","Package":"smartpipe/backend/internal/releasemcp","Test":"TestWriteToolsFollowScopes"}
+{"Time":"2026-11-13T16:04:22.328981169+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestWriteToolsFollowScopes","Output":"=== RUN   TestWriteToolsFollowScopes\n"}
+{"Time":"2026-11-13T16:04:22.329059409+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestWriteToolsFollowScopes","Output":"--- PASS: TestWriteToolsFollowScopes (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.329068282+08:00","Action":"pass","Package":"smartpipe/backend/internal/releasemcp","Test":"TestWriteToolsFollowScopes","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.329072429+08:00","Action":"run","Package":"smartpipe/backend/internal/releasemcp","Test":"TestUpdateCredentialPrecedence"}
+{"Time":"2026-11-13T16:04:22.32907497+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestUpdateCredentialPrecedence","Output":"=== RUN   TestUpdateCredentialPrecedence\n"}
+{"Time":"2026-11-13T16:04:22.329078143+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestUpdateCredentialPrecedence","Output":"--- PASS: TestUpdateCredentialPrecedence (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.32908064+08:00","Action":"pass","Package":"smartpipe/backend/internal/releasemcp","Test":"TestUpdateCredentialPrecedence","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.329083057+08:00","Action":"run","Package":"smartpipe/backend/internal/releasemcp","Test":"TestUpdateClientUsesSavedSettings"}
+{"Time":"2026-11-13T16:04:22.329085155+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestUpdateClientUsesSavedSettings","Output":"=== RUN   TestUpdateClientUsesSavedSettings\n"}
+{"Time":"2026-11-13T16:04:22.329087809+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestUpdateClientUsesSavedSettings","Output":"--- PASS: TestUpdateClientUsesSavedSettings (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.329091397+08:00","Action":"pass","Package":"smartpipe/backend/internal/releasemcp","Test":"TestUpdateClientUsesSavedSettings","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.329101319+08:00","Action":"run","Package":"smartpipe/backend/internal/releasemcp","Test":"TestGitHubCredentialAndBaseFromSettings"}
+{"Time":"2026-11-13T16:04:22.32910427+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestGitHubCredentialAndBaseFromSettings","Output":"=== RUN   TestGitHubCredentialAndBaseFromSettings\n"}
+{"Time":"2026-11-13T16:04:22.329107852+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestGitHubCredentialAndBaseFromSettings","Output":"--- PASS: TestGitHubCredentialAndBaseFromSettings (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.329110428+08:00","Action":"pass","Package":"smartpipe/backend/internal/releasemcp","Test":"TestGitHubCredentialAndBaseFromSettings","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.329112771+08:00","Action":"run","Package":"smartpipe/backend/internal/releasemcp","Test":"TestContentArtifactNameUsesServiceConvention"}
+{"Time":"2026-11-13T16:04:22.329117643+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestContentArtifactNameUsesServiceConvention","Output":"=== RUN   TestContentArtifactNameUsesServiceConvention\n"}
+{"Time":"2026-11-13T16:04:22.329120846+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestContentArtifactNameUsesServiceConvention","Output":"--- PASS: TestContentArtifactNameUsesServiceConvention (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.329123357+08:00","Action":"pass","Package":"smartpipe/backend/internal/releasemcp","Test":"TestContentArtifactNameUsesServiceConvention","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.329125723+08:00","Action":"run","Package":"smartpipe/backend/internal/releasemcp","Test":"TestCompareDistributionNamesTheMismatch"}
+{"Time":"2026-11-13T16:04:22.329127859+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestCompareDistributionNamesTheMismatch","Output":"=== RUN   TestCompareDistributionNamesTheMismatch\n"}
+{"Time":"2026-11-13T16:04:22.329134462+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestCompareDistributionNamesTheMismatch","Output":"--- PASS: TestCompareDistributionNamesTheMismatch (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.329137854+08:00","Action":"pass","Package":"smartpipe/backend/internal/releasemcp","Test":"TestCompareDistributionNamesTheMismatch","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.32914039+08:00","Action":"run","Package":"smartpipe/backend/internal/releasemcp","Test":"TestArtifactCellAndVersionShape"}
+{"Time":"2026-11-13T16:04:22.329142503+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestArtifactCellAndVersionShape","Output":"=== RUN   TestArtifactCellAndVersionShape\n"}
+{"Time":"2026-11-13T16:04:22.329145137+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Test":"TestArtifactCellAndVersionShape","Output":"--- PASS: TestArtifactCellAndVersionShape (0.00s)\n"}
+{"Time":"2026-11-13T16:04:22.329147578+08:00","Action":"pass","Package":"smartpipe/backend/internal/releasemcp","Test":"TestArtifactCellAndVersionShape","Elapsed":0}
+{"Time":"2026-11-13T16:04:22.329150019+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Output":"PASS\n"}
+{"Time":"2026-11-13T16:04:22.329330222+08:00","Action":"output","Package":"smartpipe/backend/internal/releasemcp","Output":"ok  \tsmartpipe/backend/internal/releasemcp\t0.003s\n"}
+{"Time":"2026-11-13T16:04:22.329344015+08:00","Action":"pass","Package":"smartpipe/backend/internal/releasemcp","Elapsed":0.004}
