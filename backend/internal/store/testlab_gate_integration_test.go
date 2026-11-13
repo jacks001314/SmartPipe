@@ -61,6 +61,17 @@ func TestDesktopReleaseGateRequiresMatchingUploadedProof(t *testing.T) {
 	if err = s.CheckDesktopReleaseGate(ctx, run, targets, artifacts); err != nil {
 		t.Fatal(err)
 	}
+	// Actual release storage uses algorithm-prefixed digests. Matching must
+	// work through both Spec validation and the database lookup.
+	artifacts[0].SHA256 = "sha256:" + spec.ArtifactSHA256
+	if err = s.CheckDesktopReleaseGate(ctx, run, targets, artifacts); err != nil {
+		t.Fatalf("prefixed release artifact rejected: %v", err)
+	}
+	run.ResolvedCommit = strings.Repeat("d", 40)
+	if s.CheckDesktopReleaseGate(ctx, run, targets, artifacts) == nil {
+		t.Fatal("changed source passed")
+	}
+	run.ResolvedCommit = spec.SourceSHA
 	artifacts[0].SHA256 = strings.Repeat("c", 64)
 	if s.CheckDesktopReleaseGate(ctx, run, targets, artifacts) == nil {
 		t.Fatal("changed artifact passed")
