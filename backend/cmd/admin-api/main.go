@@ -152,9 +152,6 @@ func main() {
 		_ = app.Shutdown(shutdownCtx)
 	}()
 
-	if schedule := strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_SCHEDULE")); schedule != "" && schedule != "off" {
-		api.StartReleaseScheduler(context.Background(), schedule)
-	}
 	if os.Getenv("SMARTPIPE_CRASH_RETENTION_SCHEDULE") != "off" {
 		api.StartRetentionWorker(context.Background(), time.Duration(envInt("SMARTPIPE_CRASH_RETENTION_HOURS", 6))*time.Hour)
 	}

@@ -172,7 +172,7 @@ func (a *API) Register(app *iris.Application) {
 
 	a.registerVerification(party)
 	a.registerMerges(party)
-	a.registerReleases(party)
+	a.registerReleaseV2(party.Party("/releases"))
 	a.registerCrashes(party)
 	a.registerIssues(party)
 	a.registerIdentities(party)

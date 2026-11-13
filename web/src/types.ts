@@ -437,63 +437,6 @@ export type IssueAttempt = {
   updated_at: string;
 };
 
-export type ReleaseArtifact = {
-  path: string;
-  size: number;
-  sha256: string;
-  download_url?: string;
-  upload_error?: string;
-};
-
-export type ReleaseRecord = {
-  id: number;
-  project_id: string | null;
-  version: string;
-  commit_sha: string;
-  ok: boolean;
-  status: string;
-  manifest: Record<string, unknown>;
-  manifest_sha256: string;
-  signature: string;
-  artifacts: ReleaseArtifact[];
-  output_dir: string;
-  error: string;
-  duration_ms: number;
-  created_at: string;
-};
-
-export type ReleaseCandidate = {
-  number: number;
-  title: string;
-  url: string;
-  author: string;
-};
-
-export type ReleaseRun = {
-  id: number;
-  project_id: string | null;
-  version: string;
-  commit_sha: string;
-  branch: string;
-  status: string;
-  trigger: string;
-  candidates: ReleaseCandidate[];
-  notes: string;
-  release_url: string;
-  tag: string;
-  release_id: number;
-  manifest_sha256: string;
-  output_dir: string;
-  artifacts: ReleaseArtifact[];
-  build_output: string;
-  error: string;
-  notify_status: string;
-  notify_error: string;
-  started_at: string;
-  finished_at: string | null;
-  duration_ms: number;
-};
-
 export type CrashReport = {
   id: number;
   project_id: string | null;
