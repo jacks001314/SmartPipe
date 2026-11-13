@@ -2,7 +2,9 @@ package adminapi
 
 import (
 	"fmt"
+	"net"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/kataras/iris/v12"
@@ -41,7 +43,8 @@ func (a *API) getReleaseV2ExecutorBootstrap(c iris.Context) {
 		a.badRequest(c, "架构只支持 amd64 / arm64")
 		return
 	}
-	if strings.TrimSpace(a.releaseToken) == "" {
+	token := a.executorReleaseToken()
+	if token == "" {
 		a.badRequest(c, "服务端没有配置 release-service 令牌，无法生成接入命令")
 		return
 	}
@@ -51,7 +54,7 @@ export SMARTPIPE_RELEASE_SERVICE_TOKEN=%s
 export SMARTPIPE_RELEASE_EXECUTOR_ID=%s
 export SMARTPIPE_RELEASE_EXECUTOR_OS=%s
 export SMARTPIPE_RELEASE_EXECUTOR_ARCH=%s
-./release-executor`, serviceURL, a.releaseToken, executorID, osName, arch)
+./release-executor`, serviceURL, token, executorID, osName, arch)
 	a.audit(c.Request().Context(), c, "release.v2.executor.bootstrap", "release_executor", executorID, nil, "ok", map[string]any{
 		"os": osName, "arch": arch,
 	})
@@ -60,25 +63,44 @@ export SMARTPIPE_RELEASE_EXECUTOR_ARCH=%s
 	}})
 }
 
+// executorReleaseToken returns the token release-service actually validates.
+// SMARTPIPE_RELEASE_SERVICE_TOKEN is the shared executor token; the older
+// admin release token is only a fallback for single-binary installs.
+func (a *API) executorReleaseToken() string {
+	for _, key := range []string{"SMARTPIPE_RELEASE_SERVICE_TOKEN", "RELEASE_SERVICE_TOKEN"} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return a.releaseToken
+}
+
 // executorServiceURL 给出构建机应当访问的 release-service 地址：
-// 配置里若是 127.0.0.1/localhost（服务端本机），换成管理员当前访问的主机名，
-// 这样局域网里的 macOS 构建机能直接连上。
+// 优先使用 SMARTPIPE_RELEASE_SERVICE_PUBLIC_URL；否则取管理员当前访问的主机名
+// 加上对外发布的端口，避免把容器内部的 http://worker:8095 发给构建机。
 func (a *API) executorServiceURL(c iris.Context) string {
+	if public := strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_SERVICE_PUBLIC_URL")); public != "" {
+		return strings.TrimRight(public, "/")
+	}
+	port := strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_SERVICE_PORT"))
+	if port == "" {
+		port = "8099"
+	}
+	host := strings.TrimSpace(c.Request().Host)
+	if name, _, err := net.SplitHostPort(host); err == nil {
+		host = name
+	}
+	host = strings.Trim(host, "[]")
+	if host != "" {
+		return "http://" + net.JoinHostPort(host, port)
+	}
 	parsed, err := url.Parse(strings.TrimSpace(a.releaseURL))
 	if err != nil || parsed.Host == "" {
 		return strings.TrimRight(strings.TrimSpace(a.releaseURL), "/")
 	}
-	host := parsed.Hostname()
-	if host == "127.0.0.1" || host == "localhost" || host == "::1" {
-		if requested := c.Request().Host; requested != "" {
-			if name := strings.Split(requested, ":")[0]; name != "" && name != "localhost" && name != "127.0.0.1" {
-				host = name
-			}
-		}
+	fallbackHost := parsed.Hostname()
+	if fallbackHost == "localhost" || fallbackHost == "::1" {
+		fallbackHost = "127.0.0.1"
 	}
-	port := parsed.Port()
-	if port != "" {
-		host = host + ":" + port
-	}
-	return parsed.Scheme + "://" + host
+	return parsed.Scheme + "://" + net.JoinHostPort(fallbackHost, port)
 }

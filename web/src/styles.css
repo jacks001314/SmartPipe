@@ -1272,3 +1272,10 @@ input, select, textarea { font-family: inherit; color: var(--ink); }
 .login-card { min-height: auto; }
 .login-left { padding: 40px 42px; }
 .login-desc { max-width: 340px; }
+
+/* 发版中心：运行 / 旧版 / 设置合并成一个入口 */
+.release-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+.release-tab { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 14px; border: 1px solid var(--line); background: var(--card); border-radius: var(--radius); cursor: pointer; color: var(--ink); text-align: left; font: inherit; }
+.release-tab small { color: var(--muted); font-size: 11px; }
+.release-tab:hover { border-color: var(--brand); }
+.release-tab.active { border-color: var(--brand); background: var(--brand-soft); }

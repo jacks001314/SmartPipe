@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
-import type { Project, ReleaseV2AgentView, ReleaseV2Approval, ReleaseV2Bundle, ReleaseV2Event, ReleaseV2Executor, ReleaseV2Plan, ReleaseV2Run } from "../types";
+import type { Project, ReleaseV2AgentView, ReleaseV2Approval, ReleaseV2Bundle, ReleaseV2Event, ReleaseV2Executor, ReleaseV2ExecutorDeployResult, ReleaseV2Plan, ReleaseV2Run } from "../types";
 import type { Notify } from "../App";
 
 function when(value: string | null | undefined) {
@@ -36,6 +36,7 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
   const [error, setError] = useState("");
   const [detail, setDetail] = useState<ReleaseV2Bundle | null>(null);
   const [plan, setPlan] = useState<ReleaseV2Plan | null>(null);
+  const [planError, setPlanError] = useState("");
   const [token, setToken] = useState("");
   const [approvals, setApprovals] = useState<ReleaseV2Approval[]>([]);
   const [agent, setAgent] = useState<ReleaseV2AgentView | null>(null);
@@ -43,9 +44,15 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
   const streamRef = useRef<{ es: EventSource | null; timer: number | null; cursor: number }>({ es: null, timer: null, cursor: 0 });
   const [busy, setBusy] = useState(false);
   const [bootOpen, setBootOpen] = useState(false);
-  const [bootForm, setBootForm] = useState({ id: "build-01", os: "darwin", arch: "arm64" });
+  const [bootForm, setBootForm] = useState({
+    id: "build-01", os: "auto", arch: "auto",
+    host: "", port: "22", username: "", auth_type: "password",
+    secret: "", passphrase: "", install_dir: "", save_resource: true,
+  });
   const [bootCommand, setBootCommand] = useState("");
   const [bootBusy, setBootBusy] = useState(false);
+  const [bootResult, setBootResult] = useState<ReleaseV2ExecutorDeployResult | null>(null);
+  const [removing, setRemoving] = useState("");
   const [form, setForm] = useState({ project_id: "", version: "", mode: "publish", channel: "stable", branch: "", notes: "" });
 
   const generateBootstrap = async () => {
@@ -83,6 +90,66 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
       setForm((prev) => (prev.project_id ? prev : { ...prev, project_id: p.value[0]?.id ?? "" }));
     }
   }, []);
+
+  const deployExecutor = async () => {
+    if (!bootForm.host.trim() || !bootForm.username.trim() || !bootForm.secret.trim()) {
+      notify("请填写 SSH 主机、用户名和密码/私钥", "error");
+      return;
+    }
+    setBootBusy(true);
+    setBootResult(null);
+    try {
+      const result = await api.deployReleaseV2Executor({
+        id: bootForm.id.trim() || "build-01",
+        os: bootForm.os, arch: bootForm.arch,
+        host: bootForm.host.trim(), port: Number(bootForm.port) || 22,
+        username: bootForm.username.trim(), auth_type: bootForm.auth_type,
+        secret: bootForm.secret, passphrase: bootForm.passphrase,
+        install_dir: bootForm.install_dir.trim(), save_resource: bootForm.save_resource,
+      });
+      setBootResult(result);
+      notify(result.ok ? `构建机 ${result.executor_id} 已部署并注册` : (result.error || "部署失败"), result.ok ? "ok" : "error");
+      if (result.ok) {
+        setBootForm((f) => ({ ...f, secret: "", passphrase: "" }));
+        void load();
+      }
+    } catch (e) {
+      notify(e instanceof ApiError ? e.message : String(e), "error");
+    } finally {
+      setBootBusy(false);
+    }
+  };
+
+  const removeExecutor = async (id: string, force = false) => {
+    if (removing) return;
+    if (!force && !window.confirm(`删除构建机 ${id}？会在目标机器上停止执行器、删除安装目录，并移除注册记录。`)) return;
+    setRemoving(id);
+    try {
+      const result = await api.deleteReleaseV2Executor(id, { force });
+      if (result.ok) {
+        notify(`构建机 ${id} 已在目标机停止并卸载`, "ok");
+        setBootResult(null);
+        void load();
+        return;
+      }
+      if (!force && window.confirm(`${result.error || "远程卸载失败"}。仍然只删除注册记录吗？`)) {
+        setRemoving("");
+        await removeExecutor(id, true);
+        return;
+      }
+      notify(result.error || "删除失败", "error");
+    } catch (e) {
+      const message = e instanceof ApiError ? e.message : String(e);
+      if (!force && message.includes("正在使用") && window.confirm(message + "。强制删除？")) {
+        setRemoving("");
+        await removeExecutor(id, true);
+        return;
+      }
+      notify(message, "error");
+    } finally {
+      setRemoving("");
+    }
+  };
 
   useEffect(() => {
     void load();
@@ -191,6 +258,7 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
 
   async function createPlan() {
     setBusy(true);
+    setPlanError("");
     try {
       const created = await api.createReleaseV2Plan({
         project_id: form.project_id,
@@ -204,7 +272,9 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
       setPlan(created);
       notify("已生成发布计划 " + created.id, "ok");
     } catch (err) {
-      notify(err instanceof ApiError ? err.message : "生成计划失败", "error");
+      const message = err instanceof ApiError ? err.message : "生成计划失败";
+      setPlanError(message);
+      notify(message, "error");
     } finally {
       setBusy(false);
     }
@@ -318,6 +388,13 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
               {busy ? "处理中…" : "生成计划"}
             </button>
           </div>
+          {planError && (
+            <div className="notice bad" style={{ marginTop: 12 }}>
+              <div><b>生成计划失败</b></div>
+              <div className="tiny">{planError}</div>
+              <div className="tiny">若提示缺少发版配置，可在「项目」页的项目设置里填写发版配置路径，或在仓库里提交含 release.targets 的 smartpipe.yaml；仓库有更新时生成计划会自动同步本地镜像。</div>
+            </div>
+          )}
           {plan && (
             <div className="notice" style={{ marginTop: 12 }}>
               <div><b>计划 {plan.id}</b> · {plan.version} · {plan.mode} · {plan.channel} · 状态 {plan.status}</div>
@@ -337,7 +414,7 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
 
       <div className="card">
         <div className="card-head">
-          <div><div className="card-title">构建执行器</div><div className="card-sub">构建机主动拉取任务，无需 SSH；在这台机器上跑一次下面的命令就会注册。</div></div>
+          <div><div className="card-title">构建执行器</div><div className="card-sub">填 SSH 连接信息直接部署：服务端上传 release-executor、写入令牌并在构建机上后台启动；也可以生成命令手动安装。</div></div>
           <button className="btn" onClick={() => setBootOpen((v) => !v)}>{bootOpen ? "收起" : "＋ 添加构建机"}</button>
         </div>
         {bootOpen && (
@@ -346,6 +423,7 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
               <label>构建机 id<input value={bootForm.id} onChange={(e) => setBootForm((f) => ({ ...f, id: e.target.value }))} /></label>
               <label>系统
                 <select value={bootForm.os} onChange={(e) => setBootForm((f) => ({ ...f, os: e.target.value }))}>
+                  <option value="auto">自动检测</option>
                   <option value="darwin">macOS</option>
                   <option value="linux">Linux</option>
                   <option value="windows">Windows</option>
@@ -353,24 +431,63 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
               </label>
               <label>架构
                 <select value={bootForm.arch} onChange={(e) => setBootForm((f) => ({ ...f, arch: e.target.value }))}>
+                  <option value="auto">自动检测</option>
                   <option value="arm64">arm64</option>
                   <option value="amd64">amd64</option>
                 </select>
               </label>
+              <label>SSH 主机<input value={bootForm.host} onChange={(e) => setBootForm((f) => ({ ...f, host: e.target.value }))} placeholder="192.168.0.6 或 build-01.local" /></label>
+              <label>SSH 端口<input inputMode="numeric" value={bootForm.port} onChange={(e) => setBootForm((f) => ({ ...f, port: e.target.value.replace(/[^0-9]/g, "") }))} placeholder="22" /></label>
+              <label>用户名<input value={bootForm.username} onChange={(e) => setBootForm((f) => ({ ...f, username: e.target.value }))} placeholder="builder 或 root" autoComplete="username" /></label>
+              <label>认证方式
+                <select value={bootForm.auth_type} onChange={(e) => setBootForm((f) => ({ ...f, auth_type: e.target.value, secret: "", passphrase: "" }))}>
+                  <option value="password">密码</option>
+                  <option value="private_key">SSH 私钥</option>
+                </select>
+              </label>
+              <label className="wide">{bootForm.auth_type === "password" ? "SSH 密码" : "SSH 私钥"}
+                <textarea rows={bootForm.auth_type === "password" ? 1 : 5} value={bootForm.secret} onChange={(e) => setBootForm((f) => ({ ...f, secret: e.target.value }))}
+                  placeholder={bootForm.auth_type === "password" ? "只保存在请求里，勾选保存才写入资源库" : "-----BEGIN OPENSSH PRIVATE KEY-----"} spellCheck={false} />
+              </label>
+              {bootForm.auth_type === "private_key" && (
+                <label className="wide">私钥口令（可选）<input type="password" value={bootForm.passphrase} onChange={(e) => setBootForm((f) => ({ ...f, passphrase: e.target.value }))} placeholder="私钥未加密时留空" autoComplete="new-password" /></label>
+              )}
+              <label>安装目录（留空用 ~/.smartpipe/release-executor）<input value={bootForm.install_dir} onChange={(e) => setBootForm((f) => ({ ...f, install_dir: e.target.value }))} placeholder="默认即可" /></label>
+              <label>保存连接
+                <select value={bootForm.save_resource ? "1" : "0"} onChange={(e) => setBootForm((f) => ({ ...f, save_resource: e.target.value === "1" }))}>
+                  <option value="1">保存为 SSH 资源（标签 build/release）</option>
+                  <option value="0">仅本次部署，不保存</option>
+                </select>
+              </label>
             </div>
             <div className="actions">
-              <button className="btn primary" disabled={bootBusy} onClick={() => void generateBootstrap()}>{bootBusy ? "生成中…" : "生成接入命令"}</button>
+              <button className="btn primary" disabled={bootBusy} onClick={() => void deployExecutor()}>{bootBusy ? "部署中…" : "SSH 部署并注册"}</button>
+              <button className="btn" disabled={bootBusy} onClick={() => void generateBootstrap()}>{bootBusy ? "处理中…" : "生成手动接入命令"}</button>
               {bootCommand && <button className="btn" onClick={() => void copyBootstrap()}>复制命令</button>}
             </div>
+            {bootResult && (
+              <div className={"notice " + (bootResult.ok ? "" : "warn")} style={{ marginTop: 10 }}>
+                <div><b>{bootResult.ok ? "部署成功" : "部署失败"}</b>
+                  {bootResult.host ? ` · ${bootResult.username}@${bootResult.host}` : ""}
+                  {bootResult.os && bootResult.os !== "auto" ? ` · ${bootResult.os}/${bootResult.arch}` : ""}
+                  {bootResult.install_dir ? ` · ${bootResult.install_dir}` : ""}
+                </div>
+                {bootResult.error && <div className="tiny">{bootResult.error}</div>}
+                <ul className="tiny">
+                  {bootResult.steps.map((step) => <li key={step.name}>{step.ok ? "✓" : "✗"} {step.name}{step.detail ? "：" + step.detail : ""}</li>)}
+                </ul>
+                {bootResult.log_tail && <pre className="boot-command">{bootResult.log_tail}</pre>}
+              </div>
+            )}
             {bootCommand && <pre className="boot-command">{bootCommand}</pre>}
-            <p className="muted small">命令里的令牌是服务端读取的 release-service 令牌，只发给已登录管理员。构建机上需要有 release-executor 二进制（仓库里 <code>go build ./cmd/release-executor</code>）。</p>
+            <p className="muted small">SSH 部署会连接构建机、上传对应平台的 release-executor、写入服务地址与令牌，并在后台启动；令牌只发给已登录管理员，不会回显。</p>
           </div>
         )}
         <div className="card-body" style={{ padding: 0 }}>
           <table className="table">
-            <thead><tr><th>执行器</th><th>平台</th><th>状态</th><th>版本</th><th>最近心跳</th></tr></thead>
+            <thead><tr><th>执行器</th><th>平台</th><th>状态</th><th>版本</th><th>最近心跳</th><th /></tr></thead>
             <tbody>
-              {executors.length === 0 && <tr><td colSpan={5} className="empty">还没有执行器注册；在构建机上启动 release-executor。</td></tr>}
+              {executors.length === 0 && <tr><td colSpan={6} className="empty">还没有执行器注册；在上面填 SSH 信息部署一台。</td></tr>}
               {executors.map((x) => (
                 <tr key={x.id}>
                   <td>{x.id}</td>
@@ -378,6 +495,11 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
                   <td>{statusChip(x.status)}</td>
                   <td>{x.version || "—"}</td>
                   <td>{when(x.last_heartbeat_at)}</td>
+                  <td>
+                    <button className="btn danger-ghost small" disabled={removing === x.id} onClick={() => void removeExecutor(x.id)}>
+                      {removing === x.id ? "删除中…" : "删除"}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

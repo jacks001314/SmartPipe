@@ -1,4 +1,4 @@
-import type { AuditEntry, AuthConfig, AuthSession, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Health, IssueAttempt, Project, ReleaseCandidate, ReleaseRecord, ReleaseRun, ReleaseV2AgentView, ReleaseV2AgentSession, ReleaseV2Approval, ReleaseV2Bundle, ReleaseV2Executor, ReleaseV2Plan, ReleaseV2Run, ReleaseV2Settings, ReleaseV2Probe, ReleaseV2ExecutorBootstrap, RepoOp, TestResult, UserIdentity, VerificationRecord, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubTunnelView, GitHubPATView, GitHubRepoCatalog, GitHubRepo, SchedulerOverview, SchedulerWorkerDetail, SchedulerWorker, SchedulerMessage, SchedulerOutputFrame, SchedulerOutputRawPage } from "./types";
+import type { AuditEntry, AuthConfig, AuthSession, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Health, IssueAttempt, Project, ReleaseV2AgentView, ReleaseV2AgentSession, ReleaseV2Approval, ReleaseV2Bundle, ReleaseV2Executor, ReleaseV2Plan, ReleaseV2Run, ReleaseV2Settings, ReleaseV2Probe, ReleaseV2ExecutorBootstrap, ReleaseV2ExecutorDeployResult, ReleaseV2ExecutorRemoveResult, RepoOp, TestResult, UserIdentity, VerificationRecord, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubTunnelView, GitHubPATView, GitHubRepoCatalog, GitHubRepo, SchedulerOverview, SchedulerWorkerDetail, SchedulerWorker, SchedulerMessage, SchedulerOutputFrame, SchedulerOutputRawPage } from "./types";
 import type { ResourceInspectionResult, ResourceProbeResult, RuntimeResource } from "./types";
 
 const TOKEN_KEY = "smartpipe.adminToken";
@@ -263,22 +263,12 @@ export const api = {
 
   listVerifications: (limit = 50) => request<VerificationRecord[]>("/verifications?limit=" + limit),
   listAttempts: (limit = 50) => request<IssueAttempt[]>("/attempts?limit=" + limit),
-  listReleases: (limit = 50) => request<ReleaseRecord[]>("/releases?limit=" + limit),
-  createRelease: (body: { project_id?: string; repo?: string; version: string; commit: string; artifact_globs?: string[]; notes?: string }) =>
-    request<{ record: ReleaseRecord; report: Record<string, unknown> }>("/releases", { method: "POST", body }),
-  listReleaseRuns: (limit = 50) => request<ReleaseRun[]>("/releases/runs?limit=" + limit),
   listRepoOps: (limit = 100) => request<RepoOp[]>("/repo-ops?limit=" + limit),
 
   crashRetention: () => request<CrashRetention>("/crashes/retention"),
   runCrashRetention: () => request<CrashRetention>("/crashes/retention/run", { method: "POST" }),
   listCrashes: (limit = 100) => request<CrashReport[]>("/crashes?limit=" + limit),
   getCrash: (id: number) => request<CrashReport>("/crashes/" + id),
-  listReleaseCandidates: (projectId: string, label?: string) =>
-    request<{ repo: string; label: string; candidates: ReleaseCandidate[] }>(
-      "/releases/candidates?project_id=" + encodeURIComponent(projectId) + (label ? "&label=" + encodeURIComponent(label) : "")),
-  createReleaseRun: (body: { project_id: string; version: string; commit?: string; branch?: string; notes?: string; dry_run?: boolean; artifact_globs?: string[]; confirm_major?: boolean }) =>
-    request<{ run: ReleaseRun; record: ReleaseRun }>("/releases/runs", { method: "POST", body }),
-  rollbackReleaseRun: (id: number) => request<ReleaseRun>("/releases/runs/" + id + "/rollback", { method: "POST" }),
   listReleaseV2Runs: (limit = 50) => request<ReleaseV2Run[]>("/releases/v2/runs?limit=" + limit),
   getReleaseV2Run: (id: string, after = 0) =>
     request<ReleaseV2Bundle>("/releases/v2/runs/" + encodeURIComponent(id) + "?after=" + after),
@@ -300,6 +290,14 @@ export const api = {
     request<ReleaseV2ExecutorBootstrap>(
       "/releases/v2/executors/bootstrap?os=" + encodeURIComponent(os) + "&arch=" + encodeURIComponent(arch) + "&id=" + encodeURIComponent(id),
     ),
+  deployReleaseV2Executor: (body: {
+    id: string; os: string; arch: string;
+    host?: string; port?: number; username?: string;
+    auth_type?: string; secret?: string; passphrase?: string;
+    resource_id?: string; install_dir?: string; save_resource?: boolean;
+  }) => request<ReleaseV2ExecutorDeployResult>("/releases/v2/executors/deploy", { method: "POST", body }),
+  deleteReleaseV2Executor: (id: string, body?: { force?: boolean; resource_id?: string; install_dir?: string }) =>
+    request<ReleaseV2ExecutorRemoveResult>("/releases/v2/executors/" + encodeURIComponent(id), { method: "DELETE", body: body ?? {} }),
   listReleaseV2Approvals: (id: string) => request<ReleaseV2Approval[]>("/releases/v2/runs/" + encodeURIComponent(id) + "/approvals"),
   approveReleaseV2Run: (id: string, reason: string, ttlSeconds = 7200) =>
     request<ReleaseV2Approval>("/releases/v2/runs/" + encodeURIComponent(id) + "/approvals", { method: "POST", body: { reason, ttl_seconds: ttlSeconds } }),

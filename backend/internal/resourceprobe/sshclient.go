@@ -1,6 +1,7 @@
 package resourceprobe
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -70,6 +71,54 @@ func (c *SSHClient) RunCmdTimeout(command string, timeout time.Duration) ([]byte
 		return result.output, result.err
 	case <-timer.C:
 		return nil, fmt.Errorf("ssh: command timed out after %s", timeout)
+	}
+}
+
+// RunCmdWithInput runs one command in a fresh session and feeds input to its
+// stdin. It streams a file (for example a build executor binary) to a remote
+// host without requiring an SFTP subsystem.
+func (c *SSHClient) RunCmdWithInput(command string, input []byte, timeout time.Duration) ([]byte, error) {
+	if c == nil || c.client == nil {
+		return nil, errors.New("ssh: client is closed")
+	}
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
+	session, err := c.client.NewSession()
+	if err != nil {
+		return nil, fmt.Errorf("ssh: open session: %w", err)
+	}
+	defer session.Close()
+	stdin, err := session.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("ssh: stdin pipe: %w", err)
+	}
+	var out bytes.Buffer
+	session.Stdout = &out
+	session.Stderr = &out
+
+	type outcome struct{ err error }
+	done := make(chan outcome, 1)
+	go func() {
+		if startErr := session.Start(command); startErr != nil {
+			done <- outcome{err: startErr}
+			return
+		}
+		if _, writeErr := stdin.Write(input); writeErr != nil {
+			done <- outcome{err: writeErr}
+			return
+		}
+		_ = stdin.Close()
+		done <- outcome{err: session.Wait()}
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case result := <-done:
+		return out.Bytes(), result.err
+	case <-timer.C:
+		_ = session.Close()
+		return out.Bytes(), fmt.Errorf("ssh: command timed out after %s", timeout)
 	}
 }
 

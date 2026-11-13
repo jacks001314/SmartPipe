@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"smartpipe/backend/internal/releasev2"
+	"smartpipe/backend/internal/store"
 )
 
 type fakeControlStore struct {
@@ -35,6 +36,10 @@ func (f *fakeControlStore) ClaimReleaseV2Target(context.Context, string, string,
 }
 func (f *fakeControlStore) GetRun(context.Context, string) (*releasev2.Run, error) {
 	return &releasev2.Run{ID: "run_1", Status: releasev2.RunBuilding}, nil
+}
+
+func (f *fakeControlStore) GetProject(context.Context, string) (*store.Project, error) {
+	return &store.Project{ID: "prj_1", LocalRepoPath: ""}, nil
 }
 func (f *fakeControlStore) GetTarget(context.Context, string, string) (*releasev2.Target, error) {
 	copyTarget := *f.target

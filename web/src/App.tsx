@@ -10,13 +10,11 @@ import { LanxinPage } from "./pages/LanxinPage";
 import { AuditPage } from "./pages/AuditPage";
 import { TestLabPage } from "./pages/TestLabPage";
 import { VerificationPage } from "./pages/VerificationPage";
-import { ReleasePage } from "./pages/ReleasePage";
-import { ReleaseV2Page } from "./pages/ReleaseV2Page";
-import { ReleaseV2SettingsPage } from "./pages/ReleaseV2SettingsPage";
+import { ReleaseCenterPage } from "./pages/ReleaseCenterPage";
 import { CrashPage } from "./pages/CrashPage";
 import { SchedulerPage } from "./pages/SchedulerPage";
 
-type PageKey = "testlab" | "projects" | "resources" | "credentials" | "models" | "lanxin" | "scheduler" | "verify" | "release" | "releaseV2" | "releaseSettings" | "crash" | "audit";
+type PageKey = "testlab" | "projects" | "resources" | "credentials" | "models" | "lanxin" | "scheduler" | "verify" | "releaseCenter" | "release" | "releaseV2" | "releaseSettings" | "crash" | "audit";
 
 type NavItem = { key: PageKey; label: string; icon: string };
 
@@ -32,9 +30,7 @@ const OPS_NAV: NavItem[] = [
   { key: "testlab", label: "在线测试", icon: "▣" },
   { key: "scheduler", label: "调度器", icon: "⇄" },
   { key: "verify", label: "补丁验证", icon: "✓" },
-  { key: "release", label: "发版", icon: "⬆" },
-  { key: "releaseV2", label: "发版运行 v2", icon: "⤴" },
-  { key: "releaseSettings", label: "发版设置", icon: "⚙" },
+  { key: "releaseCenter", label: "发版", icon: "⬆" },
   { key: "crash", label: "崩溃上报", icon: "⚠" },
   { key: "audit", label: "审计日志", icon: "☰" },
 ];
@@ -50,7 +46,8 @@ const META: Record<PageKey, { crumb: string; title: string; sub: string }> = {
   lanxin: { crumb: "配置中心 / 蓝信机器人", title: "蓝信机器人", sub: "管理多个机器人、自动同步所在群，并查看每个机器人的聊天消息与连接状态。" },
   scheduler: { crumb: "运行中心 / 调度器", title: "调度器", sub: "查看 worker 当前阶段、心跳和事件时间线，并暂停、恢复、重试或停止单个任务。" },
   verify: { crumb: "配置中心 / 补丁验证", title: "补丁验证", sub: "手动验证：在干净副本上应用补丁并执行 smartpipe.yaml 声明的验证命令，可查看历史验证记录；不再作为 Issue 修复的合并门禁。" },
-  release: { crumb: "配置中心 / 发版", title: "发版", sub: "从干净提交构建制品，生成带校验和与签名的 manifest。" },
+  releaseCenter: { crumb: "运行中心 / 发版", title: "发版", sub: "计划、运行、构建机与发布设置集中在一个入口。" },
+  release: { crumb: "运行中心 / 发版", title: "发版", sub: "旧链接 #release 已并入发版运行。" },
   releaseSettings: { crumb: "配置中心 / 发版设置", title: "发版设置", sub: "在这里填写真实升级服务、GitHub 与对象存储的参数；保存后立即生效。" },
   releaseV2: { crumb: "运行中心 / 发版 v2", title: "发版运行 v2", sub: "计划、构建机、目标进度、制品摘要、升级渠道与 GitHub 发布状态。" },
   crash: { crumb: "配置中心 / 崩溃上报", title: "崩溃上报", sub: "客户端 crash_bundle 脱敏、指纹去重、限流与自动建单。" },
@@ -62,7 +59,8 @@ export type Notify = (message: string, kind?: "ok" | "error") => void;
 export function App() {
   const [page, setPage] = useState<PageKey>(() => {
     const hash = window.location.hash.replace("#", "") as PageKey;
-    return NAV.some((n) => n.key === hash) ? hash : "projects";
+    const legacyRelease = ["release", "releaseV2", "releaseSettings"].includes(hash);
+    return NAV.some((n) => n.key === hash) || legacyRelease ? hash : "projects";
   });
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState("");
@@ -174,7 +172,7 @@ export function App() {
             {CONFIG_NAV.map((item) => (
               <button
                 key={item.key}
-                className={"nav-item" + (page === item.key ? " active" : "")}
+                className={"nav-item" + ((page === item.key || (item.key === "releaseCenter" && ["release", "releaseV2", "releaseSettings"].includes(page))) ? " active" : "")}
                 onClick={() => setPage(item.key)}
               >
                 <span className="nav-icon">{item.icon}</span>
@@ -243,9 +241,12 @@ export function App() {
           {page === "scheduler" && <SchedulerPage notify={notify} />}
           {page === "testlab" && <TestLabPage notify={notify} />}
           {page === "verify" && <VerificationPage notify={notify} />}
-          {page === "release" && <ReleasePage notify={notify} />}
-          {page === "releaseV2" && <ReleaseV2Page notify={notify} />}
-        {page === "releaseSettings" && <ReleaseV2SettingsPage notify={notify} />}
+          {(page === "releaseCenter" || page === "release" || page === "releaseV2" || page === "releaseSettings") && (
+            <ReleaseCenterPage
+              notify={notify}
+              initialTab={page === "releaseSettings" ? "settings" : "runs"}
+            />
+          )}
           {page === "crash" && <CrashPage notify={notify} />}
           {page === "audit" && <AuditPage notify={notify} />}
         </div>

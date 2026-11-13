@@ -140,6 +140,8 @@ func (h *HTTPHandler) executorAction(w http.ResponseWriter, r *http.Request) {
 		default:
 			http.NotFound(w, r)
 		}
+	case "source":
+		h.serveSource(w, r, executorID)
 	case "heartbeat":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -169,9 +171,9 @@ func (h *HTTPHandler) executorAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var in struct {
-			RunID        string `json:"run_id"`
-			TargetID     string `json:"target_id"`
-			OK           bool   `json:"ok"`
+			RunID    string `json:"run_id"`
+			TargetID string `json:"target_id"`
+			OK       bool   `json:"ok"`
 			// Retryable 表示这次失败属于瞬时故障（网络、对象存储不可用等），
 			// 目标应退回队列重试，而不是把整次运行判死。
 			Retryable    bool   `json:"retryable"`

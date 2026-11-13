@@ -321,6 +321,11 @@ SELECT id, run_id, actor, kind, target_id, summary, detail, created_at
 	return out, rows.Err()
 }
 
+// rowScanner is the subset of *sql.Row/*sql.Rows used by scan helpers.
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
 func (s *Store) ListExecutors(ctx context.Context) ([]releasev2.Executor, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, os, arch, labels, capabilities, version, status, last_heartbeat_at, last_error, created_at, updated_at
@@ -490,6 +495,7 @@ func firstStoreNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
 // ReleaseV2RunRetentions 批量返回清理器需要的运行信息。
 func (s *Store) ReleaseV2RunRetentions(ctx context.Context, ids []string) (map[string]releasev2.RunRetention, error) {
 	out := map[string]releasev2.RunRetention{}

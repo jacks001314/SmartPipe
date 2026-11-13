@@ -15,6 +15,23 @@ type migration struct {
 var migrations = []migration{
 
 	{
+		version: 44,
+		name:    "release_v2_executor_hosts",
+		sql: `
+CREATE TABLE IF NOT EXISTS release_v2_executor_hosts (
+    executor_id  TEXT PRIMARY KEY,
+    resource_id  TEXT NOT NULL DEFAULT '',
+    host         TEXT NOT NULL DEFAULT '',
+    port         INTEGER NOT NULL DEFAULT 22,
+    username     TEXT NOT NULL DEFAULT '',
+    install_dir  TEXT NOT NULL DEFAULT '',
+    deployed_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+`,
+	},
+
+	{
 		version: 43,
 		name:    "ssh_runtime_resources",
 		sql: `
@@ -38,7 +55,6 @@ CREATE INDEX IF NOT EXISTS runtime_resources_enabled_idx
     ON runtime_resources (kind, enabled, updated_at DESC);
 `,
 	},
-
 
 	{
 		version: 42,
