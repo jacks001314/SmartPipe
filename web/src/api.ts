@@ -73,6 +73,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
 export const api = {
   listTestRuns: () => request<import('./testlab-types').DesktopRun[]>("/test-runs"),
+  recoverTestMachine: (id:string,generation:number,reason:string) => request<void>("/test-machines/"+encodeURIComponent(id)+"/recover", {method:"POST",body:{generation,reason,cleanup_confirmed:true}}),
   listTestMachines: () => request<import('./testlab-types').DesktopMachine[]>("/test-machines"),
   setTestMachineEnabled: (id:string,enabled:boolean) => request<void>("/test-machines/"+encodeURIComponent(id)+"/enabled", {method:"POST",body:{enabled}}),
   createTestRun: (body: import('./testlab-types').DesktopSpec) => request<import('./testlab-types').DesktopRun>("/test-runs", {method:"POST",body}),

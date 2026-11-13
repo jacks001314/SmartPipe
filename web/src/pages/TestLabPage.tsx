@@ -9,6 +9,9 @@ export function TestLabPage({notify}:{notify:Notify}){
  const [runs,setRuns]=useState<DesktopRun[]>([]);
  const [projects,setProjects]=useState<Project[]>([]);
  const [busy,setBusy]=useState(false);
+ const [recovery,setRecovery]=useState<DesktopMachine|null>(null);
+ const [cleanupConfirmed,setCleanupConfirmed]=useState(false);
+ const [recoveryReason,setRecoveryReason]=useState("");
  const [error,setError]=useState("");
  const [detail,setDetail]=useState<DesktopRun|null>(null);
  const [form,setForm]=useState({project_id:"",source_sha:"",artifact_sha256:"",platform:"windows-amd64",scenario:"desktop-observe",scenario_version:"1",checks:"desktop_observed"});
@@ -50,6 +53,16 @@ export function TestLabPage({notify}:{notify:Notify}){
   catch(e){notify(e instanceof Error?e.message:"操作失败","error");}
   finally{setBusy(false);}
  }
+ async function recover(){
+  if(!recovery||!cleanupConfirmed||recoveryReason.trim().length<3)return;
+  setBusy(true);
+  try{
+   await api.recoverTestMachine(recovery.id,recovery.generation,recoveryReason.trim());
+   setRecovery(null);setCleanupConfirmed(false);setRecoveryReason("");
+   notify("占用已解除，机器仍停用；可按需重新启用");await load();
+  }catch(e){notify(e instanceof Error?e.message:"恢复失败，请刷新机器状态","error");}
+  finally{setBusy(false);}
+ }
  async function download(runID:string,reference:string){
   if(!/^sha256:[a-f0-9]{64}$/.test(reference)){notify("此证据尚未上传","error");return;}
   try{
@@ -85,9 +98,17 @@ export function TestLabPage({notify}:{notify:Notify}){
     {machines.map(m=><tr key={m.id}><td>{m.id}</td><td>{m.platform}</td>
      <td>{!m.enabled?"已停用":m.run_id?(m.lease_until&&Date.parse(m.lease_until)<Date.now()?"租约过期，待恢复":"执行中"):"空闲（连接状态未确认）"}</td>
      <td>{m.last_seen?new Date(m.last_seen).toLocaleString():"尚未连接"}</td>
-     <td><button disabled={busy||(!m.enabled&&!!m.run_id)} onClick={()=>void setEnabled(m)}>{m.enabled?"停用机器":m.run_id?"等待清理确认":"启用机器"}</button></td></tr>)}
+     <td><button disabled={busy||(!m.enabled&&!!m.run_id)} onClick={()=>void setEnabled(m)}>{m.enabled?"停用机器":m.run_id?"等待清理确认":"启用机器"}</button>{!m.enabled&&!!m.run_id&&<button disabled={busy} onClick={()=>{setRecovery({...m});setCleanupConfirmed(false);setRecoveryReason("");}}>确认清理并解除占用</button>}</td></tr>)}
    </tbody></table>{!machines.length&&<p>尚未登记测试机。由管理员部署 Runner 后登记机器身份。</p>}
   </div>
+  {recovery&&<div className="card" role="region" aria-label="测试机恢复">
+   <h3>解除 {recovery.id} 的占用</h3>
+   <p>任务：{recovery.run_id}。请先在测试机确认 Runner 和测试子进程已停止、测试资源已清理。此操作只解除占用，不会执行本机清理。</p>
+   <label><input type="checkbox" checked={cleanupConfirmed} onChange={e=>setCleanupConfirmed(e.target.checked)}/>我已确认本机清理完成</label>
+   <label>清理说明 <input aria-label="清理说明" value={recoveryReason} onChange={e=>setRecoveryReason(e.target.value)} maxLength={1000}/></label>
+   <button disabled={busy||!cleanupConfirmed||recoveryReason.trim().length<3} onClick={()=>void recover()}>解除占用，保持停用</button>
+   <button disabled={busy} onClick={()=>setRecovery(null)}>取消</button>
+  </div>}
   <div className="card"><h3>最近 100 次运行</h3>
    <table><thead><tr><th>运行</th><th>场景</th><th>平台</th><th>状态</th><th>操作</th></tr></thead><tbody>
     {runs.map(r=><tr key={r.id}><td>{r.id}</td><td>{r.spec.scenario}</td><td>{r.spec.platform}</td><td>{r.status}</td>
