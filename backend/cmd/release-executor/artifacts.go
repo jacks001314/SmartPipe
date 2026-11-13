@@ -184,12 +184,17 @@ func expandArtifactGlob(root, pattern string) ([]string, error) {
 		if err != nil {
 			return nil
 		}
-		ok, err := filepath.Match(filepath.FromSlash(suffix), filepath.ToSlash(rel))
-		if err != nil {
-			return err
-		}
-		if ok {
-			out = append(out, p)
+		// ** 需要跨目录匹配：从最深的目录开始逐级尝试后缀，命中最浅的一处即可。
+		segments := strings.Split(filepath.ToSlash(rel), "/")
+		for i := 0; i < len(segments); i++ {
+			ok, err := filepath.Match(filepath.FromSlash(suffix), filepath.FromSlash(strings.Join(segments[i:], "/")))
+			if err != nil {
+				return err
+			}
+			if ok {
+				out = append(out, p)
+				break
+			}
 		}
 		return nil
 	})

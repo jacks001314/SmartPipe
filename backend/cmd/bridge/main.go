@@ -145,7 +145,7 @@ func main() {
 			return
 		}
 		if res.Draft != nil && res.Link == nil {
-			_ = st.MarkLanxinMessage(r.Context(), msg.MessageID, store.LanxinStatusReceived, "待群内确认建单", 0, "")
+			_ = st.MarkLanxinMessage(r.Context(), msg.MessageID, store.LanxinStatusFailed, "建单失败，草稿保留待重试", 0, "")
 			writeJSON(w, http.StatusAccepted, map[string]any{"draft": res.Draft, "created": false})
 			return
 		}

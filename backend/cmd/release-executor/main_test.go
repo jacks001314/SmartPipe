@@ -135,8 +135,14 @@ func TestMergeNoProxyKeepsExistingEntries(t *testing.T) {
 }
 
 func TestGitCloneArgsWithoutCredential(t *testing.T) {
-	if args := gitCloneArgs(nil); len(args) != 0 {
-		t.Fatalf("no credential should keep default git behavior: %v", args)
+	args := gitCloneArgs(nil)
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "credential.helper") {
+		t.Fatalf("no credential should not disable the helper: %v", args)
+	}
+	// 内网机器连不上代码托管时，git 会在黑洞连接上干等；保留低速超时让回退更早发生。
+	if !strings.Contains(joined, "http.lowSpeedTime=20") {
+		t.Fatalf("clone args missing low-speed guard: %v", args)
 	}
 }
 

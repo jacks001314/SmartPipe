@@ -554,10 +554,13 @@ func (s *Scheduler) applyChatDecision(ctx context.Context, p *Project, msg Inbou
 		if err != nil {
 			return messageOutcome{Status: "failed"}, err
 		}
-		if err := s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, issueDraftPrompt(draft)); err != nil {
-			return messageOutcome{Status: "failed", DraftID: draft.ID}, err
+		// 建单不再等群里确认：草稿落库后立刻建 Issue 并派 worker。
+		// 失败时 confirmIssueDraft 已经把原因回给群里，草稿退回 pending，可用“确认建单”重试。
+		issue, issueURL, confirmErr := s.confirmIssueDraft(ctx, p, msg, draft)
+		if confirmErr != nil {
+			return messageOutcome{Status: "failed", Reason: clamp(confirmErr.Error(), 300), DraftID: draft.ID, Issue: issue, IssueURL: issueURL}, nil
 		}
-		return messageOutcome{Status: "awaiting_confirmation", Reason: draft.Title, DraftID: draft.ID}, nil
+		return messageOutcome{Status: "issue_created", Reason: draft.Title, DraftID: draft.ID, Issue: issue, IssueURL: issueURL}, nil
 	}
 	return messageOutcome{Status: "ignored"}, nil
 }

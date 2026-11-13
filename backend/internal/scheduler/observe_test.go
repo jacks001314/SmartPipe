@@ -132,7 +132,7 @@ func TestCrossBotClaimPreventsDuplicateReply(t *testing.T) {
 	}
 }
 
-func TestAutoTriageStillNeedsConfirmationAndFlag(t *testing.T) {
+func TestAutoTriageCreatesIssueOnlyWhenEnabled(t *testing.T) {
 	h := newHarness(t, Config{})
 	h.project.Policy = ChatPolicy{Mode: "smart", AutoIssueEnabled: false, AutoIssueConfidence: 0.85, HourlyReplyLimit: 10}
 	h.runner.triageReply = `{"action":"triage","title":"导出偶发少行","body":"100 行只导入 97 行","severity":"high","confidence":0.95,"reason":"具体缺陷"}`
@@ -151,11 +151,11 @@ func TestAutoTriageStillNeedsConfirmationAndFlag(t *testing.T) {
 	if err := h.s.HandleMessage(context.Background(), nonAtMsg("m-triage-on", "导出偶发少三行")); err != nil {
 		t.Fatalf("handle on: %v", err)
 	}
-	if h.tracker.issueCount() != 0 {
-		t.Fatal("auto triage must still wait for group confirmation")
+	if h.tracker.issueCount() != 1 {
+		t.Fatalf("auto triage should create the issue directly, got %d", h.tracker.issueCount())
 	}
-	if sent := strings.Join(h.notifier.all(), "\n"); !strings.Contains(sent, "待确认建单") {
-		t.Fatalf("draft prompt missing: %s", sent)
+	if sent := strings.Join(h.notifier.all(), "\n"); !strings.Contains(sent, "已创建 Issue #1") {
+		t.Fatalf("issue link missing: %s", sent)
 	}
 	count, _ := h.repo.CountAutoIssueDrafts(context.Background(), "prj-1", "group-1", time.Now().Add(-24*time.Hour))
 	if count != 1 {

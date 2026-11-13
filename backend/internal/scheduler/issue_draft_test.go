@@ -7,34 +7,36 @@ import (
 	"time"
 )
 
-func TestIssueDraftPendingDoesNotCreateOrQueue(t *testing.T) {
+func TestIssueAutoCreatesAndQueuesWorker(t *testing.T) {
 	h := newHarness(t, Config{})
 	h.runner.chatReply = `{"action":"issue","title":"导入偶发丢行","body":"导入 100 行只出现 97 行","severity":"high"}`
-	if err := h.s.HandleMessage(context.Background(), msg("draft-pending", "导入偶尔少几行")); err != nil {
+	if err := h.s.HandleMessage(context.Background(), msg("draft-auto", "导入偶尔少几行")); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
-	if h.tracker.issueCount() != 0 {
-		t.Fatalf("draft must not create issue, got %d", h.tracker.issueCount())
+	if h.tracker.issueCount() != 1 {
+		t.Fatalf("issue should be created without confirmation, got %d", h.tracker.issueCount())
 	}
-	if w, _ := h.repo.ActiveWorker(context.Background(), "prj-1", 1); w != nil {
-		t.Fatalf("draft must not queue worker: %+v", w)
+	if w, _ := h.repo.ActiveWorker(context.Background(), "prj-1", 1); w == nil {
+		t.Fatal("created issue should queue a worker")
 	}
 	sent := strings.Join(h.notifier.all(), "\n")
-	if !strings.Contains(sent, "【待确认建单】") || !strings.Contains(sent, "确认建单 DRAFT-") {
-		t.Fatalf("confirmation prompt missing: %q", sent)
+	if strings.Contains(sent, "【待确认建单】") || !strings.Contains(sent, "已创建 Issue #1") {
+		t.Fatalf("group should receive the issue link: %q", sent)
 	}
 }
 
 func TestIssueDraftCancel(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.runner.chatReply = `{"action":"issue","title":"取消建单测试","body":"正文","severity":"medium"}`
-	if err := h.s.HandleMessage(context.Background(), msg("draft-cancel-source", "请记录一个问题")); err != nil {
-		t.Fatalf("handle: %v", err)
+	// 自动建单之后，群里能取消的是建单失败留下的草稿。
+	draft := &IssueDraft{
+		ID: "DRAFT-CANCEL01", Kind: "chat", ProjectID: "prj-1", ChatID: "group-1",
+		SourceMessageID: "draft-cancel-source", Title: "取消建单测试", Body: "正文", Severity: "medium",
+		Status: IssueDraftPending, CreatedAt: time.Now(), UpdatedAt: time.Now(), ExpiresAt: time.Now().Add(issueDraftTTL),
 	}
-	draftID := issueDraftIDPattern.FindString(strings.Join(h.notifier.all(), "\n"))
-	if draftID == "" {
-		t.Fatalf("draft id missing: %#v", h.notifier.all())
+	if created, err := h.repo.CreateIssueDraft(context.Background(), draft); err != nil || !created {
+		t.Fatalf("create draft: %v created=%v", err, created)
 	}
+	draftID := draft.ID
 	if err := h.s.HandleMessage(context.Background(), msg("draft-cancel", "取消建单 "+draftID)); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
@@ -50,14 +52,15 @@ func TestIssueDraftExpires(t *testing.T) {
 	h := newHarness(t, Config{})
 	current := time.Now()
 	h.s.now = func() time.Time { return current }
-	h.runner.chatReply = `{"action":"issue","title":"过期测试","body":"正文","severity":"medium"}`
-	if err := h.s.HandleMessage(context.Background(), msg("draft-expire-source", "请记录一个问题")); err != nil {
-		t.Fatalf("handle: %v", err)
+	draft := &IssueDraft{
+		ID: "DRAFT-EXPIRE01", Kind: "chat", ProjectID: "prj-1", ChatID: "group-1",
+		SourceMessageID: "draft-expire-source", Title: "过期测试", Body: "正文", Severity: "medium",
+		Status: IssueDraftPending, CreatedAt: current, UpdatedAt: current, ExpiresAt: current.Add(issueDraftTTL),
 	}
-	draftID := issueDraftIDPattern.FindString(strings.Join(h.notifier.all(), "\n"))
-	if draftID == "" {
-		t.Fatalf("draft id missing: %#v", h.notifier.all())
+	if created, err := h.repo.CreateIssueDraft(context.Background(), draft); err != nil || !created {
+		t.Fatalf("create draft: %v created=%v", err, created)
 	}
+	draftID := draft.ID
 	current = current.Add(issueDraftTTL + time.Second)
 	if err := h.s.HandleMessage(context.Background(), msg("draft-expire", "确认建单 "+draftID)); err != nil {
 		t.Fatalf("confirm expired: %v", err)
@@ -72,14 +75,15 @@ func TestIssueDraftExpires(t *testing.T) {
 
 func TestIssueDraftConfirmationIsIdempotent(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.runner.chatReply = `{"action":"issue","title":"幂等确认测试","body":"正文","severity":"medium"}`
-	if err := h.s.HandleMessage(context.Background(), msg("draft-idempotent-source", "请记录一个问题")); err != nil {
-		t.Fatalf("handle: %v", err)
+	draft := &IssueDraft{
+		ID: "DRAFT-IDEMPOT01", Kind: "chat", ProjectID: "prj-1", ChatID: "group-1",
+		SourceMessageID: "draft-idempotent-source", Title: "幂等确认测试", Body: "正文", Severity: "medium",
+		Status: IssueDraftPending, CreatedAt: time.Now(), UpdatedAt: time.Now(), ExpiresAt: time.Now().Add(issueDraftTTL),
 	}
-	draftID := issueDraftIDPattern.FindString(strings.Join(h.notifier.all(), "\n"))
-	if draftID == "" {
-		t.Fatalf("draft id missing: %#v", h.notifier.all())
+	if created, err := h.repo.CreateIssueDraft(context.Background(), draft); err != nil || !created {
+		t.Fatalf("create draft: %v created=%v", err, created)
 	}
+	draftID := draft.ID
 	for i := 0; i < 2; i++ {
 		if err := h.s.HandleMessage(context.Background(), msg("draft-idempotent-confirm", "确认建单 "+draftID)); err != nil {
 			t.Fatalf("confirm %d: %v", i, err)

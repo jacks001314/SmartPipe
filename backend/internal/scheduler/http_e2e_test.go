@@ -70,19 +70,6 @@ func TestHTTPEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bot dispatch: %v", err)
 	}
-	draftID := ""
-	waitFor(t, "draft confirmation", func() bool {
-		draftID = issueDraftIDPattern.FindString(strings.Join(h.notifier.all(), "\n"))
-		return draftID != ""
-	})
-	err = dispatcher.Dispatch(context.Background(), bot.Inbound{
-		Platform: "lanxin", PlatformMessageID: "e2e-confirm", ChatType: "group",
-		GroupID: "group-1", GroupName: "研发群", SenderID: "u1", SenderName: "张三",
-		Text: "确认建单 " + draftID, BotID: "bot-1", IsAtMe: true,
-	})
-	if err != nil {
-		t.Fatalf("bot confirm: %v", err)
-	}
 	waitFor(t, "issue + queued worker", func() bool {
 		w, _ := h.repo.ActiveWorker(context.Background(), "prj-1", 1)
 		return w != nil

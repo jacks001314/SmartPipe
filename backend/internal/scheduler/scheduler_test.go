@@ -338,23 +338,10 @@ func TestChatCreatesIssueAndFixWorkerProducesPR(t *testing.T) {
 	if err := h.s.HandleMessage(context.Background(), msg("m2", "导出点了没反应")); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
-	if h.tracker.issueCount() != 0 {
-		t.Fatalf("issue must wait for group confirmation, got %d", h.tracker.issueCount())
-	}
-	if len(h.notifier.all()) != 1 || !strings.Contains(h.notifier.all()[0], "待确认建单") {
-		t.Fatalf("group should receive draft confirmation: %#v", h.notifier.all())
-	}
-	draftID := issueDraftIDPattern.FindString(h.notifier.all()[0])
-	if draftID == "" {
-		t.Fatalf("draft id missing: %#v", h.notifier.all())
-	}
-	if err := h.s.HandleMessage(context.Background(), msg("m2-confirm", "确认建单 "+draftID)); err != nil {
-		t.Fatalf("confirm: %v", err)
-	}
 	if h.tracker.issueCount() != 1 {
-		t.Fatalf("issue not created after confirmation: %d", len(h.tracker.issues))
+		t.Fatalf("issue should be created without confirmation, got %d", h.tracker.issueCount())
 	}
-	if !strings.Contains(h.notifier.all()[len(h.notifier.all())-1], "Issue #1") {
+	if len(h.notifier.all()) == 0 || !strings.Contains(h.notifier.all()[len(h.notifier.all())-1], "Issue #1") {
 		t.Fatalf("group should receive issue link: %#v", h.notifier.all())
 	}
 	w, err := h.repo.ActiveWorker(context.Background(), "prj-1", 1)
@@ -867,31 +854,18 @@ func TestMessageLifecycleRecorded(t *testing.T) {
 	if err := h.s.HandleMessage(context.Background(), msg("msg-record-1", "记录这条消息")); err != nil {
 		t.Fatal(err)
 	}
-	draftID := issueDraftIDPattern.FindString(strings.Join(h.notifier.all(), "\n"))
-	if draftID == "" {
-		t.Fatalf("draft id missing: %#v", h.notifier.all())
-	}
-	if err := h.s.HandleMessage(context.Background(), msg("msg-record-confirm", "确认建单 "+draftID)); err != nil {
-		t.Fatal(err)
-	}
 	list, err := h.repo.ListMessages(context.Background(), 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var original, confirmed *MessageRecord
+	var original *MessageRecord
 	for i := range list {
-		switch list[i].PlatformMessageID {
-		case "msg-record-1":
+		if list[i].PlatformMessageID == "msg-record-1" {
 			original = &list[i]
-		case "msg-record-confirm":
-			confirmed = &list[i]
 		}
 	}
-	if original == nil || original.Status != "awaiting_confirmation" {
-		t.Fatalf("original message should await confirmation: %+v", original)
-	}
-	if confirmed == nil || confirmed.Status != "issue_created" || confirmed.Issue != 1 {
-		t.Fatalf("confirmation message should record issue creation: %+v", confirmed)
+	if original == nil || original.Status != "issue_created" || original.Issue != 1 {
+		t.Fatalf("message should record issue creation: %+v", original)
 	}
 }
 

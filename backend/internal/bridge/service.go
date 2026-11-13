@@ -59,7 +59,7 @@ func (s *Service) WithNotifier(n Notifier) *Service {
 	return s
 }
 
-// Result 是一次入站消息的处理结果。草稿未确认时 Draft 非空，Link 为空。
+// Result 是一次入站消息的处理结果。建单失败时 Draft 非空，Link 为空。
 type Result struct {
 	Link      *store.BridgeLink `json:"link,omitempty"`
 	Draft     *issuedraft.Draft `json:"draft,omitempty"`
@@ -76,7 +76,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg Message) (*store.Bridge
 	return res.Link, res.Created, nil
 }
 
-// HandleInbound 处理一条入站消息：先建草稿并回群，确认后才创建 Issue。
+// HandleInbound 处理一条入站消息：建草稿后立即创建 Issue 并回执。
 func (s *Service) HandleInbound(ctx context.Context, msg Message) (*Result, error) {
 	msg.MessageID = strings.TrimSpace(msg.MessageID)
 	msg.Title = strings.TrimSpace(msg.Title)
@@ -152,13 +152,15 @@ func (s *Service) HandleInbound(ctx context.Context, msg Message) (*Result, erro
 		}
 		draft = current
 	}
-	if created {
-		if err := s.replyDraft(ctx, msg, chatID, issuedraft.Prompt(draft)); err != nil {
-			_ = s.store.FinishIssueDraft(ctx, draft.ID, issuedraft.StatusCancelled, 0, "", now)
-			return nil, err
-		}
+	// 建单不再等群里确认：草稿落库后立刻创建 Issue；失败时草稿退回 pending 供群里重试。
+	claimed, err := s.store.ClaimIssueDraft(ctx, draft.ID, project.ID, chatID, msg.UserID, msg.SenderName, now)
+	if err != nil {
+		return nil, err
 	}
-	return &Result{Draft: draft}, nil
+	if claimed == nil {
+		return &Result{Draft: draft}, nil
+	}
+	return s.createIssueFromDraft(ctx, msg, project, claimed, chatID, now)
 }
 
 func (s *Service) answerDraft(ctx context.Context, msg Message, project *store.Project, action, explicitID string) (*Result, error) {
@@ -194,6 +196,11 @@ func (s *Service) answerDraft(ctx context.Context, msg Message, project *store.P
 		return &Result{Draft: draft}, nil
 	}
 
+	return s.createIssueFromDraft(ctx, msg, project, draft, chatID, now)
+}
+
+// createIssueFromDraft 是建单的唯一出口：自动建单和群里重试都走这里。
+func (s *Service) createIssueFromDraft(ctx context.Context, msg Message, project *store.Project, draft *issuedraft.Draft, chatID string, now time.Time) (*Result, error) {
 	client, err := s.clientFor(ctx, &project.ID, draft.Repo)
 	if err != nil {
 		_ = s.store.ReleaseIssueDraft(ctx, draft.ID, now)
@@ -202,7 +209,8 @@ func (s *Service) answerDraft(ctx context.Context, msg Message, project *store.P
 	issue, err := client.CreateIssue(ctx, draft.Repo, draft.Title, draft.Body, draft.Labels)
 	if err != nil {
 		_ = s.store.ReleaseIssueDraft(ctx, draft.ID, now)
-		_ = s.replyDraft(ctx, msg, chatID, "GitHub 建单失败，草稿仍保留，请稍后再次确认。")
+		_ = s.replyDraft(ctx, msg, chatID,
+			fmt.Sprintf("GitHub 建单失败，草稿 %s 已保留，稍后回复「确认建单 %s」重试。", draft.ID, draft.ID))
 		return nil, err
 	}
 	link, err := s.store.CreateBridgeLink(ctx, store.BridgeLink{
