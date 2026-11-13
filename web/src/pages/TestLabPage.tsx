@@ -11,7 +11,7 @@ export function TestLabPage({notify}:{notify:Notify}){
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState("");
  const [detail,setDetail]=useState<DesktopRun|null>(null);
- const [form,setForm]=useState({project_id:"",source_sha:"",artifact_sha256:"",platform:"windows-amd64"});
+ const [form,setForm]=useState({project_id:"",source_sha:"",artifact_sha256:"",platform:"windows-amd64",scenario:"desktop-observe",scenario_version:"1",checks:"desktop_observed"});
  const load=useCallback(async()=>{
   setBusy(true);
   try{
@@ -26,10 +26,15 @@ export function TestLabPage({notify}:{notify:Notify}){
   if(!form.project_id||!/^([a-f0-9]{40}|[a-f0-9]{64})$/.test(form.source_sha)||! /^[a-f0-9]{64}$/.test(form.artifact_sha256)){
    notify("请选择项目，并填写完整源码 SHA 和安装包 SHA-256","error");return;
   }
+  const required_checks=form.checks.split(/[\s,，]+/).filter(Boolean);
+  if(!form.scenario.trim()||!form.scenario_version.trim()||!required_checks.length||new Set(required_checks).size!==required_checks.length){
+   notify("请填写场景、版本和不重复的必需检查项","error");return;
+  }
   setBusy(true);
   try{
-   await api.createTestRun({...form,scenario:"desktop-observe",scenario_version:"1",required_checks:["desktop_observed"]});
-   notify("观察任务已排队");await load();
+   const {checks,...spec}=form;
+   await api.createTestRun({...spec,scenario:form.scenario.trim(),scenario_version:form.scenario_version.trim(),required_checks});
+   notify("测试任务已排队；等待支持该场景的 Runner 领取");await load();
   }catch(e){notify(e instanceof Error?e.message:"创建失败","error");}
   finally{setBusy(false);}
  }
@@ -56,10 +61,10 @@ export function TestLabPage({notify}:{notify:Notify}){
   }catch(e){notify(e instanceof Error?e.message:"下载失败","error");}
  }
  return <>
-  <div className="notice">当前可创建桌面观察任务，用于确认应用可读取和截图。通过观察不代表安装、编码或升级验收通过。</div>
+  <div className="notice">场景名称和版本必须与测试机已部署配置一致。桌面观察仅用于读取和截图，不满足发布验收门禁。</div>
   {error&&<div role="alert" className="notice">{error}</div>}
   <div className="card">
-   <h3>新建桌面观察</h3>
+   <h3>新建桌面测试</h3>
    <label>项目 <select aria-label="项目" value={form.project_id} onChange={e=>setForm({...form,project_id:e.target.value})}>
     <option value="">请选择项目</option>{projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
    </select></label>
@@ -68,7 +73,11 @@ export function TestLabPage({notify}:{notify:Notify}){
    </select></label>
    <label>源码 SHA <input aria-label="源码 SHA" value={form.source_sha} onChange={e=>setForm({...form,source_sha:e.target.value.trim()})}/></label>
    <label>制品 SHA-256 <input aria-label="制品 SHA-256" value={form.artifact_sha256} onChange={e=>setForm({...form,artifact_sha256:e.target.value.trim()})}/></label>
-   <button disabled={busy} onClick={()=>void create()}>创建观察任务</button>
+   <label>场景 <input aria-label="场景" value={form.scenario} onChange={e=>setForm({...form,scenario:e.target.value})}/></label>
+   <label>场景版本 <input aria-label="场景版本" value={form.scenario_version} onChange={e=>setForm({...form,scenario_version:e.target.value})}/></label>
+   <label>必需检查项 <input aria-label="必需检查项" placeholder="以逗号或空格分隔" value={form.checks} onChange={e=>setForm({...form,checks:e.target.value})}/></label>
+   <p>这些检查项必须全部通过并上传证据；填写名称不会自动安装测试场景。</p>
+   <button disabled={busy} onClick={()=>void create()}>创建测试任务</button>
    <button disabled={busy} onClick={()=>void load()}>刷新</button>
   </div>
   <div className="card"><h3>测试机</h3>
@@ -88,6 +97,7 @@ export function TestLabPage({notify}:{notify:Notify}){
   {detail&&<div className="card"><h3>{detail.id}</h3>
    <p>源码：{detail.spec.source_sha}</p><p>制品：{detail.spec.artifact_sha256}</p>
    <p>场景：{detail.spec.scenario} / {detail.spec.scenario_version}</p>
+   <p>必需检查项：{detail.spec.required_checks.join("、")}</p>
    {detail.report?.checks.map(c=><p key={c.id}>{c.id}：{c.status} {c.evidence&&<button onClick={()=>void download(detail.id,c.evidence)}>下载证据</button>}</p>)}
    {!detail.report&&<p>尚未提交报告。</p>}
   </div>}
