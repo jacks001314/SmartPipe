@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from "node:fs"
+import { readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -116,11 +116,14 @@ export function hasNativePayload(
   directory: string,
   target: CuaSdkNativeTarget = nativeTarget(),
 ): boolean {
-  return (
-    existsSync(join(directory, target.library)) &&
-    existsSync(join(directory, target.runtime)) &&
-    target.companions.every((filename) => existsSync(join(directory, filename)))
-  )
+  try {
+    return [target.library, target.runtime, ...target.companions].every((filename) => {
+      const info = statSync(join(directory, filename))
+      return info.isFile() && info.size > 0
+    })
+  } catch {
+    return false
+  }
 }
 
 export function hasCompletedNativePayload(
@@ -129,7 +132,13 @@ export function hasCompletedNativePayload(
 ): boolean {
   if (!hasNativePayload(directory, target)) return false
   try {
-    return statSync(join(directory, "complete.json")).isFile()
+    const metadata = JSON.parse(readFileSync(join(directory, "complete.json"), "utf8"))
+    return metadata !== null && typeof metadata === "object" &&
+      metadata.archive === target.archive &&
+      typeof metadata.version === "string" &&
+      target.archive.startsWith(`cua-driver-rs-${metadata.version}-`) &&
+      typeof metadata.checksum === "string" && /^[a-f0-9]{64}$/.test(metadata.checksum) &&
+      typeof metadata.source === "string" && metadata.source.startsWith("https://")
   } catch {
     return false
   }
