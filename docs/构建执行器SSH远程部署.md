@@ -21,9 +21,9 @@
   "id": "build-03",
   "os": "auto",
   "arch": "auto",
-  "host": "192.168.0.3",
+  "host": "build-01.example.com",
   "port": 22,
-  "username": "malama",
+  "username": "<ssh-user>",
   "auth_type": "password",
   "secret": "……",
   "install_dir": "",
@@ -55,7 +55,7 @@
 
 | 变量 | 作用 |
 |---|---|
-| `SMARTPIPE_RELEASE_SERVICE_PUBLIC_URL` | 构建机访问 release-service 的地址，例如 `http://192.168.0.5:8099`。不填时用管理员访问的主机名 + `SMARTPIPE_RELEASE_SERVICE_PORT` |
+| `SMARTPIPE_RELEASE_SERVICE_PUBLIC_URL` | 构建机访问 release-service 的地址，例如 `https://smartpipe.example.com:8099`。不填时用管理员访问的主机名 + `SMARTPIPE_RELEASE_SERVICE_PORT` |
 | `SMARTPIPE_RELEASE_SERVICE_PORT` | 对外发布端口，默认 8099 |
 | `SMARTPIPE_EXECUTOR_ASSETS` | 执行器二进制目录，默认 `/app/bin/executors` |
 
@@ -69,7 +69,7 @@
 
 ## 验证记录（2026-11-13）
 
-- 目标机：`malama@192.168.0.3`（macOS，amd64），由配置台发起。
+- 目标机：`<ssh-user>@<build-host>`（macOS，amd64），由配置台发起。
 - 结果：SSH 连接、平台识别 `darwin/amd64`、上传 6 MiB 执行器、写入配置、`launchd` 启动、注册在线，总耗时 8 秒。
 - 控制台执行器列表显示 `build-03 darwin/amd64 online`。
 - 本机 `build-05`（linux/amd64）也验证过完整流程，用于排查令牌问题后已清理。
@@ -79,6 +79,90 @@
 - Windows 构建机暂不支持 SSH 自动部署，接口会提示改用手动接入命令。
 - macOS 的 launchd 需要该用户具备可用的登录会话；不可用时自动回退到 `nohup`，机器重启后需要重新部署。
 - 卸载：停止对应 launchd/systemd 服务后删除 `$HOME/.smartpipe/release-executor`。
+
+## 已知环境坑：macOS 12 + Node 24 原生模块
+
+macOS 12 自带的 libc++ 没有 `std::ranges`，而 Node 24 的 `v8-memory-span.h` 会按
+`#if __has_include(<ranges>)` 给 `std::ranges::enable_view` 写特化。用 SDK 13.1 +
+clang 14 编译时会出现两类错误：
+
+- `no member named 'enable_view' in namespace 'std::ranges'`
+- `redefinition of 'enable_view'`（先包含 `<string>` 再包含 v8 头时）
+
+这是 Clang 14 对限定式变量模板特化的限制，不是项目代码问题。构建机上可对
+node-gyp 头缓存做一次本地补丁，让该分支不参与编译：
+
+```sh
+for f in "$HOME"/Library/Caches/node-gyp/*/include/node/v8-memory-span.h; do
+  [ -f "$f" ] || continue
+  grep -q 'smartpipe: no ranges' "$f" && continue
+  cp "$f" "$f.smartpipe.bak"
+  sed -i '' 's|#if __has_include(<ranges>)|#if 0 /* smartpipe: no ranges on macOS 12 CLT */|' "$f"
+done
+```
+
+补丁只影响当前用户缓存，不改系统 SDK；node-gyp 重新下载头时需要再执行一次。
+`executor_probe` 会输出 `xcode-select -p`、SDK 版本、SDK 路径与 clang 版本，便于先确认
+是否命中这个坑。更彻底的方案是把构建机升到 macOS 13+ 与 CLT 15+。
+
+## 已知环境坑：macOS 构建机出 Windows 安装包
+
+Syntropy 的 Windows 安装包可以在 Intel macOS 上交叉构建，但要求 PATH 里有
+`makensis` 与 `x86_64-w64-mingw32-g++`；缺任何一个，`build.mjs` 会在
+`assertInstallerTarget` 处直接失败。macOS 12 自带的老 Homebrew 已经跑不起来
+（portable-ruby 2.3.7 读不到系统版本），不要指望 `brew install`。
+
+已验证可行的替代装法（全部落在用户目录，`/usr/local/bin` 只放软链或包装脚本）：
+
+```sh
+# NSIS：用 electron-builder 的 macOS 版 makensis（3.04）
+mkdir -p ~/toolchains/nsis
+curl -fsSL -o /tmp/nsis.7z \
+  https://github.com/electron-userland/electron-builder-binaries/releases/download/nsis-3.0.4.1/nsis-3.0.4.1.7z
+bsdtar -xf /tmp/nsis.7z -C ~/toolchains/nsis
+chmod +x ~/toolchains/nsis/mac/makensis
+ln -sf ~/toolchains/nsis/mac/makensis /usr/local/bin/makensis
+ln -sfn ~/toolchains/nsis /usr/local/share/nsis   # makensis 默认去这里找 Stubs/
+
+# mingw-w64：用 llvm-mingw 的 clang++ 冒充 g++ 入口
+curl -fsSL -o ~/toolchains/llvm-mingw.tar.xz \
+  https://github.com/mstorsjo/llvm-mingw/releases/download/20261104/llvm-mingw-20261104-ucrt-macos-universal.tar.xz
+tar -xf ~/toolchains/llvm-mingw.tar.xz -C ~/toolchains
+cat > /usr/local/bin/x86_64-w64-mingw32-g++ <<'EOF'
+#!/bin/sh
+exec "$HOME/toolchains/llvm-mingw-20261104-ucrt-macos-universal/bin/x86_64-w64-mingw32-clang++" "$@"
+EOF
+chmod +x /usr/local/bin/x86_64-w64-mingw32-g++
+```
+
+验收（两条都要有输出）：
+
+```sh
+makensis -VERSION
+x86_64-w64-mingw32-g++ --version | head -1
+```
+
+`executor_probe` 现在会额外输出 `windows cross toolchain:` 段落，Agent 可以先看这一段再决定是否重装。
+
+### makensis 报 `std::bad_alloc`：构建命令没有 UTF-8 locale
+
+现象：`makensis` 一读到带 `Unicode true` 的 `.nsi` 就
+`libc++abi: terminating with uncaught exception of type std::bad_alloc`，
+换成 NSIS 3.0.5 也一样；不带 `Unicode true` 的最小脚本却能编译。
+
+根因不是内存、也不是 NSIS 版本：通过 SSH 启动的执行器没有 `LANG`，
+并且继承了 `LC_CTYPE=C`，NSIS 的 Unicode 构建在这种情况下会直接崩溃。
+
+验证方式（构建机上）：
+
+```sh
+env -i PATH=/usr/local/bin:/usr/bin:/bin LANG=en_US.UTF-8 makensis -V2 /tmp/u.nsi   # 成功
+env -i PATH=/usr/local/bin:/usr/bin:/bin LANG=en_US.UTF-8 LC_CTYPE=C makensis -V2 /tmp/u.nsi  # bad_alloc
+```
+
+执行器自 2026-11-15 起在构建命令和 Agent 遥控命令里统一补
+`LANG` / `LC_ALL`（macOS 用 `en_US.UTF-8`，Linux 用 `C.UTF-8`），
+只在环境里没有有效 UTF-8 locale 时生效；`executor_probe` 的 `locale:` 行会显示当前值。
 
 ## 删除构建机
 
@@ -97,4 +181,4 @@
 接口：`DELETE /admin/releases/v2/executors/{id}`，可选 body `{"force":true,"resource_id":"...","install_dir":"..."}`。
 部署位置记录在迁移 44 新增的 `release_v2_executor_hosts` 表；本功能上线前部署的执行器没有这条记录，删除时可以带 `resource_id` / `install_dir`，或者强制只删注册信息。
 
-验证（2026-11-13）：在 `malama@192.168.0.3` 上部署并删除两个临时执行器——`build-03-test2`（`$HOME/.smartpipe/executor-test2`）和 `build-03-test3`（绝对路径 `/tmp/smartpipe-executor-test3`），两次都返回 `remote_cleaned: true`，步骤为“停止并卸载 → 删除注册记录 → 删除 SSH 资源”，`build-03` 保持在线未受影响。绝对路径场景下进程清理按 `^<dir>/release-executor` 精确匹配，避免误杀执行脚本自身的 shell。
+验证（2026-11-13）：在 `<ssh-user>@<build-host>` 上部署并删除两个临时执行器——`build-03-test2`（`$HOME/.smartpipe/executor-test2`）和 `build-03-test3`（绝对路径 `/tmp/smartpipe-executor-test3`），两次都返回 `remote_cleaned: true`，步骤为“停止并卸载 → 删除注册记录 → 删除 SSH 资源”，`build-03` 保持在线未受影响。绝对路径场景下进程清理按 `^<dir>/release-executor` 精确匹配，避免误杀执行脚本自身的 shell。
