@@ -9,9 +9,18 @@ coverage.out
 # 本地真实凭证与部署数据，勿提交
 deploy/.env
 deploy/bot.local.env
+# 环境专属网络/解析覆盖（含真实 DNS、IP），只保留 example 模板
+deploy/docker-compose.override.yml
 deploy/data/
 .dev/
 backend/bin/
+# go build ./... 在 backend/ 下留下的可执行文件
+/backend/codex-pipeline
+/backend/release-executor
+/backend/release-mcp
+/backend/release-service
+/backend/scheduler
+/backend/update-service-stub
 
 # 构建/部署临时文件
 *.tar.gz

@@ -54,7 +54,7 @@ func (a *API) applyGitHubProxy(raw string) error {
 	} else {
 		parsed, err := url.Parse(raw)
 		if err != nil || parsed.Host == "" {
-			return fmt.Errorf("代理地址不合法，示例：http://172.17.0.1:7890")
+			return fmt.Errorf("代理地址不合法，示例：http://proxy.example.com:7890")
 		}
 		switch parsed.Scheme {
 		case "http", "https", "socks5", "socks5h":

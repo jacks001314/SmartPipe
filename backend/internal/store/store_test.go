@@ -12,7 +12,7 @@ import (
 
 // 集成测试需要真实 Postgres。设置 SMARTPIPE_TEST_DSN 后运行：
 //
-//	$env:SMARTPIPE_TEST_DSN="postgres://smartpipe:pwd@192.168.1.99:5432/smartpipe_test?sslmode=disable"
+//	$env:SMARTPIPE_TEST_DSN="postgres://smartpipe:pwd@<db-host>:5432/smartpipe_test?sslmode=disable"
 //	go test ./internal/store -count=1
 func testStore(t *testing.T) *Store {
 	t.Helper()

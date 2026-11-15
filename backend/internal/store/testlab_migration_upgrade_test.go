@@ -50,4 +50,18 @@ INSERT INTO desktop_test_machines(id,platform,token_sha256,generation)
 	if count != 5 {
 		t.Fatalf("new migration count = %d", count)
 	}
+	var intakeTable string
+	if err := s.db.QueryRow("SELECT to_regclass('release_project_configs')::text").Scan(&intakeTable); err != nil {
+		t.Fatal(err)
+	}
+	if intakeTable != "release_project_configs" {
+		t.Fatal("release intake tables missing after legacy upgrade")
+	}
+	var repaired bool
+	if err := s.db.QueryRow("SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version=53)").Scan(&repaired); err != nil {
+		t.Fatal(err)
+	}
+	if !repaired {
+		t.Fatal("release intake repair migration missing")
+	}
 }
