@@ -61,38 +61,43 @@ AUTH="Authorization: Bearer ${SMARTPIPE_ADMIN_TOKEN}"
 CT="Content-Type: application/json"
 
 [[ -d "$SLOW_DIR/.git" ]] || fail "$SLOW_DIR 不是 git 仓库"
-COMMIT=$(git -c safe.directory="$SLOW_DIR" -C "$SLOW_DIR" rev-parse HEAD)
 
 admin_version=$(curl -fsS "$ADMIN/healthz" | json_field 'd.get("version","")')
 [[ -n "$admin_version" ]] || fail "admin-api /healthz 不可用"
 pass "admin-api 健康：$admin_version"
 
-# create_run <标签>：建项目/计划/运行，回显 run id
+# create_run <标签>：用三输入入口建一个 build_only 演练运行，回显 run id。
+# 版本、tag、commit 由服务端从项目配置与本地仓库派生，脚本不再直接传。
 create_run() {
-  local tag=$1 stamp project plan run run_id
+  local tag=$1 stamp work repo project project_id cfg run run_id version
   stamp=$(date +%s)$RANDOM
+  version="0.2.$((stamp % 100000))"
+  work=${SMOKE_SLOW_WORK:-/tmp/release-v2-recovery-$stamp}
+  repo=$work/repo
+  mkdir -p "$repo"
+  [[ -f "$SLOW_DIR/smartpipe.yaml" ]] && cp "$SLOW_DIR/smartpipe.yaml" "$repo/smartpipe.yaml"
+  printf '{"version":"%s"}\n' "$version" > "$repo/version.json"
+  git -C "$repo" init -q -b main
+  git -C "$repo" -c user.name=recovery -c user.email=recovery@example.invalid add -A
+  git -C "$repo" -c user.name=recovery -c user.email=recovery@example.invalid commit -qm "recovery $version"
+  git -C "$repo" -c user.name=recovery -c user.email=recovery@example.invalid tag "v$version"
+
   project=$(curl -fsS -X POST -H "$AUTH" -H "$CT" \
-    -d "{\"name\":\"recovery-$tag-$stamp\",\"github_repo_url\":\"file://$SLOW_DIR\",\"github_default_branch\":\"main\",\"local_repo_path\":\"$SLOW_DIR\",\"enabled\":true}" \
+    -d "{\"name\":\"recovery-$tag-$stamp\",\"github_repo_url\":\"file://$repo\",\"github_default_branch\":\"main\",\"local_repo_path\":\"$repo\",\"enabled\":true}" \
     "$ADMIN/admin/projects")
-  local project_id
   project_id=$(echo "$project" | json_field 'd["data"]["id"]')
   [[ "$project_id" == prj_* ]] || fail "创建项目失败：$project"
 
-  plan=$(curl -fsS -X POST -H "$AUTH" -H "$CT" \
-    -d "{\"project_id\":\"$project_id\",\"version\":\"0.2.$((stamp % 100000))\",\"mode\":\"build_only\",\"channel\":\"$CHANNEL\",\"commit\":\"$COMMIT\"}" \
-    "$ADMIN/admin/releases/v2/plans")
-  local plan_id blockers
-  plan_id=$(echo "$plan" | json_field 'd["data"]["id"]')
-  [[ "$plan_id" == rplan_* ]] || fail "创建计划失败：$plan"
-  blockers=$(echo "$plan" | json_field 'd["data"].get("blockers")')
-  [[ "$blockers" == "None" || "$blockers" == "[]" ]] || fail "计划有阻塞项：$blockers"
+  cfg='{"builds":{"linux-amd64":{"build":"sleep 20 && mkdir -p dist && date -u > dist/app.txt && tar -czf dist/app.tar.gz dist/app.txt","sign":"sh -c '"'"'date -u > dist/app.sig && printf SIGNED >> dist/app.sig'"'"'","verify":"test -s dist/app.tar.gz","artifacts":[{"role":"app-bundle","glob":"dist/app.tar.gz","content_type":"application/gzip"}]}},"version_file":"version.json","channel_order":["test","stable"]}'
+  curl -fsS -X PUT -H "$AUTH" -H "$CT" -d "$cfg" \
+    "$ADMIN/admin/releases/v2/projects/$project_id/release-config" >/dev/null || fail "写入项目发布配置失败"
 
   run=$(curl -fsS -X POST -H "$AUTH" -H "$CT" \
-    -d "{\"plan_id\":\"$plan_id\",\"idempotency_key\":\"recovery-$stamp\"}" \
+    -d "{\"project_id\":\"$project_id\",\"mode\":\"build_only\",\"idempotency_key\":\"recovery-$stamp\"}" \
     "$ADMIN/admin/releases/v2/runs")
   run_id=$(echo "$run" | json_field 'd["data"]["id"]')
   [[ "$run_id" == rrun_* ]] || fail "创建运行失败：$run"
-  pass "运行：$run_id（项目 $project_id）"
+  pass "运行：$run_id（项目 $project_id，v$version，build_only）"
   echo "$run_id"
 }
 

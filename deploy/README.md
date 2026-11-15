@@ -53,7 +53,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build.ps1 `
 
 ```bash
 sudo ./scripts/install.sh --install-docker \
-  --dsn 'postgres://smartpipe:password@192.168.1.99:5432/smartpipe?sslmode=disable' \
+  --dsn 'postgres://smartpipe:password@db-host:5432/smartpipe?sslmode=disable' \
   --lanxin-app-id 'orgId-appId' \
   --lanxin-app-secret 'your-app-secret'
 ```
@@ -81,6 +81,10 @@ chmod 600 deploy/.env
 # 编辑 deploy/.env，至少替换 DSN、主密钥、全部内部令牌和蓝信凭据
 sudo ./scripts/install.sh --mode docker --env-file deploy/.env
 ```
+
+通用 `docker-compose.yml` 不内置任何 DNS 或公网 IP。当前环境如果需要固定 DNS 或
+`github.com` 解析，复制 `deploy/docker-compose.override.example.yml` 为
+`deploy/docker-compose.override.yml`，再在 `deploy/.env` 填写对应变量；不要把地址写回通用模板。
 
 安装后检查：
 
@@ -144,7 +148,7 @@ SSH 端口不是 22 时，加 `-Port 2222`。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\deploy.ps1 `
-  -HostName 192.168.1.99 -User jacks `
+  -HostName <deploy-host> -User <ssh-user> `
   -PassFile C:\secure\smartpipe-ssh.txt `
   -EnvFile .\deploy\.env
 ```
@@ -153,7 +157,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\deploy.ps1 `
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\deploy.ps1 `
-  -HostName 192.168.1.99 -User jacks `
+  -HostName <deploy-host> -User <ssh-user> `
   -PassFile C:\secure\smartpipe-ssh.txt `
   -EnvFile .\deploy\.env -Mode docker
 ```
@@ -162,7 +166,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\deploy.ps1 `
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\deploy.ps1 `
-  -HostName 192.168.1.99 -User jacks `
+  -HostName <deploy-host> -User <ssh-user> `
   -PassFile C:\secure\smartpipe-ssh.txt `
   -EnvFile .\deploy\.env -Mode binary
 ```
@@ -219,7 +223,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\sit-all.ps1
 2. 换一组端口：`SMARTPIPE_ADMIN_PORT` / `BRIDGE_PORT` / `BOT_PORT` / `VERIFY_PORT` 全部改掉；
 3. 换一个数据库：不要和旧实例共用同一个 database，否则迁移与数据互相干扰。
 
-示例（192.168.0.5 上的第二套，端口 19090–19097）：
+示例（同一台机器上的第二套，端口 19090–19097）：
 
 ```bash
 # 数据库：用已有 Postgres 容器建独立库与角色
@@ -228,15 +232,15 @@ docker exec smartpipe-postgres psql -U smartpipe -d postgres -c "CREATE DATABASE
 
 # 环境文件追加
 COMPOSE_PROJECT_NAME=smartpipe-v05
-SMARTPIPE_DSN=postgres://smartpipe_v05:...@172.17.0.1:5432/smartpipe_v05?sslmode=disable
+SMARTPIPE_DSN=postgres://smartpipe_v05:...@db-host:5432/smartpipe_v05?sslmode=disable
 SMARTPIPE_ADMIN_PORT=19092
 SMARTPIPE_BRIDGE_PORT=19090
 SMARTPIPE_BOT_PORT=19093
 SMARTPIPE_VERIFY_PORT=19095
 ```
 
-容器里的服务走 `172.17.0.1`（docker0 网关）访问宿主机上已经发布到 `0.0.0.0:5432`
-的 Postgres。
+容器里的服务通过 `SMARTPIPE_DSN` 里的主机访问 Postgres；该主机按当前环境填写
+（例如宿主机的 docker0 网关或独立数据库地址），不要沿用任何示例 IP。
 
 另外，全新数据库必须依赖 `store.Migrate` 按版本升序执行迁移；旧代码按声明顺序
 （18 → 1）执行，空库会在 `agent_tokens` 上失败，admin-api 反复重启。该问题已修复，

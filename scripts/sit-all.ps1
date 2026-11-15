@@ -1,4 +1,4 @@
-# Full local SIT regression: health checks, backend tests, web build, and every smoke script.
+﻿# Full local SIT regression: health checks, backend tests, web build, and every smoke script.
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\sit-all.ps1 [-SkipTests] [-Only mcp-smoke]
 param(
   [switch]$SkipTests,
@@ -37,6 +37,12 @@ function Run-Step([string]$name, [scriptblock]$body) {
     $sw.Stop()
     Add-Result $name $false ((("{0:N1}s " -f $sw.Elapsed.TotalSeconds)) + $_.Exception.Message)
   }
+}
+
+Write-Output "== static =="
+Run-Step "hardcoded-endpoints" {
+  & (Join-Path $PSScriptRoot "check-hardcoded-endpoints.ps1")
+  if ($LASTEXITCODE -ne 0) { throw "发现环境私有地址字面量" }
 }
 
 $services = @(

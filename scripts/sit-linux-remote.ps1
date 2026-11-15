@@ -1,14 +1,17 @@
 # 在 Linux 主机上跑 sit-linux.sh：打包 backend+sdks → 上传 → 解包 → 执行。
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File scripts\sit-linux-remote.ps1 `
-#         -HostName 192.168.1.99 -User jacks -PassFile C:\path\pass.txt [-SkipTest]
+#         -HostName <host> -User <user> -PassFile C:\path\pass.txt [-SkipTest]
 param(
-  [string]$HostName = "192.168.1.99",
-  [string]$User = "jacks",
+  [string]$HostName = $env:SMARTPIPE_DEPLOY_HOST,
+  [string]$User = $env:SMARTPIPE_DEPLOY_USER,
   [string]$PassFile = "",
-  [string]$TestDSN = "postgres://smartpipe:smartpipe_dev_2026@192.168.1.99:5432/smartpipe_test?sslmode=disable",
+  [string]$TestDSN = $env:SMARTPIPE_TEST_DSN,
   [switch]$SkipTest
 )
 $ErrorActionPreference = "Stop"
+if ([string]::IsNullOrWhiteSpace($HostName)) { throw "缺少 -HostName（或设置 SMARTPIPE_DEPLOY_HOST）" }
+if ([string]::IsNullOrWhiteSpace($User)) { throw "缺少 -User（或设置 SMARTPIPE_DEPLOY_USER）" }
+if (-not $SkipTest -and [string]::IsNullOrWhiteSpace($TestDSN)) { throw "缺少 -TestDSN（或设置 SMARTPIPE_TEST_DSN）" }
 $root = Split-Path -Parent $PSScriptRoot
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $tar = Join-Path $root (".dev\sit-linux-" + $stamp + ".tar.gz")

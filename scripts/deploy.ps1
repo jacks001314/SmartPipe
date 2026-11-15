@@ -1,6 +1,6 @@
 param(
-  [string]$HostName = "192.168.1.99",
-  [string]$User = "jacks",
+  [string]$HostName = $env:SMARTPIPE_DEPLOY_HOST,
+  [string]$User = $env:SMARTPIPE_DEPLOY_USER,
   [ValidateRange(1, 65535)]
   [int]$Port = 22,
   [string]$PassFile = "",
@@ -16,6 +16,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if ([string]::IsNullOrWhiteSpace($HostName)) { throw "缺少 -HostName（或设置 SMARTPIPE_DEPLOY_HOST）" }
+if ([string]::IsNullOrWhiteSpace($User)) { throw "缺少 -User（或设置 SMARTPIPE_DEPLOY_USER）" }
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $Stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $DevRoot = Join-Path $Root ".dev"

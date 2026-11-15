@@ -9,10 +9,10 @@
 注册并启动计划任务 SmartPipeReleaseExecutor（SYSTEM 账户，开机触发）。
 
 .EXAMPLE
-.\install.ps1 -BinaryPath .\release-executor.exe -ServiceUrl http://10.0.0.5:18099 -ExecutorId win-01 -Token <token>
+.\install.ps1 -BinaryPath .\release-executor.exe -ServiceUrl https://release-service.example.com -ExecutorId win-01 -Token <token>
 
 .EXAMPLE
-.\install.ps1 -BinaryPath .\release-executor.exe -ServiceUrl http://10.0.0.5:18099 -ExecutorId win-01 -DryRun
+.\install.ps1 -BinaryPath .\release-executor.exe -ServiceUrl https://release-service.example.com -ExecutorId win-01 -DryRun
 #>
 [CmdletBinding()]
 param(
@@ -47,7 +47,7 @@ if (-not $DryRun) {
     }
 }
 if ([string]::IsNullOrWhiteSpace($ServiceUrl)) {
-    if ($DryRun) { $ServiceUrl = '<prompt>' } else { $ServiceUrl = (Read-Host 'release-service URL（例如 http://10.0.0.5:18099）') }
+    if ($DryRun) { $ServiceUrl = '<prompt>' } else { $ServiceUrl = (Read-Host 'release-service URL（例如 https://release-service.example.com）') }
 }
 if ([string]::IsNullOrWhiteSpace($ExecutorId)) { $ExecutorId = ($env:COMPUTERNAME).ToLowerInvariant() }
 if ([string]::IsNullOrWhiteSpace($Token)) {

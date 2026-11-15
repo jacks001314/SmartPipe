@@ -187,7 +187,7 @@ copy_tree() {
     fi
   done
   mkdir -p "$INSTALL_DIR/deploy"
-  for item in docker-compose.yml .env.example README.md; do
+  for item in docker-compose.yml docker-compose.override.example.yml .env.example README.md; do
     if [[ -f "$SOURCE_DIR/deploy/$item" ]]; then
       cp -a "$SOURCE_DIR/deploy/$item" "$INSTALL_DIR/deploy/"
     fi

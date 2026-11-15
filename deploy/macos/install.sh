@@ -7,7 +7,7 @@
 #   bash install.sh --dry-run /tmp/release-executor   # 只渲染并校验 plist，不改系统
 #
 # 需要提前准备（也可以用环境变量传进来）：
-#   SMARTPIPE_RELEASE_SERVICE_URL     release-service 地址，例如 http://10.0.0.5:18099
+#   SMARTPIPE_RELEASE_SERVICE_URL     release-service 地址，例如 https://release-service.example.com
 #   SMARTPIPE_RELEASE_SERVICE_TOKEN   执行器令牌（只存在于本机，不进仓库）
 #   SMARTPIPE_RELEASE_EXECUTOR_ID     稳定执行器 id，例如 mac-mini-01
 #

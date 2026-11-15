@@ -3,7 +3,7 @@
 #   app     admin-api + bot + bridge   （控制台、蓝信、GitHub Webhook）
 #   worker  scheduler + Codex + 构建工具链，另带 patch-verifier（只用于发版构建）
 #
-# 数据库沿用已有的 postgres 容器（默认 172.17.0.1:5432），不在这里管理。
+# 数据库沿用当前环境已有的 Postgres（地址由 SMARTPIPE_DSN 指定），不在这里管理。
 #
 # 首次部署：
 #   cp deploy/.env.example deploy/.env
@@ -29,13 +29,12 @@ x-runtime: &runtime
   init: true
   # 两个容器用同一 uid 写同一个数据卷，commit/push 不需要任何路径映射。
   user: "10001:10001"
-  dns:
-    - ${SMARTPIPE_DNS_PRIMARY:-192.168.1.1}
-    - ${SMARTPIPE_DNS_SECONDARY:-223.5.5.5}
-  # 本机 DNS 会把 github.com 解析到当前网络无法到达的边缘节点；映射到可用的
-  # GitHub 边缘地址。其他部署可用 SMARTPIPE_GITHUB_IP 覆盖。
+  # DNS 不设默认值：容器默认继承宿主机解析器。需要固定 DNS 时，复制
+  # docker-compose.override.example.yml 为 docker-compose.override.yml，
+  # 并按当前环境填写，不在通用 Compose 里写死任何地址。
+  # 网络相关的域名/地址不做内置映射：需要固定 github.com 等解析时，在同目录
+  # 放一份只属于该环境的 docker-compose.override.yml，不要改这份通用配置。
   extra_hosts:
-    - "github.com:${SMARTPIPE_GITHUB_IP:-140.82.112.3}"
     - "host.docker.internal:host-gateway"
   security_opt:
     - no-new-privileges:true
@@ -77,6 +76,8 @@ services:
       SMARTPIPE_RELEASE_SERVICE_ADDR: ":8099"
       SMARTPIPE_RELEASE_SERVICE_TOKEN: ${RELEASE_SERVICE_TOKEN}
       SMARTPIPE_RELEASE_MCP_ADDR: ":8097"
+      # 发布 Agent 通过回环地址调用 release-mcp；不设置时 Agent 不会启动。
+      SMARTPIPE_RELEASE_AGENT_MCP_URL: http://127.0.0.1:8097/mcp
       SMARTPIPE_RELEASE_STORAGE_DIR: /data/releases
       SMARTPIPE_RELEASE_OBJECTS_PUBLIC_URL: ${SMARTPIPE_RELEASE_OBJECTS_PUBLIC_URL:-}
       SMARTPIPE_RELEASE_UPDATE_URL: ${SMARTPIPE_RELEASE_UPDATE_URL:-}

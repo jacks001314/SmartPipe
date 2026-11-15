@@ -20,7 +20,7 @@ go build -ldflags "-s -w -X main.version=0.6.9" -o dist/release-executor.exe ./c
 
 ```powershell
 .\install.ps1 -BinaryPath .\release-executor.exe `
-    -ServiceUrl http://10.0.0.5:18099 `
+    -ServiceUrl https://release-service.example.com `
     -ExecutorId win-01 `
     -Token <executor token>
 ```

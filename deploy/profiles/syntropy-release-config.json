@@ -1,0 +1,83 @@
+{
+  "builds": {
+    "darwin-arm64": {
+      "build": "cd desktop_app && pnpm install --frozen-lockfile && export npm_config_fetch_timeout=600000 npm_config_fetch_retries=5 && export SYNTROPY_BUILD_DATE=\"${SMARTPIPE_BUILD_VERSION##*.}\" && node tools/build.mjs installer --target-os darwin --target-arch arm64 --thin --installer-dir dist/installers-thin --skip-tests && node tools/build.mjs installer --target-os darwin --target-arch arm64 --installer-dir dist/installers --skip-tests && node tools/update-bundle.mjs --platform darwin-arm64 --installer-dir dist/installers-thin $(grep -q -- '--installer-kind' tools/update-bundle.mjs && printf -- '--installer-kind thin')",
+      "verify": "cd desktop_app && node tools/verify-installers.mjs --platform darwin-arm64 --expect-version \"$SMARTPIPE_BUILD_VERSION\"",
+      "host_os": "darwin",
+      "host_arch": "amd64",
+      "timeout": "150m",
+      "manifest_path": "desktop_app/dist/update-bundle/update-bundle.json",
+      "artifacts": [
+        { "role": "installer", "kind": "installer", "glob": "desktop_app/dist/installers/darwin-arm64/*.dmg", "required": true },
+        { "role": "update-thin", "kind": "thin", "glob": "desktop_app/dist/installers-thin/darwin-arm64/*.dmg", "required": true },
+        { "role": "update-bundle", "kind": "manifest", "glob": "desktop_app/dist/update-bundle/update-bundle.json", "required": true },
+        { "role": "app-server", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/bin/darwin-arm64/syntropy-app-server", "os": "darwin", "arch": "arm64", "required": true, "destinations": ["update:product"] },
+        { "role": "codex", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/codex-darwin-amd64.tgz", "os": "darwin", "arch": "amd64", "required": true, "destinations": ["update:product"] },
+        { "role": "codex", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/codex-darwin-arm64.tgz", "os": "darwin", "arch": "arm64", "required": true, "destinations": ["update:product"] },
+        { "role": "codex", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/codex-linux-amd64.tgz", "os": "linux", "arch": "amd64", "required": true, "destinations": ["update:product"] },
+        { "role": "codex", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/codex-windows-amd64.tgz", "os": "windows", "arch": "amd64", "required": true, "destinations": ["update:product"] },
+        { "role": "mbot", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/mbot-darwin-amd64", "os": "darwin", "arch": "amd64", "required": true, "destinations": ["update:product"] },
+        { "role": "mbot", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/mbot-darwin-arm64", "os": "darwin", "arch": "arm64", "required": true, "destinations": ["update:product"] },
+        { "role": "mbot", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/mbot-linux-amd64", "os": "linux", "arch": "amd64", "required": true, "destinations": ["update:product"] },
+        { "role": "mbot", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/mbot-linux-arm64", "os": "linux", "arch": "arm64", "required": true, "destinations": ["update:product"] },
+        { "role": "mbot", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/mbot-windows-amd64.exe", "os": "windows", "arch": "amd64", "required": true, "destinations": ["update:product"] },
+        { "role": "nbot", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/nbot-darwin-amd64", "os": "darwin", "arch": "amd64", "required": true, "destinations": ["update:product"] },
+        { "role": "nbot", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/nbot-darwin-arm64", "os": "darwin", "arch": "arm64", "required": true, "destinations": ["update:product"] },
+        { "role": "nbot", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/nbot-linux-amd64", "os": "linux", "arch": "amd64", "required": true, "destinations": ["update:product"] },
+        { "role": "nbot", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/nbot-linux-arm64", "os": "linux", "arch": "arm64", "required": true, "destinations": ["update:product"] },
+        { "role": "nbot", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/nbot-windows-amd64.exe", "os": "windows", "arch": "amd64", "required": true, "destinations": ["update:product"] },
+        { "role": "node-repl", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/node-repl-darwin-amd64", "os": "darwin", "arch": "amd64", "required": true, "destinations": ["update:product"] },
+        { "role": "node-repl", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/node-repl-darwin-arm64", "os": "darwin", "arch": "arm64", "required": true, "destinations": ["update:product"] },
+        { "role": "node-repl", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/node-repl-linux-amd64", "os": "linux", "arch": "amd64", "required": true, "destinations": ["update:product"] },
+        { "role": "node-repl", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/node-repl-linux-arm64", "os": "linux", "arch": "arm64", "required": true, "destinations": ["update:product"] },
+        { "role": "node-repl", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/node-repl-windows-amd64.exe", "os": "windows", "arch": "amd64", "required": true, "destinations": ["update:product"] },
+        { "role": "node-runtime", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/node-runtime-darwin-amd64", "os": "darwin", "arch": "amd64", "required": true, "destinations": ["update:product"] },
+        { "role": "node-runtime", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/node-runtime-darwin-arm64", "os": "darwin", "arch": "arm64", "required": true, "destinations": ["update:product"] },
+        { "role": "node-runtime", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/node-runtime-linux-amd64", "os": "linux", "arch": "amd64", "required": true, "destinations": ["update:product"] },
+        { "role": "node-runtime", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/node-runtime-linux-arm64", "os": "linux", "arch": "arm64", "required": true, "destinations": ["update:product"] },
+        { "role": "node-runtime", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/node-runtime-windows-amd64.exe", "os": "windows", "arch": "amd64", "required": true, "destinations": ["update:product"] },
+        { "role": "content-templates", "kind": "content", "glob": "desktop_app/dist/update-bundle/content/templates-*.tar.gz", "required": true, "destinations": ["update:content"] },
+        { "role": "content-skills", "kind": "content", "glob": "desktop_app/dist/update-bundle/content/skills-*.tar.gz", "required": true, "destinations": ["update:content"] }
+      ]
+    },
+    "windows-amd64": {
+      "build": "cd desktop_app && pnpm install --frozen-lockfile && export npm_config_fetch_timeout=600000 npm_config_fetch_retries=5 && export SYNTROPY_BUILD_DATE=\"${SMARTPIPE_BUILD_VERSION##*.}\" && node tools/build.mjs installer --target-os windows --target-arch amd64 --thin --installer-dir dist/installers-thin --skip-tests && node tools/build.mjs installer --target-os windows --target-arch amd64 --installer-dir dist/installers --skip-tests && node tools/update-bundle.mjs --platform windows-amd64 --installer-dir dist/installers-thin $(grep -q -- '--installer-kind' tools/update-bundle.mjs && printf -- '--installer-kind thin')",
+      "verify": "cd desktop_app && node tools/verify-installers.mjs --platform windows-amd64 --expect-version \"$SMARTPIPE_BUILD_VERSION\"",
+      "host_os": "darwin",
+      "host_arch": "amd64",
+      "timeout": "150m",
+      "manifest_path": "desktop_app/dist/update-bundle/update-bundle.json",
+      "artifacts": [
+        { "role": "installer", "kind": "installer", "glob": "desktop_app/dist/installers/windows-amd64/*.exe", "required": true },
+        { "role": "app-server", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/bin/win32-x64/syntropy-app-server.exe", "os": "windows", "arch": "amd64", "required": true, "destinations": ["update:product"] },
+        { "role": "update-thin", "kind": "thin", "glob": "desktop_app/dist/installers-thin/windows-amd64/*.exe", "required": true },
+        { "role": "update-bundle", "kind": "manifest", "glob": "desktop_app/dist/update-bundle/update-bundle.json", "required": true }
+      ]
+    }
+  },
+  "manifest_path": "desktop_app/dist/update-bundle/update-bundle.json",
+  "version_file": "desktop_app/package.json",
+  "version_json_path": "version",
+  "build_version_template": "{version}.{date}",
+  "notes_path": "docs/releases/{tag}.md",
+  "channel_order": ["beta", "stable"],
+  "publishing": {
+    "update_service": {
+      "component": "product",
+      "productSlots": {
+        "desktop": { "artifactRole": "installer" },
+        "mbot": { "artifactRole": "mbot" },
+        "nbot": { "artifactRole": "nbot" },
+        "node-repl": { "artifactRole": "node-repl" },
+        "codex": { "artifactRole": "codex" },
+        "node-runtime": { "artifactRole": "node-runtime" },
+        "app-server": { "artifactRole": "app-server" }
+      },
+      "components": {
+        "templates": { "artifactRole": "content-templates" },
+        "skills": { "artifactRole": "content-skills" }
+      }
+    }
+  }
+}
+

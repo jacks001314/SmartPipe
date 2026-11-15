@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 # Linux 运行时冒烟：用 Linux 编译出的 admin-api 连真实 Postgres 起进程，
 # 验证能迁移/启动、/healthz 200、带管理令牌能读项目列表，然后退出。
-# 用法：SMARTPIPE_BIN=/tmp/smartpipe-bin ./scripts/linux-runtime-smoke.sh
+# 用法：SMARTPIPE_DSN='postgres://user:pass@db-host:5432/db?sslmode=disable' \
+#       SMARTPIPE_BIN=/tmp/smartpipe-bin ./scripts/linux-runtime-smoke.sh
 set -euo pipefail
 BIN="${SMARTPIPE_BIN:-/tmp/smartpipe-bin}"
-DSN="${SMARTPIPE_DSN:-postgres://smartpipe:smartpipe_dev_2026@192.168.1.99:5432/smartpipe?sslmode=disable}"
+if [ -z "${SMARTPIPE_DSN:-}" ]; then
+  echo "SMARTPIPE_DSN is required, e.g. postgres://user:pass@db-host:5432/smartpipe?sslmode=disable" >&2
+  exit 2
+fi
+DSN="$SMARTPIPE_DSN"
 PORT="${SMARTPIPE_SMOKE_PORT:-18092}"
 TOKEN="linux-smoke-token"
 KEY="$(head -c 32 /dev/urandom | base64)"
