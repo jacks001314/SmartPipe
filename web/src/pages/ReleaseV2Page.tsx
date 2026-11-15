@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
-import type { Project, ReleaseV2AgentView, ReleaseV2Approval, ReleaseV2Bundle, ReleaseV2Event, ReleaseV2Executor, ReleaseV2ExecutorDeployResult, ReleaseV2Plan, ReleaseV2Run } from "../types";
+import type { Project, ReleaseV2AgentView, ReleaseV2Bundle, ReleaseV2Event, ReleaseV2Executor, ReleaseV2ExecutorDeployResult, ReleaseV2Preview, ReleaseV2Run } from "../types";
 import type { Notify } from "../App";
+import { ReleaseV2ConfigModal } from "./ReleaseV2ConfigModal";
 
 function when(value: string | null | undefined) {
   if (!value) return "—";
@@ -23,7 +24,7 @@ function bytes(size: number) {
 
 function statusChip(status: string) {
   const ok = ["published", "built", "ready"].includes(status);
-  const warn = ["staged", "publishing", "verifying", "building", "preparing", "queued", "leased", "uploaded", "partially_published"].includes(status);
+  const warn = ["staged", "publishing", "verifying", "artifacts_ready", "building", "preparing", "queued", "leased", "uploaded", "partially_published"].includes(status);
   return <span className={"chip " + (ok ? "ok" : warn ? "warn" : "bad")}><span className="dot" />{status}</span>;
 }
 
@@ -35,12 +36,12 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [error, setError] = useState("");
   const [detail, setDetail] = useState<ReleaseV2Bundle | null>(null);
-  const [plan, setPlan] = useState<ReleaseV2Plan | null>(null);
-  const [planError, setPlanError] = useState("");
+  const [preview, setPreview] = useState<ReleaseV2Preview | null>(null);
+  const [previewError, setPreviewError] = useState("");
+  const [selectedServers, setSelectedServers] = useState<string[]>([]);
+  const [selectedExecutors, setSelectedExecutors] = useState<string[]>([]);
   const [token, setToken] = useState("");
-  const [approvals, setApprovals] = useState<ReleaseV2Approval[]>([]);
   const [agent, setAgent] = useState<ReleaseV2AgentView | null>(null);
-  const [bindings, setBindings] = useState<Record<string, string>>({});
   const streamRef = useRef<{ es: EventSource | null; timer: number | null; cursor: number }>({ es: null, timer: null, cursor: 0 });
   const [busy, setBusy] = useState(false);
   const [bootOpen, setBootOpen] = useState(false);
@@ -53,7 +54,8 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
   const [bootBusy, setBootBusy] = useState(false);
   const [bootResult, setBootResult] = useState<ReleaseV2ExecutorDeployResult | null>(null);
   const [removing, setRemoving] = useState("");
-  const [form, setForm] = useState({ project_id: "", version: "", mode: "publish", channel: "stable", branch: "", notes: "" });
+  const [form, setForm] = useState({ project_id: "" });
+  const [configOpen, setConfigOpen] = useState(false);
 
   const generateBootstrap = async () => {
     setBootBusy(true);
@@ -208,13 +210,11 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
 
   const openRun = useCallback(async (id: string) => {
     try {
-      const [bundle, list, view] = await Promise.all([
+      const [bundle, view] = await Promise.all([
         api.getReleaseV2Run(id),
-        api.listReleaseV2Approvals(id),
         api.getReleaseV2Agent(id).catch(() => null),
       ]);
       setDetail(bundle);
-      setApprovals(list);
       setAgent(view);
       setToken("");
       const lastId = bundle.events.reduce((max, ev) => Math.max(max, ev.id), 0);
@@ -243,57 +243,65 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
     }
   }
 
-  async function approveRun(id: string) {
-    setBusy(true);
-    try {
-      await api.approveReleaseV2Run(id, "控制台人工批准");
-      notify("已批准发布，发布 Agent 会自动续跑收口", "ok");
-      await openRun(id);
-    } catch (err) {
-      notify(err instanceof ApiError ? err.message : "批准失败", "error");
-    } finally {
-      setBusy(false);
+  const loadPreview = useCallback(async (projectId: string) => {
+    if (!projectId) {
+      setPreview(null);
+      return;
     }
-  }
-
-  async function createPlan() {
-    setBusy(true);
-    setPlanError("");
+    setPreviewError("");
     try {
-      const created = await api.createReleaseV2Plan({
+      const next = await api.releaseV2ProjectPreview(projectId);
+      setPreview(next);
+      setSelectedServers(next.update_servers.filter((s) => s.enabled).map((s) => s.id));
+      setSelectedExecutors(next.builds.map((b) => b.executor_id).filter((v): v is string => Boolean(v)));
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "读取发布预览失败";
+      setPreview(null);
+      setPreviewError(message);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPreview(form.project_id);
+  }, [form.project_id, loadPreview]);
+
+  async function createRun() {
+    if (!form.project_id) return;
+    setBusy(true);
+    try {
+      const run = await api.createReleaseV2Run({
         project_id: form.project_id,
-        version: form.version,
-        mode: form.mode,
-        channel: form.channel,
-        branch: form.branch || undefined,
-        executor_bindings: Object.fromEntries(Object.entries(bindings).filter(([, v]) => v)),
-        notes: form.notes || undefined,
+        update_server_ids: selectedServers,
+        executor_ids: selectedExecutors,
       });
-      setPlan(created);
-      notify("已生成发布计划 " + created.id, "ok");
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : "生成计划失败";
-      setPlanError(message);
-      notify(message, "error");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function startRun() {
-    if (!plan) return;
-    setBusy(true);
-    try {
-      const run = await api.createReleaseV2Run({ plan_id: plan.id });
-      notify("已创建运行 " + run.id, "ok");
-      setPlan(null);
+      notify("发布已创建，Agent 已接管 " + run.id, "ok");
       await load();
       await openRun(run.id);
     } catch (err) {
-      notify(err instanceof ApiError ? err.message : "创建运行失败", "error");
+      notify(err instanceof ApiError ? err.message : "创建发布失败", "error");
     } finally {
       setBusy(false);
     }
+  }
+
+  function toggleServer(id: string) {
+    setSelectedServers((prev) => prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]);
+  }
+
+  function selectedExecutorFor(build: ReleaseV2Preview["builds"][number]) {
+    const hostOS = build.host_os || build.os;
+    const hostArch = build.host_arch || build.arch;
+    return selectedExecutors.find((id) => {
+      const executor = executors.find((item) => item.id === id);
+      return executor?.os === hostOS && executor?.arch === hostArch;
+    }) ?? "";
+  }
+
+  function chooseExecutor(build: ReleaseV2Preview["builds"][number], executorId: string) {
+    const hostOS = build.host_os || build.os;
+    const hostArch = build.host_arch || build.arch;
+    const platformIDs = new Set(executors.filter((item) => item.os === hostOS && item.arch === hostArch).map((item) => item.id));
+    setSelectedExecutors((prev) => [...prev.filter((id) => !platformIDs.has(id)), ...(executorId ? [executorId] : [])]);
   }
 
   async function cancelRun(id: string) {
@@ -328,87 +336,82 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
       <div className="card">
         <div className="card-head">
           <div>
-            <div className="card-title">新建发布计划</div>
-            <div className="card-sub">计划只读仓库与配置，不产生外部副作用；阻塞项会在下方显示。</div>
+            <div className="card-title">新建发布</div>
+            <div className="card-sub">选择项目、升级服务器和构建机；版本、源码包、构建、灌库和发布都由 Agent 自动完成。</div>
           </div>
-          <button className="btn" onClick={() => void load()}>刷新</button>
+          <div className="btn-row">
+            <button className="btn" disabled={!form.project_id} onClick={() => setConfigOpen(true)}>发版配置</button>
+            <button className="btn" onClick={() => void load()}>刷新</button>
+          </div>
         </div>
         <div className="card-body">
           <div className="form-grid">
             <label className="field">
               <span>项目</span>
-              <select value={form.project_id} onChange={(e) => setForm({ ...form, project_id: e.target.value })}>
+              <select value={form.project_id} onChange={(e) => setForm({ project_id: e.target.value })}>
                 {projects.map((p) => <option key={p.id} value={p.id}>{p.name || p.id}</option>)}
               </select>
             </label>
-            <label className="field">
-              <span>产品版本</span>
-              <input value={form.version} placeholder="0.5.16" onChange={(e) => setForm({ ...form, version: e.target.value })} />
-            </label>
-            <label className="field">
-              <span>模式</span>
-              <select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value })}>
-                <option value="build_only">仅构建</option>
-                <option value="stage">构建并暂存</option>
-                <option value="publish">完整发布</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>渠道</span>
-              <input value={form.channel} onChange={(e) => setForm({ ...form, channel: e.target.value })} />
-            </label>
-            <label className="field">
-              <span>分支（留空取项目默认）</span>
-              <input value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} />
+            <label className="field wide">
+              <span>升级服务器</span>
+              <div className="btn-row" style={{ flexWrap: "wrap", gap: 8 }}>
+                {(preview?.update_servers ?? []).length === 0 && <span className="tiny">发版设置里还没有升级服务</span>}
+                {(preview?.update_servers ?? []).map((server) => (
+                  <label key={server.id} className="tiny" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <input type="checkbox" checked={selectedServers.includes(server.id)} onChange={() => toggleServer(server.id)} />
+                    {server.name} <span className="mono">{server.url}</span>
+                  </label>
+                ))}
+              </div>
             </label>
             <label className="field wide">
-              <span>构建机绑定（留空自动选择同平台在线执行器）</span>
+              <span>构建机</span>
               <div className="btn-row" style={{ flexWrap: "wrap", gap: 8 }}>
-                {executorPlatforms(executors).length === 0 && <span className="tiny">暂无在线执行器</span>}
-                {executorPlatforms(executors).map((platform) => (
-                  <label key={platform} className="field" style={{ minWidth: 220 }}>
-                    <span className="tiny">{platform}</span>
-                    <select value={bindings[platform] ?? ""} onChange={(e) => setBindings({ ...bindings, [platform]: e.target.value })}>
-                      <option value="">自动</option>
-                      {executors.filter((x) => x.status === "online" && x.os + "-" + x.arch === platform).map((x) => (
-                        <option key={x.id} value={x.id}>{x.id}</option>
+                {(preview?.builds ?? []).map((build) => (
+                  <label key={build.target_id} className="field" style={{ minWidth: 240 }}>
+                    <span className="tiny">{build.target_id}</span>
+                    <select value={selectedExecutorFor(build)} onChange={(e) => chooseExecutor(build, e.target.value)}>
+                      <option value="">自动选择</option>
+                      {executors.filter((item) => item.status === "online" && item.os === (build.host_os || build.os) && item.arch === (build.host_arch || build.arch)).map((item) => (
+                        <option key={item.id} value={item.id}>{item.id}</option>
                       ))}
                     </select>
                   </label>
                 ))}
               </div>
             </label>
-            <label className="field wide">
-              <span>发布说明</span>
-              <textarea rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-            </label>
           </div>
-          <div className="btn-row">
-            <button className="btn primary" disabled={busy || !form.project_id || !form.version} onClick={() => void createPlan()}>
-              {busy ? "处理中…" : "生成计划"}
+          {previewError && (
+            <div className="notice bad" style={{ marginTop: 12 }}>
+              <div><b>读取项目信息失败</b></div>
+              <div className="tiny">{previewError}</div>
+            </div>
+          )}
+          {preview && (
+            <div className="notice" style={{ marginTop: 12 }}>
+              <div><b>{preview.version}</b> · {preview.tag} · 提交 <span className="mono">{shortHash(preview.commit)}</span> · {preview.commit_date || "—"}</div>
+              <div className="tiny">构建版本 {preview.build_version} · 仓库 {preview.repo || "—"} · 分支 {preview.branch}</div>
+              <div className="tiny">平台：{preview.builds.map((build) => build.target_id + (build.host_os ? " ← " + build.host_os + "/" + build.host_arch : "") + (selectedExecutorFor(build) ? "@" + selectedExecutorFor(build) : "")).join("，") || "—"}</div>
+              {(preview.warnings ?? []).length > 0 && (
+                <div className="notice warn" style={{ marginTop: 10 }}>
+                  {(preview.warnings ?? []).map((warning) => (
+                    <div key={warning.code}>{warning.message}</div>
+                  ))}
+                </div>
+              )}
+              {preview.notes && <div className="tiny">发布说明：{preview.notes.slice(0, 180)}{preview.notes.length > 180 ? "…" : ""}</div>}
+              {(preview.blockers ?? []).length > 0 && (
+                <ul className="tiny">
+                  {(preview.blockers ?? []).map((b) => <li key={b.code + (b.target_id ?? "")}>{b.code}：{b.message}</li>)}
+                </ul>
+              )}
+            </div>
+          )}
+          <div className="btn-row" style={{ marginTop: 12 }}>
+            <button className="btn primary" disabled={busy || !form.project_id || selectedServers.length === 0 || (preview?.blockers ?? []).length > 0} onClick={() => void createRun()}>
+              {busy ? "处理中…" : "创建发布并由 Agent 接管"}
             </button>
           </div>
-          {planError && (
-            <div className="notice bad" style={{ marginTop: 12 }}>
-              <div><b>生成计划失败</b></div>
-              <div className="tiny">{planError}</div>
-              <div className="tiny">若提示缺少发版配置，可在「项目」页的项目设置里填写发版配置路径，或在仓库里提交含 release.targets 的 smartpipe.yaml；仓库有更新时生成计划会自动同步本地镜像。</div>
-            </div>
-          )}
-          {plan && (
-            <div className="notice" style={{ marginTop: 12 }}>
-              <div><b>计划 {plan.id}</b> · {plan.version} · {plan.mode} · {plan.channel} · 状态 {plan.status}</div>
-              <div className="tiny">目标：{plan.targets.map((t) => t.id + (t.executor_id ? "@" + t.executor_id : "")).join("，") || "—"}</div>
-              {(plan.blockers ?? []).length > 0 ? (
-                <ul className="tiny">
-                  {(plan.blockers ?? []).map((b) => <li key={b.code + (b.target_id ?? "")}>{b.code}：{b.message}</li>)}
-                </ul>
-              ) : (
-                <div className="tiny">无阻塞项，可用于创建运行。</div>
-              )}
-              <button className="btn primary" disabled={busy || (plan.blockers ?? []).length > 0} onClick={() => void startRun()}>创建运行</button>
-            </div>
-          )}
         </div>
       </div>
 
@@ -436,7 +439,7 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
                   <option value="amd64">amd64</option>
                 </select>
               </label>
-              <label>SSH 主机<input value={bootForm.host} onChange={(e) => setBootForm((f) => ({ ...f, host: e.target.value }))} placeholder="192.168.0.6 或 build-01.local" /></label>
+              <label>SSH 主机<input value={bootForm.host} onChange={(e) => setBootForm((f) => ({ ...f, host: e.target.value }))} placeholder="build-01.example.com" /></label>
               <label>SSH 端口<input inputMode="numeric" value={bootForm.port} onChange={(e) => setBootForm((f) => ({ ...f, port: e.target.value.replace(/[^0-9]/g, "") }))} placeholder="22" /></label>
               <label>用户名<input value={bootForm.username} onChange={(e) => setBootForm((f) => ({ ...f, username: e.target.value }))} placeholder="builder 或 root" autoComplete="username" /></label>
               <label>认证方式
@@ -581,29 +584,7 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
               <button className="btn primary" disabled={busy || !agent?.enabled || agent?.running} onClick={() => void startAgent(detail.run.id)}>
                 启动发布 Agent
               </button>
-              <span className="tiny">Agent 会在审批门禁处停下，批准后再继续推进。</span>
-            </div>
-            <h4>发布审批</h4>
-            <table className="table">
-              <thead><tr><th>时间</th><th>审批人</th><th>状态</th><th>绑定摘要</th><th>过期</th></tr></thead>
-              <tbody>
-                {approvals.length === 0 && <tr><td colSpan={5} className="empty">尚无审批记录；stable 渠道推进前需要人工批准。</td></tr>}
-                {approvals.map((a) => (
-                  <tr key={a.id}>
-                    <td className="tiny">{when(a.created_at)}</td>
-                    <td className="tiny">{a.actor}</td>
-                    <td>{statusChip(a.state)}</td>
-                    <td className="mono tiny">{shortHash(a.content_sha256)}</td>
-                    <td className="tiny">{when(a.expires_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="btn-row" style={{ marginTop: 8 }}>
-              <button className="btn" disabled={busy || !["staged", "verifying", "publishing"].includes(detail.run.status)} onClick={() => void approveRun(detail.run.id)}>
-                批准发布
-              </button>
-              <span className="tiny">批准绑定当前暂存 bundle 摘要，过期后需重新批准。</span>
+              <span className="tiny">Agent 自动推进构建、灌库、渠道和 GitHub；失败时自动诊断修复，无法恢复才终止并给出根因。</span>
             </div>
             <h4>目标平台</h4>
             <table className="table">
@@ -667,21 +648,16 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
           </div>
         </div>
       )}
+      {configOpen && (
+        <ReleaseV2ConfigModal
+          project={projects.find((project) => project.id === form.project_id) ?? null}
+          onClose={() => setConfigOpen(false)}
+          onSaved={() => { void loadPreview(form.project_id); }}
+          notify={notify}
+        />
+      )}
     </div>
   );
-}
-
-function executorPlatforms(executors: ReleaseV2Executor[]) {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const x of executors) {
-    if (x.status !== "online") continue;
-    const key = x.os + "-" + x.arch;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(key);
-  }
-  return out.sort();
 }
 
 function mergeEvents(events: ReleaseV2Event[], next: ReleaseV2Event): ReleaseV2Event[] {

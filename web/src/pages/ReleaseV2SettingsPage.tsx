@@ -246,7 +246,7 @@ export function ReleaseV2SettingsPage({ notify }: { notify: Notify }) {
           </div>
         </header>
         <div className="grid two">
-          <label>Endpoint<input placeholder="http://127.0.0.1:9000" value={form.s3_endpoint} onChange={(e) => patch("s3_endpoint", e.target.value)} /></label>
+          <label>Endpoint<input placeholder="https://s3.example.com" value={form.s3_endpoint} onChange={(e) => patch("s3_endpoint", e.target.value)} /></label>
           <label>Bucket<input placeholder="smartpipe-releases" value={form.s3_bucket} onChange={(e) => patch("s3_bucket", e.target.value)} /></label>
           <label>Region<input placeholder="us-east-1" value={form.s3_region} onChange={(e) => patch("s3_region", e.target.value)} /></label>
           <label>前缀<input placeholder="releases" value={form.s3_prefix} onChange={(e) => patch("s3_prefix", e.target.value)} /></label>

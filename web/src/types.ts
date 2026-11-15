@@ -686,18 +686,6 @@ export type ReleaseV2Run = {
   updated_at: string;
 };
 
-export type ReleaseV2Approval = {
-  id: string;
-  run_id: string;
-  kind: string;
-  actor: string;
-  reason: string;
-  content_sha256: string;
-  state: string;
-  expires_at?: string | null;
-  created_at: string;
-};
-
 export type ReleaseV2Bundle = {
   run: ReleaseV2Run;
   targets: ReleaseV2Target[];
@@ -706,15 +694,71 @@ export type ReleaseV2Bundle = {
   events: ReleaseV2Event[];
 };
 
-export type ReleaseV2Plan = {
+export type ReleaseV2PreviewBuild = {
+  target_id: string;
+  os: string;
+  arch: string;
+  host_os?: string;
+  host_arch?: string;
+  executor_id?: string;
+  candidates?: string[];
+  ready: boolean;
+  message?: string;
+};
+
+export type ReleaseV2PreviewUpdateServer = {
   id: string;
-  status: string;
+  name: string;
+  url: string;
+  enabled: boolean;
+};
+
+export type ReleaseV2Preview = {
+  project_id: string;
+  repo: string;
+  branch: string;
   version: string;
-  mode: string;
-  channel: string;
-  targets: { id: string; os: string; arch: string; executor_id: string }[];
+  tag: string;
+  commit: string;
+  commit_date?: string;
+  build_version: string;
+  notes?: string;
+  notes_path?: string;
+  builds: ReleaseV2PreviewBuild[];
+  update_servers: ReleaseV2PreviewUpdateServer[];
   blockers?: { code: string; message: string; target_id?: string }[];
-  expires_at: string;
+  warnings?: { code: string; message: string }[];
+};
+
+export type ReleaseV2ProjectReleaseConfig = {
+  project_id: string;
+  builds: Record<string, {
+    build: string;
+    sign?: string;
+    verify?: string;
+    timeout?: string;
+    manifest_path?: string;
+    host_os?: string;
+    host_arch?: string;
+    artifacts?: {
+      role: string;
+      kind?: string;
+      glob: string;
+      content_type?: string;
+      required?: boolean;
+      signed?: boolean | null;
+    }[];
+  }>;
+  manifest_path?: string;
+  version_file?: string;
+  version_json_path?: string;
+  build_version_template?: string;
+  notes_path?: string;
+  channel_order?: string[];
+  update_server_ids?: string[];
+  publishing?: Record<string, Record<string, unknown>>;
+  policies?: Record<string, unknown>;
+  updated_at?: string;
 };
 
 export type ReleaseV2AgentSession = {
@@ -758,6 +802,7 @@ export type ReleaseV2Probe = {
 };
 
 export type ReleaseV2UpdateService = {
+  id?: string;
   name: string;
   url: string;
   credential: string;

@@ -1,4 +1,4 @@
-import type { AuditEntry, AuthConfig, AuthSession, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Health, IssueAttempt, Project, ReleaseV2AgentView, ReleaseV2AgentSession, ReleaseV2Approval, ReleaseV2Bundle, ReleaseV2Executor, ReleaseV2Plan, ReleaseV2Run, ReleaseV2Settings, ReleaseV2Probe, ReleaseV2ExecutorBootstrap, ReleaseV2ExecutorDeployResult, ReleaseV2ExecutorRemoveResult, RepoOp, TestResult, UserIdentity, VerificationRecord, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubTunnelView, GitHubPATView, GitHubRepoCatalog, GitHubRepo, SchedulerOverview, SchedulerWorkerDetail, SchedulerWorker, SchedulerMessage, SchedulerOutputFrame, SchedulerOutputRawPage } from "./types";
+import type { AuditEntry, AuthConfig, AuthSession, CrashReport, CrashRetention, Credential, LanxinBot, LanxinBotDetail, GitHubDeviceFlow, GitHubOAuthPoll, GitHubOAuthView, LanxinGroup, LanxinMessage, LanxinTestResult, ModelConfigImportPreview, ModelConfigImportResult, ModelLocalConfigResult, ModelDefault, ModelProfile, ModelProvider, ProviderModel, ProviderTestResult, Health, IssueAttempt, Project, ReleaseV2AgentView, ReleaseV2AgentSession, ReleaseV2Bundle, ReleaseV2Executor, ReleaseV2Preview, ReleaseV2ProjectReleaseConfig, ReleaseV2Run, ReleaseV2Settings, ReleaseV2Probe, ReleaseV2ExecutorBootstrap, ReleaseV2ExecutorDeployResult, ReleaseV2ExecutorRemoveResult, RepoOp, TestResult, UserIdentity, VerificationRecord, GitHubAppSetup, GitHubAppSetupStatus, GitHubRepoList, GitHubProxyView, GitHubTunnelView, GitHubPATView, GitHubRepoCatalog, GitHubRepo, SchedulerOverview, SchedulerWorkerDetail, SchedulerWorker, SchedulerMessage, SchedulerOutputFrame, SchedulerOutputRawPage } from "./types";
 import type { ResourceInspectionResult, ResourceProbeResult, RuntimeResource } from "./types";
 
 const TOKEN_KEY = "smartpipe.adminToken";
@@ -278,9 +278,13 @@ export const api = {
   getReleaseV2Agent: (id: string) => request<ReleaseV2AgentView>("/releases/v2/runs/" + encodeURIComponent(id) + "/agent"),
   startReleaseV2Agent: (id: string, body: { scopes?: string[]; model?: string; effort?: string }) =>
     request<ReleaseV2AgentSession>("/releases/v2/runs/" + encodeURIComponent(id) + "/agent", { method: "POST", body }),
-  createReleaseV2Plan: (body: { project_id: string; version: string; build_version?: string; channel?: string; mode: string; branch?: string; commit?: string; targets?: string[]; executor_bindings?: Record<string, string>; notes?: string }) =>
-    request<ReleaseV2Plan>("/releases/v2/plans", { method: "POST", body }),
-  createReleaseV2Run: (body: { plan_id: string; idempotency_key?: string }) =>
+  releaseV2ProjectPreview: (id: string) =>
+    request<ReleaseV2Preview>("/releases/v2/projects/" + encodeURIComponent(id) + "/release-preview"),
+  getReleaseV2ProjectConfig: (id: string) =>
+    request<ReleaseV2ProjectReleaseConfig>("/releases/v2/projects/" + encodeURIComponent(id) + "/release-config"),
+  saveReleaseV2ProjectConfig: (id: string, body: ReleaseV2ProjectReleaseConfig) =>
+    request<ReleaseV2ProjectReleaseConfig>("/releases/v2/projects/" + encodeURIComponent(id) + "/release-config", { method: "PUT", body }),
+  createReleaseV2Run: (body: { project_id: string; executor_ids?: string[]; update_server_ids?: string[]; idempotency_key?: string }) =>
     request<ReleaseV2Run>("/releases/v2/runs", { method: "POST", body }),
   cancelReleaseV2Run: (id: string, reason?: string) =>
     request<ReleaseV2Run>("/releases/v2/runs/" + encodeURIComponent(id) + "/cancel", { method: "POST", body: { reason } }),
@@ -299,9 +303,6 @@ export const api = {
   }) => request<ReleaseV2ExecutorDeployResult>("/releases/v2/executors/deploy", { method: "POST", body }),
   deleteReleaseV2Executor: (id: string, body?: { force?: boolean; resource_id?: string; install_dir?: string }) =>
     request<ReleaseV2ExecutorRemoveResult>("/releases/v2/executors/" + encodeURIComponent(id), { method: "DELETE", body: body ?? {} }),
-  listReleaseV2Approvals: (id: string) => request<ReleaseV2Approval[]>("/releases/v2/runs/" + encodeURIComponent(id) + "/approvals"),
-  approveReleaseV2Run: (id: string, reason: string, ttlSeconds = 7200) =>
-    request<ReleaseV2Approval>("/releases/v2/runs/" + encodeURIComponent(id) + "/approvals", { method: "POST", body: { reason, ttl_seconds: ttlSeconds } }),
   createVerification: (body: {
     project_id?: string;
     issue_ref: string;

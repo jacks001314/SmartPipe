@@ -147,6 +147,25 @@ button { font-family: inherit; }
 .modal-body { padding: 4px 20px 8px; }
 .modal-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 20px; border-top: 1px solid var(--line); }
 .icon-btn { border: 0; background: transparent; font-size: 15px; color: var(--muted); cursor: pointer; }
+.release-config-modal { width: min(1120px, 100%); }
+.release-config-modal .modal-body { max-height: calc(100vh - 220px); overflow: auto; }
+.release-config-section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin: 20px 0 10px; }
+.release-config-section-head h4 { margin: 0 0 3px; font-size: 13px; }
+.release-config-build { border: 1px solid var(--line); border-radius: 12px; background: #fbfdff; padding: 14px; margin: 12px 0; }
+.release-config-build-head { display: grid; grid-template-columns: minmax(180px, 1.3fr) minmax(130px, .7fr) minmax(130px, .7fr) auto; gap: 10px 14px; align-items: end; margin-bottom: 12px; }
+.release-config-build-head > .btn { align-self: end; }
+.release-config-artifacts { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+.release-config-artifacts-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.release-config-artifacts .table { margin: 0; }
+.release-config-artifacts .table input:not([type="checkbox"]), .release-config-artifacts .table select { min-width: 110px; }
+.release-config-artifacts .table td { vertical-align: middle; }
+.release-config-advanced { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; }
+.release-config-advanced > summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+@media (max-width: 720px) {
+  .release-config-modal { width: 100%; }
+  .release-config-build-head { grid-template-columns: 1fr; }
+  .release-config-modal .modal-body { max-height: calc(100vh - 180px); }
+}
 
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
 .field { display: flex; flex-direction: column; gap: 5px; }

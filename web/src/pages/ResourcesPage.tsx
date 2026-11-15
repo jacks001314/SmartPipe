@@ -525,7 +525,7 @@ export function ResourcesPage({ notify }: { notify: Notify }) {
               </div>
               <div className="field resource-host-field">
                 <label>主机名或 IP *</label>
-                <input value={form.host} onChange={(event) => setForm({ ...form, host: event.target.value })} placeholder="10.0.1.20 或 build-01.example.com" />
+                <input value={form.host} onChange={(event) => setForm({ ...form, host: event.target.value })} placeholder="build-01.example.com" />
               </div>
               <div className="field resource-port-field">
                 <label>SSH 端口</label>

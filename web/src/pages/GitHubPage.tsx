@@ -580,7 +580,7 @@ export function GitHubPage({ notify }: { notify: Notify }) {
             <input
               value={proxyURL}
               onChange={(event) => setProxyURL(event.target.value)}
-              placeholder="http://172.17.0.1:7890（留空表示直连）"
+              placeholder="http://proxy.example.com:7890（留空表示直连）"
               spellCheck={false}
             />
             <button className="btn small" disabled={!!proxyBusy} onClick={() => void saveProxy()}>
