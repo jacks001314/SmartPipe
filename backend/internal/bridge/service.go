@@ -384,6 +384,55 @@ func ClientForRepo(ctx context.Context, st *store.Store, projectID *string, repo
 	return nil, fmt.Errorf("bridge: no usable GitHub credential: %w", lastErr)
 }
 
+// UserClientForRepo 只使用账号身份（PAT 或 OAuth，二者都存为 github_pat）的客户端。
+// GitHub 的 user-attachments 上传接口不接受 GitHub App 安装令牌：它需要具体
+// 用户作为附件所有者，安装令牌调用会返回 404。调用方据此提示管理员补 PAT。
+func UserClientForRepo(ctx context.Context, st *store.Store, projectID *string, repo string) (*github.Client, error) {
+	all, err := st.ListCredentials(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	candidates := make([]store.Credential, 0, len(all))
+	appendScoped := func(projectScoped bool) {
+		for _, c := range all {
+			if !c.Enabled || c.Kind != store.CredentialGitHubPAT {
+				continue
+			}
+			if projectScoped {
+				if projectID == nil || c.ProjectID == nil || *c.ProjectID != *projectID {
+					continue
+				}
+			} else if c.ProjectID != nil {
+				continue
+			}
+			candidates = append(candidates, c)
+		}
+	}
+	appendScoped(true)
+	appendScoped(false)
+	if len(candidates) == 0 {
+		return nil, errors.New("bridge: 上传附件需要账号 PAT 或 OAuth 授权；GitHub App 安装令牌不支持附件上传")
+	}
+
+	repo = normalizeRepoRef(repo)
+	var lastErr error
+	for _, c := range candidates {
+		client, err := clientFromCredential(ctx, st, c)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if repo != "" {
+			if err := repoAccessible(ctx, projectID, c.ID, repo, client); err != nil {
+				lastErr = fmt.Errorf("credential %s cannot access %s: %w", c.Name, repo, err)
+				continue
+			}
+		}
+		return client, nil
+	}
+	return nil, fmt.Errorf("bridge: no usable user credential for attachment upload: %w", lastErr)
+}
+
 // githubCredentialCandidates 按优先级列出可用的 GitHub 凭据：
 // 项目级 github_app → 项目级 github_pat → 全局 github_app → 全局 github_pat。
 func githubCredentialCandidates(ctx context.Context, st *store.Store, projectID *string) ([]store.Credential, error) {

@@ -81,6 +81,9 @@ type fakeTracker struct {
 
 	mergeCalls []int
 	mergeErr   error
+
+	uploads   []string
+	uploadErr error
 }
 
 func newFakeTracker() *fakeTracker {
@@ -184,6 +187,22 @@ func (f *fakeTracker) commentsFor(n int) []Comment {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]Comment(nil), f.comments[n]...)
+}
+
+func (f *fakeTracker) UploadAttachment(ctx context.Context, projectID, name, mimeType string, data []byte) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.uploadErr != nil {
+		return "", f.uploadErr
+	}
+	f.uploads = append(f.uploads, name)
+	return "https://github.com/user-attachments/assets/" + name, nil
+}
+
+func (f *fakeTracker) uploadCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.uploads)
 }
 
 type fakeNotifier struct {

@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -132,5 +133,42 @@ func TestClientForRepoPrefersAppWhenRepoVisible(t *testing.T) {
 	}
 	if atomic.LoadInt32(appTokens) != 1 {
 		t.Fatalf("installation token issued %d times, want cached single call", *appTokens)
+	}
+}
+
+// 附件上传只接受账号身份：只有 GitHub App 凭据时必须明确报错，
+// 不能被 ClientForRepo 的 App 优先策略悄悄选中安装令牌。
+func TestUserClientForRepoRequiresAccountCredential(t *testing.T) {
+	env := newEnv(t)
+	ResetCredentialCache()
+	t.Cleanup(ResetCredentialCache)
+	ctx := context.Background()
+	project := env.project(t, true)
+
+	app, _ := appServer(t, true)
+	if _, err := env.store.CreateCredential(ctx, &project.ID, store.CredentialGitHubApp, "app", appKeyPEM(t), map[string]any{
+		"api_base":        app.URL,
+		"app_id":          "1",
+		"installation_id": "2",
+	}); err != nil {
+		t.Fatalf("app credential: %v", err)
+	}
+	if _, err := UserClientForRepo(ctx, env.store, &project.ID, "example/core"); err == nil ||
+		!strings.Contains(err.Error(), "PAT") {
+		t.Fatalf("err = %v", err)
+	}
+
+	pat, _ := patServer(t)
+	if _, err := env.store.CreateCredential(ctx, &project.ID, store.CredentialGitHubPAT, "pat", "ghp_user_token", map[string]any{
+		"api_base": pat.URL,
+	}); err != nil {
+		t.Fatalf("pat credential: %v", err)
+	}
+	client, err := UserClientForRepo(ctx, env.store, &project.ID, "example/core")
+	if err != nil {
+		t.Fatalf("UserClientForRepo: %v", err)
+	}
+	if client.Token != "ghp_user_token" {
+		t.Fatalf("token = %q", client.Token)
 	}
 }

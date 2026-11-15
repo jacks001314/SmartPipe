@@ -62,6 +62,12 @@ type Tracker interface {
 	CreatePR(ctx context.Context, projectID string, issue int, head, base, title, body string) (PullRequest, error)
 }
 
+// AttachmentUploader 是可选能力：把聊天图片上传到 GitHub，返回可写进 Issue 的 URL。
+// Tracker 实现它就启用；测试里的假 tracker 不实现时附件保持原有行为。
+type AttachmentUploader interface {
+	UploadAttachment(ctx context.Context, projectID, name, mimeType string, data []byte) (string, error)
+}
+
 // PullMerger 是可选能力：PR 就绪后由控制面直接合入基线分支。
 // Tracker 实现它就启用自动合并；测试里的假 tracker 不实现时保持等待 review。
 type PullMerger interface {
@@ -527,7 +533,8 @@ func (s *Scheduler) applyChatDecision(ctx context.Context, p *Project, msg Inbou
 			_ = s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, "没能确定要更新哪个 Issue，请在消息里带上 #编号。")
 			return messageOutcome{Status: "need_info", Reason: "没有识别到 Issue 编号"}, nil
 		}
-		if err := s.tracker.Comment(ctx, p.ID, issue, botComment(d.Reply)); err != nil {
+		attachments := s.uploadIssueImages(ctx, p, msg)
+		if err := s.tracker.Comment(ctx, p.ID, issue, botComment(attachments.apply(d.Reply))); err != nil {
 			return messageOutcome{Status: "failed", Issue: issue, IssueURL: issueURLFor(p, issue)}, err
 		}
 		if w, _ := s.repo.ActiveWorker(ctx, p.ID, issue); w != nil {
@@ -546,12 +553,14 @@ func (s *Scheduler) applyChatDecision(ctx context.Context, p *Project, msg Inbou
 		}
 		return messageOutcome{Status: "issue_updated", Reason: clamp(d.Reply, 500), Issue: issue, IssueURL: issueURLFor(p, issue)}, nil
 	case "issue":
+		attachments := s.uploadIssueImages(ctx, p, msg)
 		existing, err := s.findDuplicate(ctx, p.ID, d.Title)
 		if err != nil {
 			log.Printf("[scheduler] dedupe failed: %v", err)
 		}
 		if existing != nil {
-			_ = s.tracker.Comment(ctx, p.ID, existing.Number, botComment("来自蓝信的新反馈（重复问题）：\n\n"+msg.Text))
+			comment := "来自蓝信的新反馈（重复问题）：\n\n" + msg.Text
+			_ = s.tracker.Comment(ctx, p.ID, existing.Number, botComment(attachments.apply(comment)))
 			if w, _ := s.repo.ActiveWorker(ctx, p.ID, existing.Number); w != nil {
 				s.resume(w, msg.Text)
 			}
@@ -561,6 +570,7 @@ func (s *Scheduler) applyChatDecision(ctx context.Context, p *Project, msg Inbou
 			}
 			return messageOutcome{Status: "issue_updated", Reason: "重复问题，已补充到已有 Issue", Issue: existing.Number, IssueURL: existing.URL}, nil
 		}
+		d.Body = attachments.apply(d.Body)
 		draft, err := s.newIssueDraft(ctx, p, msg, d)
 		if err != nil {
 			return messageOutcome{Status: "failed"}, err

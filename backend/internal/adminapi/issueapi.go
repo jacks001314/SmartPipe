@@ -3,6 +3,7 @@ package adminapi
 import (
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -15,6 +16,7 @@ import (
 func (a *API) registerIssues(p iris.Party) {
 	p.Get("/issues/{number}", a.getIssue)
 	p.Post("/issues", a.createIssue)
+	p.Post("/issues/attachments", a.uploadIssueAttachment)
 	p.Get("/issue-search", a.searchIssues)
 	p.Get("/issues/{number}/comments", a.listIssueComments)
 	p.Post("/issues/{number}/comments", a.commentIssue)
@@ -223,6 +225,111 @@ func (a *API) createIssue(c iris.Context) {
 		"number": issue.Number, "title": issue.Title, "url": issue.HTMLURL,
 		"state": issue.State, "body": issue.Body,
 	}})
+}
+
+// maxIssueAttachmentBytes 与 bot 的聊天附件上限一致。
+const maxIssueAttachmentBytes = 8 << 20
+
+// uploadIssueAttachment 把聊天截图上传到 GitHub user-attachments，返回可写进
+// Issue 正文的 URL。上传必须使用账号身份，所以这里走 UserClientForRepo。
+func (a *API) uploadIssueAttachment(c iris.Context) {
+	// base64 后约膨胀 4/3，留出 JSON 包装的余量。
+	c.SetMaxRequestBodySize(12 << 20)
+	var in struct {
+		ProjectID string `json:"project_id"`
+		Name      string `json:"name"`
+		MimeType  string `json:"mime_type"`
+		Data      []byte `json:"data"`
+	}
+	if err := decodeBody(c, &in); err != nil {
+		a.badRequest(c, "请求体不是合法 JSON")
+		return
+	}
+	in.ProjectID = strings.TrimSpace(in.ProjectID)
+	if in.ProjectID == "" || len(in.Data) == 0 {
+		a.badRequest(c, "project_id 与 data 必填")
+		return
+	}
+	if len(in.Data) > maxIssueAttachmentBytes {
+		a.badRequest(c, "单个附件不能超过 8 MB")
+		return
+	}
+	mimeType := attachmentMimeType(in.MimeType, in.Data)
+	if !strings.HasPrefix(mimeType, "image/") {
+		a.badRequest(c, "只支持图片附件")
+		return
+	}
+
+	ctx := c.Request().Context()
+	project, err := a.store.GetProject(ctx, in.ProjectID)
+	if err != nil {
+		a.fail(c, err)
+		return
+	}
+	repo := projectRepo(project)
+	if repo == "" {
+		a.badRequest(c, "项目未配置 GitHub 仓库")
+		return
+	}
+	client, err := bridge.UserClientForRepo(ctx, a.store, &project.ID, repo)
+	if err != nil {
+		c.StatusCode(http.StatusServiceUnavailable)
+		_ = c.JSON(envelope{Err: &apiError{Code: "attachment_unavailable", Message: err.Error()}})
+		return
+	}
+	name := attachmentUploadName(in.Name, mimeType)
+	url, err := client.UploadUserAttachment(ctx, repo, name, mimeType, in.Data)
+	if err != nil {
+		c.StatusCode(http.StatusBadGateway)
+		_ = c.JSON(envelope{Err: &apiError{Code: "github_error", Message: err.Error()}})
+		return
+	}
+	a.audit(ctx, c, "issue.attachment", "issue", name, &project.ID, "ok",
+		map[string]any{"size": len(in.Data), "mime_type": mimeType})
+	_ = c.JSON(envelope{Data: iris.Map{"url": url, "name": name, "size": len(in.Data)}})
+}
+
+// attachmentMimeType 去掉 Content-Type 参数并按内容兜底识别。
+func attachmentMimeType(raw string, data []byte) string {
+	mimeType := strings.ToLower(strings.TrimSpace(raw))
+	if base, _, ok := strings.Cut(mimeType, ";"); ok {
+		mimeType = strings.TrimSpace(base)
+	}
+	if mimeType == "" {
+		mimeType = strings.ToLower(http.DetectContentType(data))
+	}
+	return mimeType
+}
+
+// attachmentUploadName 只保留安全字符，并按 MIME 补齐扩展名。
+func attachmentUploadName(name, mimeType string) string {
+	base := filepath.Base(strings.TrimSpace(name))
+	base = strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '-', r == '_':
+			return r
+		case r == ' ':
+			return '-'
+		default:
+			return -1
+		}
+	}, base)
+	if base == "" || base == "." || base == ".." {
+		base = "attachment"
+	}
+	if filepath.Ext(base) == "" {
+		ext := map[string]string{
+			"image/png":  ".png",
+			"image/jpeg": ".jpg",
+			"image/gif":  ".gif",
+			"image/webp": ".webp",
+		}[mimeType]
+		if ext == "" {
+			ext = ".img"
+		}
+		base += ext
+	}
+	return base
 }
 
 func (a *API) searchIssues(c iris.Context) {

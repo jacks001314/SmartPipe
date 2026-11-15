@@ -37,6 +37,10 @@ type apiEnvelope struct {
 }
 
 func (t *HTTPTracker) do(ctx context.Context, method, path string, payload any, out any) error {
+	return t.doWithClient(ctx, t.Client, method, path, payload, out)
+}
+
+func (t *HTTPTracker) doWithClient(ctx context.Context, client *http.Client, method, path string, payload any, out any) error {
 	var body io.Reader
 	if payload != nil {
 		raw, err := json.Marshal(payload)
@@ -55,7 +59,10 @@ func (t *HTTPTracker) do(ctx context.Context, method, path string, payload any, 
 	if t.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+t.Token)
 	}
-	resp, err := t.Client.Do(req)
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -140,6 +147,32 @@ func (t *HTTPTracker) GetIssue(ctx context.Context, projectID string, number int
 func (t *HTTPTracker) Comment(ctx context.Context, projectID string, number int, body string) error {
 	path := fmt.Sprintf("/admin/issues/%d/comments", number)
 	return t.do(ctx, http.MethodPost, path, map[string]any{"project_id": projectID, "body": body}, nil)
+}
+
+// UploadAttachment 把聊天图片交给 admin-api 上传到 GitHub，返回 Issue 可用的 URL。
+func (t *HTTPTracker) UploadAttachment(ctx context.Context, projectID, name, mimeType string, data []byte) (string, error) {
+	var out struct {
+		URL string `json:"url"`
+	}
+	// admin-api 要先把图片传到 GitHub，慢链路上 60 秒的默认超时不够。
+	client := t.Client
+	if client == nil {
+		client = &http.Client{Timeout: 3 * time.Minute}
+	} else if client.Timeout < 3*time.Minute {
+		clone := *client
+		clone.Timeout = 3 * time.Minute
+		client = &clone
+	}
+	err := t.doWithClient(ctx, client, http.MethodPost, "/admin/issues/attachments", map[string]any{
+		"project_id": projectID, "name": name, "mime_type": mimeType, "data": data,
+	}, &out)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(out.URL) == "" {
+		return "", fmt.Errorf("scheduler: attachment upload returned no url")
+	}
+	return out.URL, nil
 }
 
 // ListComments 拉 Issue 评论。

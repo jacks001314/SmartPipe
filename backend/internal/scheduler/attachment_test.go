@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -118,5 +119,65 @@ func TestChatAcceptsAttachmentOnlyMessage(t *testing.T) {
 	spec := h.runner.last()
 	if !strings.Contains(spec.Prompt, "只带了附件") || !strings.Contains(spec.Prompt, "config.toml") {
 		t.Fatalf("prompt = %s", spec.Prompt)
+	}
+}
+
+// 图片附件建单时必须上传进 Issue 正文，而不是只交给模型看。
+func TestChatIssueUploadsImageIntoBody(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.runner.chatReply = `{"action":"issue","title":"登录页报错","body":"截图里的错误码无法定位","severity":"high"}`
+	m := msg("m-issue-image", "这个报错怎么处理")
+	m.Attachments = []Attachment{
+		{Name: "error.png", MimeType: "image/png", Data: []byte("\x89PNG\r\n\x1a\n0000")},
+		{Name: "config.toml", MimeType: "text/plain", Data: []byte("title = \"x\"\n")},
+	}
+	if err := h.s.HandleMessage(context.Background(), m); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if h.tracker.uploadCount() != 1 {
+		t.Fatalf("uploads = %v, want only the image", h.tracker.uploads)
+	}
+	issue := h.tracker.issueAt(0)
+	if !strings.Contains(issue.Body, "## 聊天截图") ||
+		!strings.Contains(issue.Body, "![error.png](https://github.com/user-attachments/assets/error.png)") {
+		t.Fatalf("issue body missing image: %s", issue.Body)
+	}
+}
+
+// 补充已有 Issue 时，图片同样要进评论。
+func TestChatIssueUpdateUploadsImageIntoComment(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.runner.chatReply = `{"action":"issue_update","issue":33,"reply":"补充一张复现截图"}`
+	m := msg("m-update-image", "#33 还会闪退")
+	m.Attachments = []Attachment{
+		{Name: "crash.png", MimeType: "image/png", Data: []byte("\x89PNG\r\n\x1a\n0000")},
+	}
+	if err := h.s.HandleMessage(context.Background(), m); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	comments := h.tracker.commentsFor(33)
+	if len(comments) != 1 || !strings.Contains(comments[0].Body, "![crash.png](https://github.com/user-attachments/assets/crash.png)") {
+		t.Fatalf("comment missing image: %+v", comments)
+	}
+}
+
+// 上传失败不能让建单失败：Issue 仍要创建，并在正文里提示人工补充。
+func TestChatIssueSurvivesImageUploadFailure(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.tracker.uploadErr = errors.New("github: HTTP 404: Not Found")
+	h.runner.chatReply = `{"action":"issue","title":"启动失败","body":"见截图","severity":"high"}`
+	m := msg("m-issue-image-fail", "启动就报错")
+	m.Attachments = []Attachment{
+		{Name: "boot.png", MimeType: "image/png", Data: []byte("\x89PNG\r\n\x1a\n0000")},
+	}
+	if err := h.s.HandleMessage(context.Background(), m); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if h.tracker.issueCount() != 1 {
+		t.Fatalf("issue should still be created, got %d", h.tracker.issueCount())
+	}
+	issue := h.tracker.issueAt(0)
+	if !strings.Contains(issue.Body, "附件上传失败：boot.png") {
+		t.Fatalf("issue body should note upload failure: %s", issue.Body)
 	}
 }

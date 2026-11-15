@@ -28,7 +28,7 @@ var (
 // IssueDraft 是建单草稿：落库后立即走建单路径；建单失败时保留草稿，群里可以重试。
 type IssueDraft = issuedraft.Draft
 
-// draftSourceInbound 还原建单需要的来源信息；附件不会进入 Issue 正文。
+// draftSourceInbound 还原建单需要的来源信息；聊天图片已在上传后写进草稿正文。
 func draftSourceInbound(d *IssueDraft) Inbound {
 	if d == nil {
 		return Inbound{}
