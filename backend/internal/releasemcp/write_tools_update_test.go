@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"smartpipe/backend/internal/releasepublish"
+	"smartpipe/backend/internal/releasev2"
 )
 
 func TestContentArtifactNameUsesServiceConvention(t *testing.T) {
@@ -62,5 +63,42 @@ func TestArtifactCellAndVersionShape(t *testing.T) {
 		if isTripleVersion(bad) {
 			t.Fatalf("%q should be rejected", bad)
 		}
+	}
+}
+
+func TestSelectUpdateTargetsHonoursRunSelection(t *testing.T) {
+	all := []updateTarget{{Name: "cdn", URL: "https://cdn.example.com"}, {Name: "app", URL: "https://app.example.com"}}
+	got, missing := selectUpdateTargets(all, []string{" CDN ", "cdn"})
+	if len(missing) != 0 || len(got) != 1 || got[0].Name != "cdn" {
+		t.Fatalf("selection = %+v missing = %v", got, missing)
+	}
+	if got, missing := selectUpdateTargets(all, nil); len(missing) != 0 || len(got) != 2 {
+		t.Fatalf("empty selection must keep every service, got %+v", got)
+	}
+	got, missing = selectUpdateTargets(all, []string{"cdn", "missing"})
+	if len(got) != 1 || got[0].Name != "cdn" || len(missing) != 1 || missing[0] != "missing" {
+		t.Fatalf("partial selection = %+v missing = %v", got, missing)
+	}
+}
+
+func TestBundleCoversArtifactsDetectsStaleBundle(t *testing.T) {
+	bundle := releasev2.UpgradeBundle{Components: map[string]releasev2.BundleComponent{
+		"product": {Version: "0.5.17", Slots: []releasev2.BundleSlot{{Slot: "installer", ArtifactID: 11}}},
+		"templates": {Version: "1.0.0", Artifacts: []releasev2.BundleArtifact{{ArtifactID: 12}}},
+	}}
+	artifacts := []releasev2.Artifact{
+		{ID: 11, Role: "installer"},
+		{ID: 12, Role: "templates"},
+		{ID: 99, Role: "upgrade_bundle"},
+	}
+	if !bundleCoversArtifacts(bundle, artifacts) {
+		t.Fatal("bundle should cover every publishable artifact")
+	}
+	artifacts = append(artifacts, releasev2.Artifact{ID: 13, Role: "update-thin"})
+	if bundleCoversArtifacts(bundle, artifacts) {
+		t.Fatal("bundle missing artifact 13 must be treated as stale")
+	}
+	if bundleCoversArtifacts(releasev2.UpgradeBundle{}, artifacts) {
+		t.Fatal("empty bundle is never usable")
 	}
 }

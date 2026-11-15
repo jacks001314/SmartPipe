@@ -29,7 +29,7 @@ func TestRepoSlugParsesCommonURLs(t *testing.T) {
 func TestVerifyGitHubAssetsDetectsGaps(t *testing.T) {
 	digest := "sha256:" + "a"
 	artifacts := []releasev2.Artifact{
-		{Name: "SyntropySetup.exe", Role: "server-binary", SHA256: digest},
+		{Name: "SyntropySetup.exe", Role: "server-binary", SHA256: digest, Destinations: []string{"github"}},
 		{Name: "upgrade-bundle.json", Role: "upgrade_bundle", SHA256: digest},
 	}
 	release := &releasepublish.GitHubRelease{Assets: []releasepublish.GitHubAsset{{Name: "SyntropySetup.exe", Digest: digest}}}
@@ -41,14 +41,14 @@ func TestVerifyGitHubAssetsDetectsGaps(t *testing.T) {
 		t.Fatalf("digest mismatch gaps = %v", gaps)
 	}
 	release.Assets = nil
-	if gaps := verifyGitHubAssets(release, artifacts); len(gaps) != 1 {
+	if gaps := verifyGitHubAssets(release, artifacts); len(gaps) != 2 || !strings.Contains(strings.Join(gaps, ";"), "missing asset") || !strings.Contains(strings.Join(gaps, ";"), "asset count") {
 		t.Fatalf("missing asset gaps = %v", gaps)
 	}
 }
 
 func TestVerifyGitHubAssets(t *testing.T) {
 	artifacts := []releasev2.Artifact{
-		{Name: "app.tar.gz", Role: "app-bundle", Size: 176, SHA256: "sha256:aaaa"},
+		{Name: "app.tar.gz", Role: "app-bundle", Size: 176, SHA256: "sha256:aaaa", Destinations: []string{"github"}},
 		{Name: "upgrade-bundle.json", Role: "upgrade_bundle", Size: 722, SHA256: "sha256:bbbb"},
 	}
 	release := &releasepublish.GitHubRelease{Assets: []releasepublish.GitHubAsset{
@@ -69,7 +69,7 @@ func TestVerifyGitHubAssets(t *testing.T) {
 	if gaps := verifyGitHubAssets(release, artifacts); len(gaps) != 1 || !strings.Contains(gaps[0], "size mismatch") {
 		t.Fatalf("size mismatch not reported: %v", gaps)
 	}
-	if gaps := verifyGitHubAssets(&releasepublish.GitHubRelease{}, artifacts); len(gaps) != 1 || !strings.Contains(gaps[0], "missing asset app.tar.gz") {
+	if gaps := verifyGitHubAssets(&releasepublish.GitHubRelease{}, artifacts); len(gaps) != 2 || !strings.Contains(strings.Join(gaps, ";"), "missing asset app.tar.gz") || !strings.Contains(strings.Join(gaps, ";"), "asset count") {
 		t.Fatalf("missing asset not reported: %v", gaps)
 	}
 }

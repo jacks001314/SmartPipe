@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -58,11 +59,66 @@ func fetchSourceArchive(ctx context.Context, client *http.Client, cfg config, en
 		return err
 	}
 	defer f.Close()
-	return extractTarGz(f, dir)
+	if err := extractTarGz(f, dir); err != nil {
+		return err
+	}
+	return writeSourceMetadata(dir, env)
+}
+
+// writeSourceMetadata 让构建脚本不依赖 .git 也能拿到本次发布的版本与提交。
+func writeSourceMetadata(dir string, env *targetEnvelope) error {
+	if env == nil || env.Run == nil {
+		return nil
+	}
+	payload := map[string]any{
+		"run_id": env.Run.ID, "version": env.Run.Version, "tag": env.Run.Tag,
+		"build_version": env.Run.BuildVersion, "commit": env.Run.ResolvedCommit,
+		"channel": env.Run.Channel,
+	}
+	raw, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, ".smartpipe-source.json"), append(raw, '\n'), 0o644)
+}
+
+// describeTopLevel 返回解包目录的前几项，构建失败时能直接从日志判断
+// 归档层级是否按预期剥离，而不是只看到一句 cd 失败。
+func describeTopLevel(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "unreadable: " + err.Error()
+	}
+	names := make([]string, 0, len(entries)+1)
+	for i, entry := range entries {
+		if i >= 12 {
+			names = append(names, "...")
+			break
+		}
+		name := entry.Name()
+		if entry.IsDir() {
+			name += "/"
+		}
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return "(empty)"
+	}
+	return strings.Join(names, " ")
 }
 
 // extractTarGz 解开归档，并挡住跳出目标目录的条目。
-func extractTarGz(r io.Reader, dir string) error {
+//
+// GitHub 的 tarball 会自带一层 <owner>-<repo>-<sha>/ 根目录，而 git archive
+// 直接从仓库根开始。这里统一剥掉唯一顶层目录，构建脚本看到的目录结构一致。
+func extractTarGz(r io.ReadSeeker, dir string) error {
+	prefix, err := archiveRootPrefix(r)
+	if err != nil {
+		return err
+	}
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
 	gz, err := gzip.NewReader(r)
 	if err != nil {
 		return err
@@ -77,7 +133,14 @@ func extractTarGz(r io.Reader, dir string) error {
 		if err != nil {
 			return err
 		}
-		clean := filepath.Clean(strings.TrimPrefix(hdr.Name, "./"))
+		name := strings.TrimPrefix(filepath.ToSlash(hdr.Name), "./")
+		if prefix != "" {
+			name = strings.TrimPrefix(name, prefix+"/")
+		}
+		if name == "" {
+			continue
+		}
+		clean := filepath.Clean(filepath.FromSlash(name))
 		if clean == "." || clean == "" {
 			continue
 		}
@@ -122,4 +185,59 @@ func extractTarGz(r io.Reader, dir string) error {
 			}
 		}
 	}
+}
+
+// archiveRootPrefix 返回归档唯一的顶层目录；没有唯一顶层目录时返回空串。
+func archiveRootPrefix(r io.Reader) (string, error) {
+	gz, err := gzip.NewReader(r)
+	if err != nil {
+		return "", err
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	top := ""
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		// GitHub tarball 会带一条 pax_global_header（type 'g'），它没有目录层级。
+		// 把它当成“仓库根有文件”会让唯一顶层目录不被剥离，构建脚本随后找不到
+		// 子目录，所以这里只统计真实文件/目录条目。
+		if hdr.Typeflag == tar.TypeXGlobalHeader || hdr.Typeflag == tar.TypeXHeader {
+			continue
+		}
+		name := strings.TrimSuffix(strings.TrimPrefix(filepath.ToSlash(hdr.Name), "./"), "/")
+		if name == "" || name == "." {
+			continue
+		}
+		idx := strings.IndexByte(name, '/')
+		if idx < 0 {
+			// 归档里的顶层目录条目本身（type dir）不算“仓库根有文件”；
+			// 只有真正的根级文件才说明这不是带前缀的 tarball。
+			if hdr.Typeflag != tar.TypeDir {
+				return "", nil
+			}
+			if top == "" {
+				top = name
+				continue
+			}
+			if top != name {
+				return "", nil
+			}
+			continue
+		}
+		segment := name[:idx]
+		if top == "" {
+			top = segment
+			continue
+		}
+		if top != segment {
+			return "", nil
+		}
+	}
+	return top, nil
 }

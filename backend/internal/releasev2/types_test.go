@@ -81,22 +81,3 @@ func TestAgentTokenAndScopes(t *testing.T) {
 	}
 }
 
-func TestApprovalPolicyDefaultsAndOverrides(t *testing.T) {
-	if required, _ := ApprovalPolicy(nil, "stable"); !required {
-		t.Fatal("stable should require approval by default")
-	}
-	if required, _ := ApprovalPolicy(nil, "beta"); required {
-		t.Fatal("beta should not require approval by default")
-	}
-	policies := map[string]any{"approvals": map[string]any{
-		"required_channels": []any{"test", "stable"},
-		"ttl":               "30m",
-	}}
-	required, ttl := ApprovalPolicy(policies, "test")
-	if !required || ttl.Minutes() != 30 {
-		t.Fatalf("policy = %v %v", required, ttl)
-	}
-	if required, _ := ApprovalPolicy(policies, "beta"); required {
-		t.Fatal("beta should stay unapproved-free")
-	}
-}

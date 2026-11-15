@@ -42,6 +42,56 @@ func (s *Server) defaultGitHubCredential(ctx context.Context) string {
 	return ""
 }
 
+// githubCredentialCandidates 按优先级列出可尝试的凭据名：显式参数 > 发版设置 >
+// 服务端环境 > 全部启用的全局 github_pat。
+func (s *Server) githubCredentialCandidates(ctx context.Context, args map[string]any) []string {
+	out := make([]string, 0, 4)
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		for _, seen := range out {
+			if seen == value {
+				return
+			}
+		}
+		out = append(out, value)
+	}
+	add(stringArg(args, "credential"))
+	add(s.settingValue(ctx, "release_github_credential"))
+	add(s.GitHubCredential)
+	if s.Store != nil {
+		if items, err := s.Store.ListCredentials(ctx, nil); err == nil {
+			for _, item := range items {
+				if item.Kind == "github_pat" && item.ProjectID == nil && item.Enabled {
+					add(item.Name)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// githubCredentialForRepo 选一个真的能读该仓库的凭据。令牌有效但对目标
+// 私有库无权限时 GitHub 返回 404，只看令牌会影响整条发布链。
+func (s *Server) githubCredentialForRepo(ctx context.Context, owner, repo string, args map[string]any) (string, error) {
+	candidates := s.githubCredentialCandidates(ctx, args)
+	if len(candidates) == 0 {
+		return "", fmt.Errorf("发版设置里没有可用的 GitHub 凭据")
+	}
+	client := s.githubClient(ctx)
+	var lastErr error
+	for _, name := range candidates {
+		if err := client.GetRepo(ctx, name, owner, repo); err == nil {
+			return name, nil
+		} else {
+			lastErr = err
+		}
+	}
+	return "", fmt.Errorf("没有能访问 %s/%s 的 GitHub 凭据：%v", owner, repo, lastErr)
+}
+
 // githubClient 每次按当前设置构造：界面改了 API 地址或凭据后不需要重启进程。
 func (s *Server) githubClient(ctx context.Context) *releasepublish.GitHubClient {
 	base := s.settingValue(ctx, "release_github_api_base")
@@ -208,7 +258,18 @@ func (s *Server) githubDispatch(ctx context.Context, p *principal, name string, 
 		if releaseID == 0 {
 			return blockedResult("github_draft_missing", "create the GitHub draft first"), true, nil
 		}
-		release, err := s.githubClient(ctx).PublishRelease(ctx, s.githubCredential(ctx, args), owner, repo, releaseID)
+		client := s.githubClient(ctx)
+		credential := s.githubCredential(ctx, args)
+		// 发布一旦落地就不能再补资产（GitHub 不允许向已发布 Release 追加），
+		// 所以先把资产核对完，缺一件就拦下来，让 Agent 回去补传。
+		current, err := client.GetRelease(ctx, credential, owner, repo, releaseID)
+		if err != nil {
+			return nil, true, err
+		}
+		if gaps := verifyGitHubAssets(current, gateArtifacts); len(gaps) > 0 {
+			return blockedResult("github_assets_incomplete", strings.Join(gaps, "; ")), true, nil
+		}
+		release, err := client.PublishRelease(ctx, credential, owner, repo, releaseID)
 		if err != nil {
 			return nil, true, err
 		}
@@ -230,11 +291,28 @@ func (s *Server) githubDispatch(ctx context.Context, p *principal, name string, 
 		if releaseID == 0 {
 			releaseID = s.githubDraftID(ctx, p.Run.ID)
 		}
-		release, err := s.githubClient(ctx).GetRelease(ctx, s.githubCredential(ctx, args), owner, repo, releaseID)
+		credential, err := s.githubCredentialForRepo(ctx, owner, repo, args)
+		if err != nil {
+			return blockedResult("github_credential_unavailable", err.Error()), true, nil
+		}
+		var release *releasepublish.GitHubRelease
+		// 支持按 tag 读回：同版本重发前先确认远端已有 Release 的状态。
+		if tag := strings.TrimSpace(stringArg(args, "tag")); tag != "" && releaseID == 0 {
+			release, err = s.githubClient(ctx).GetReleaseByTag(ctx, credential, owner, repo, tag)
+		} else {
+			release, err = s.githubClient(ctx).GetRelease(ctx, credential, owner, repo, releaseID)
+		}
 		if err != nil {
 			return nil, true, err
 		}
 		return textResult(release), true, nil
+
+	case "github_release_sync":
+		result, err := s.githubSync(ctx, p, args)
+		if err != nil {
+			return nil, true, err
+		}
+		return result, true, nil
 	}
 	return nil, false, nil
 }
@@ -264,24 +342,26 @@ func verifyGitHubAssets(release *releasepublish.GitHubRelease, artifacts []relea
 		uploaded[asset.Name] = asset
 	}
 	var missing []string
+	expected := 0
 	for _, artifact := range artifacts {
-		if artifact.Role == "upgrade_bundle" {
+		if !deliversTo(artifact, "github") {
 			continue
 		}
+		expected++
 		asset, ok := uploaded[artifact.Name]
 		if !ok {
 			missing = append(missing, "missing asset "+artifact.Name)
 			continue
 		}
-		switch {
-		case asset.Digest != "":
-			if !sameDigest(asset.Digest, artifact.SHA256) {
-				missing = append(missing, "digest mismatch "+artifact.Name)
-			}
-		case artifact.Size > 0 && asset.Size != artifact.Size:
-			// 老版本 GitHub 响应没有 digest，退化成大小核对；两者都没有就只能算通过。
+		if artifact.Size > 0 && asset.Size != artifact.Size {
 			missing = append(missing, fmt.Sprintf("size mismatch %s: github %d != local %d", artifact.Name, asset.Size, artifact.Size))
 		}
+		if asset.Digest != "" && !sameDigest(asset.Digest, artifact.SHA256) {
+			missing = append(missing, "digest mismatch "+artifact.Name)
+		}
+	}
+	if len(release.Assets) != expected {
+		missing = append(missing, fmt.Sprintf("asset count %d != expected %d", len(release.Assets), expected))
 	}
 	sort.Strings(missing)
 	return missing

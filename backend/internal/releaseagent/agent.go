@@ -34,6 +34,8 @@ type Repository interface {
 	RevokeReleaseV2Token(ctx context.Context, id string) error
 	CreateAgentSession(ctx context.Context, in *releasev2.AgentSession) error
 	UpdateAgentSession(ctx context.Context, in *releasev2.AgentSession) error
+	SetReleaseV2RunAgentThreadID(ctx context.Context, runID, threadID string) error
+	MarkReleaseV2RunNeedsAttention(ctx context.Context, runID, reason string) (bool, error)
 	AppendEvent(ctx context.Context, ev releasev2.Event) error
 }
 
@@ -51,19 +53,23 @@ func (f RunnerFunc) Run(ctx context.Context, spec codexrunner.Spec) (*codexrunne
 
 // Config 是发布 Agent 的运行参数，全部来自服务端环境变量。
 type Config struct {
-	Enabled          bool
-	MCPURL           string
-	ServerName       string
-	TokenEnvVar      string
-	WorkRoot         string
-	CodexPath        string
-	Model            string
-	Effort           string
-	Sandbox          string
-	Compatibility    string
-	Timeout          time.Duration
+	Enabled       bool
+	MCPURL        string
+	ServerName    string
+	TokenEnvVar   string
+	WorkRoot      string
+	CodexPath     string
+	Model         string
+	Effort        string
+	Sandbox       string
+	Compatibility string
+	Timeout       time.Duration
+	// ToolTimeout 是单次 MCP 工具调用的上限。release_import / github_release_sync
+	// 一次要传完整制品（Syntropy 全量约 2.4 GB），4 分钟根本不够；导入本身按
+	// 「同一 cell 摘要一致就跳过」可续传，超时后用同样的参数再调即可。
+	ToolTimeout   time.Duration
 	// MaxSessions 限制同时运行的发布 Agent 会话数；0 表示不限制。
-	MaxSessions int
+	MaxSessions      int
 	TokenTTL         time.Duration
 	BaseInstructions string
 	// ModelEnv 返回项目模型供应商的环境变量（OPENAI_BASE_URL / OPENAI_API_KEY）。
@@ -82,6 +88,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.Timeout <= 0 {
 		c.Timeout = 45 * time.Minute
+	}
+	if c.ToolTimeout <= 0 {
+		c.ToolTimeout = 20 * time.Minute
 	}
 	if c.TokenTTL <= 0 {
 		c.TokenTTL = c.Timeout + 30*time.Minute
@@ -233,6 +242,8 @@ func (l *Launcher) Running(runID string) bool {
 
 func (l *Launcher) execute(ctx context.Context, bundle *releasev2.RunBundle, session *releasev2.AgentSession, rawToken, workDir, effort string) {
 	run := bundle.Run
+	stderr := &cappedBuffer{max: 32 << 10}
+	var threadRecorded bool
 	spec := codexrunner.Spec{
 		WorkDir:          workDir,
 		Prompt:           BuildPrompt(bundle, l.cfg.MCPURL, l.cfg.ServerName),
@@ -243,9 +254,19 @@ func (l *Launcher) execute(ctx context.Context, bundle *releasev2.RunBundle, ses
 		Sandbox:          l.cfg.Sandbox,
 		Compatibility:    l.cfg.Compatibility,
 		Timeout:          l.cfg.Timeout,
+		LogWriter:        stderr,
 		Env:              l.agentEnv(ctx, run.ProjectID, rawToken),
 		ConfigOverrides:  l.mcpOverrides(),
 		KeepResponse:     true,
+		// 续用上一次会话的线程：构建常常比一轮会话长，重开新线程会让 Agent
+		// 忘掉已经排查过的环境和已经下过的结论。
+		ResumeThreadID: strings.TrimSpace(run.AgentThreadID),
+		PersistThread:  true,
+		// 线程一建立就落库，不能等本轮结束：attention 续跑的前提是上一轮
+		// 进程被杀，等到最后再写就永远写不进去。
+		OnThread: func(threadID string, resumed bool) {
+			threadRecorded = l.registerThread(session, threadID, resumed)
+		},
 		OnEvent: func(ev codexrunner.Event) {
 			l.projectEvent(run.ID, session, ev)
 		},
@@ -262,24 +283,105 @@ func (l *Launcher) execute(ctx context.Context, bundle *releasev2.RunBundle, ses
 	if session.FinishedAt == nil {
 		session.FinishedAt = &now
 	}
+	if res != nil && strings.TrimSpace(res.ThreadID) != "" {
+		session.ThreadID = res.ThreadID
+		session.TurnID = res.TurnID
+		if !threadRecorded {
+			_ = l.registerThread(session, res.ThreadID, res.Resumed)
+		}
+	}
 	switch {
 	case err != nil && (errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled)):
 		l.finish(context.Background(), session, releasev2.AgentSessionCancelled, "发布 Agent 已取消", "")
+		l.handBackRun(session.RunID, "agent cancelled")
 	case err != nil:
-		l.finish(context.Background(), session, releasev2.AgentSessionFailed, "发布 Agent 异常退出", Redact(err.Error()))
+		l.finish(context.Background(), session, releasev2.AgentSessionFailed, "发布 Agent 异常退出", l.failureDetail(err.Error(), stderr, session))
+		l.handBackRun(session.RunID, "agent exited: "+err.Error())
 	case res != nil && isFailureStatus(res.Status):
-		l.finish(context.Background(), session, releasev2.AgentSessionFailed, "发布 Agent 结束状态 "+res.Status, Redact(res.FinalResponse))
+		l.finish(context.Background(), session, releasev2.AgentSessionFailed, "发布 Agent 结束状态 "+res.Status,
+			l.failureDetail(firstNonEmpty(res.FinalResponse, stderr.String()), stderr, session))
+		l.handBackRun(session.RunID, "agent finished with status "+res.Status)
 	default:
 		summary := "发布 Agent 本轮结束"
 		if res != nil {
-			session.ThreadID = res.ThreadID
-			session.TurnID = res.TurnID
 			if text := strings.TrimSpace(Redact(res.FinalResponse)); text != "" {
 				summary = limit(text, 2000)
 			}
 		}
 		l.finish(context.Background(), session, releasev2.AgentSessionFinished, summary, "")
 	}
+}
+
+// registerThread 把本轮使用的 Codex 线程登记到运行上：会话表和运行表都要写，
+// 这样进程被杀后 attention worker 还能按同一个线程续跑。返回是否写成功。
+func (l *Launcher) registerThread(session *releasev2.AgentSession, threadID string, resumed bool) bool {
+	threadID = strings.TrimSpace(threadID)
+	if l == nil || session == nil || threadID == "" {
+		return false
+	}
+	session.ThreadID = threadID
+	if l.repo != nil {
+		_ = l.repo.SetReleaseV2RunAgentThreadID(context.Background(), session.RunID, threadID)
+	}
+	_ = l.appendEvent(context.Background(), releasev2.Event{
+		RunID: session.RunID, Actor: "release-agent", Kind: "agent.thread",
+		Summary: "发布 Agent 线程已登记，后续会话续用",
+		Detail:  map[string]any{"session_id": session.ID, "thread_id": threadID, "resumed": resumed},
+	})
+	return true
+}
+
+// handBackRun 在 Agent 会话异常结束时把运行交回 needs_attention，让
+// attention worker 重新接管。已结束或已取消的运行会被 SQL 条件排除。
+func (l *Launcher) handBackRun(runID, reason string) {
+	if l == nil || l.repo == nil || strings.TrimSpace(runID) == "" {
+		return
+	}
+	_, _ = l.repo.MarkReleaseV2RunNeedsAttention(context.Background(), runID, reason)
+}
+
+func (l *Launcher) failureDetail(message string, stderr *cappedBuffer, session *releasev2.AgentSession) string {
+	detail := Redact(message)
+	if text := strings.TrimSpace(stderr.String()); text != "" {
+		_ = l.appendEvent(context.Background(), releasev2.Event{
+			RunID: session.RunID, Actor: "release-agent", Kind: "agent.stderr",
+			Summary: "Codex stderr", Detail: map[string]any{"session_id": session.ID, "stderr": limit(Redact(text), 8000)},
+		})
+		if !strings.Contains(detail, text) {
+			detail = strings.TrimSpace(detail + "\n" + Redact(text))
+		}
+	}
+	return limit(detail, 4000)
+}
+
+// cappedBuffer keeps the last diagnostics without letting a noisy child process
+// grow the agent's memory without bound.
+type cappedBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+	max int
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	written := len(p)
+	if c.max <= 0 {
+		c.max = 32 << 10
+	}
+	if room := c.max - c.buf.Len(); room > 0 {
+		if len(p) > room {
+			p = p[:room]
+		}
+		_, _ = c.buf.Write(p)
+	}
+	return written, nil
+}
+
+func (c *cappedBuffer) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buf.String()
 }
 
 func (l *Launcher) finish(ctx context.Context, session *releasev2.AgentSession, status releasev2.AgentSessionStatus, summary, lastError string) {
@@ -319,8 +421,14 @@ func (l *Launcher) mcpOverrides() []string {
 	return []string{
 		fmt.Sprintf("mcp_servers.%s.url=%q", server, strings.TrimSpace(l.cfg.MCPURL)),
 		fmt.Sprintf("mcp_servers.%s.bearer_token_env_var=%q", server, l.cfg.TokenEnvVar),
-		fmt.Sprintf("mcp_servers.%s.tool_timeout_sec=180", server),
+		// 构建机长命令由工具自己返回 command_id，Agent 用 executor_command_get
+		// 轮询；这里的上限主要给 release_import / github_release_sync 这类
+		// 真要传完整制品的调用留出带宽余量。
+		fmt.Sprintf("mcp_servers.%s.tool_timeout_sec=%d", server, int(l.cfg.ToolTimeout/time.Second)),
 		fmt.Sprintf("mcp_servers.%s.startup_timeout_sec=60", server),
+		// Codex 对没有 readOnlyHint 注解的 MCP 工具默认要求审批；本链路固定
+		// approval_policy=never，不显式设成 approve 会在客户端直接拒绝调用。
+		fmt.Sprintf("mcp_servers.%s.default_tools_approval_mode=%q", server, "approve"),
 	}
 }
 
@@ -354,7 +462,12 @@ func (l *Launcher) projectEvent(runID string, session *releasev2.AgentSession, e
 			tool := firstNonEmpty(stringAny(item["tool"]), stringAny(item["name"]))
 			status := firstNonEmpty(stringAny(item["status"]), "running")
 			args := limit(Redact(compactJSON(item["arguments"])), 2000)
-			result := limit(Redact(firstNonEmpty(stringAny(item["result"]), stringAny(item["output"]))), 4000)
+			result := limit(Redact(firstNonEmpty(
+				stringAny(item["result"]),
+				stringAny(item["output"]),
+				nestedMessage(item["error"]),
+				toolResultText(item["result"]),
+			)), 4000)
 			_ = l.appendEvent(ctx, releasev2.Event{
 				RunID: runID, Actor: "release-agent", Kind: "agent.tool",
 				Summary: limit(fmt.Sprintf("%s %s", tool, status), 200),
@@ -424,6 +537,46 @@ func stringAny(value any) string {
 	}
 }
 
+func nestedMessage(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case map[string]any:
+		if msg := firstNonEmpty(stringAny(typed["message"]), stringAny(typed["text"]), stringAny(typed["error"])); msg != "" {
+			return msg
+		}
+		return compactJSON(typed)
+	default:
+		if value != nil {
+			return compactJSON(value)
+		}
+		return ""
+	}
+}
+
+func toolResultText(value any) string {
+	obj, ok := value.(map[string]any)
+	if !ok {
+		return ""
+	}
+	var parts []string
+	if content, ok := obj["content"].([]any); ok {
+		for _, entry := range content {
+			item, ok := entry.(map[string]any)
+			if !ok {
+				continue
+			}
+			if text := stringAny(item["text"]); text != "" {
+				parts = append(parts, text)
+			}
+		}
+	}
+	if text := stringAny(obj["text"]); text != "" {
+		parts = append(parts, text)
+	}
+	return strings.Join(parts, "\n")
+}
+
 func limit(text string, max int) string {
 	text = strings.TrimSpace(text)
 	if max <= 0 || len(text) <= max {
@@ -451,7 +604,11 @@ func firstNonEmpty(values ...string) string {
 func agentStatusAllowed(status releasev2.RunStatus) bool {
 	switch status {
 	case releasev2.RunQueued, releasev2.RunPreparing, releasev2.RunBuilding,
-		releasev2.RunVerifying, releasev2.RunStaged:
+		releasev2.RunVerifying, releasev2.RunArtifactsReady, releasev2.RunStaged,
+		releasev2.RunNeedsAttention, releasev2.RunRecovering, releasev2.RunPublishing,
+		// 渠道已推进但 GitHub 失败时运行停在 partially_published；这正是 Agent
+		// 需要接手续跑的场景，不能把它挡在门外。
+		releasev2.RunPartiallyPublished:
 		return true
 	}
 	return false

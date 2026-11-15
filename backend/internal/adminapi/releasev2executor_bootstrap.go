@@ -86,13 +86,16 @@ func (a *API) executorServiceURL(c iris.Context) string {
 	if port == "" {
 		port = "8099"
 	}
-	host := strings.TrimSpace(c.Request().Host)
+	host := firstHeaderValue(c.GetHeader("X-Forwarded-Host"))
+	if host == "" {
+		host = strings.TrimSpace(c.Request().Host)
+	}
 	if name, _, err := net.SplitHostPort(host); err == nil {
 		host = name
 	}
 	host = strings.Trim(host, "[]")
 	if host != "" {
-		return "http://" + net.JoinHostPort(host, port)
+		return requestScheme(c) + "://" + net.JoinHostPort(host, port)
 	}
 	parsed, err := url.Parse(strings.TrimSpace(a.releaseURL))
 	if err != nil || parsed.Host == "" {
@@ -103,4 +106,23 @@ func (a *API) executorServiceURL(c iris.Context) string {
 		fallbackHost = "127.0.0.1"
 	}
 	return parsed.Scheme + "://" + net.JoinHostPort(fallbackHost, port)
+}
+
+// requestScheme 按反向代理传入的协议头或 TLS 状态决定对外地址的 scheme，
+// 避免部署在 HTTPS 后面时仍给构建机下发 http 地址。
+func requestScheme(c iris.Context) string {
+	if proto := strings.ToLower(firstHeaderValue(c.GetHeader("X-Forwarded-Proto"))); proto == "http" || proto == "https" {
+		return proto
+	}
+	if c.Request().TLS != nil {
+		return "https"
+	}
+	return "http"
+}
+
+func firstHeaderValue(raw string) string {
+	if idx := strings.IndexByte(raw, ','); idx >= 0 {
+		raw = raw[:idx]
+	}
+	return strings.TrimSpace(raw)
 }

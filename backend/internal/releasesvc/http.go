@@ -35,6 +35,7 @@ func (h *HTTPHandler) Handler() http.Handler {
 	})
 	mux.HandleFunc("/internal/release-executors/register", h.auth(h.registerExecutor))
 	mux.HandleFunc("/internal/release-executors/", h.auth(h.executorAction))
+	mux.HandleFunc("/internal/release-runs/", h.auth(h.releaseRunAction))
 	return mux
 }
 
@@ -142,6 +143,10 @@ func (h *HTTPHandler) executorAction(w http.ResponseWriter, r *http.Request) {
 		}
 	case "source":
 		h.serveSource(w, r, executorID)
+	case "manifest":
+		h.putTargetManifest(w, r, executorID)
+	case "commands":
+		h.executorCommands(w, r, executorID, parts[2:])
 	case "heartbeat":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

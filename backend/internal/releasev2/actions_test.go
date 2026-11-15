@@ -94,7 +94,7 @@ func (f *fakeRepo) GetTarget(_ context.Context, runID, targetID string) (*Target
 func (f *fakeRepo) RetryReleaseV2Target(_ context.Context, runID, targetID string) (bool, error) {
 	for i := range f.targets[runID] {
 		t := &f.targets[runID][i]
-		if t.TargetID == targetID && t.Status == TargetFailed {
+		if t.TargetID == targetID && (t.Status == TargetFailed || t.Status == TargetUploaded) {
 			t.Status = TargetRetryQueued
 			t.Attempt++
 			return true, nil
@@ -162,6 +162,7 @@ func TestRetryTargetRequiresFailure(t *testing.T) {
 	repo.seed(Run{ID: "run_1", Status: RunBuilding},
 		Target{TargetID: "darwin-arm64", Status: TargetReady, Attempt: 1},
 		Target{TargetID: "darwin-amd64", Status: TargetFailed, Attempt: 1},
+		Target{TargetID: "windows-amd64", Status: TargetUploaded, Attempt: 1},
 	)
 	svc := NewService(repo)
 	if _, err := svc.RetryTarget(context.Background(), "run_1", "darwin-arm64", "agent", ""); !errors.Is(err, ErrState) {
@@ -173,6 +174,13 @@ func TestRetryTargetRequiresFailure(t *testing.T) {
 	}
 	if target.Status != TargetRetryQueued || target.Attempt != 2 {
 		t.Fatalf("target = %+v", target)
+	}
+	uploaded, err := svc.RetryTarget(context.Background(), "run_1", "windows-amd64", "agent", "manifest missing")
+	if err != nil {
+		t.Fatalf("uploaded target retry err = %v", err)
+	}
+	if uploaded.Status != TargetRetryQueued || uploaded.Attempt != 2 {
+		t.Fatalf("uploaded target = %+v", uploaded)
 	}
 }
 
@@ -189,8 +197,9 @@ func TestRetryTargetResumesFailedRun(t *testing.T) {
 	if target.Status != TargetRetryQueued || target.Attempt != 2 {
 		t.Fatalf("target = %+v", target)
 	}
-	if got := repo.runs["run_1"].Status; got != RunPreparing {
-		t.Fatalf("run status = %s, want preparing", got)
+	// 失败运行先进入 recovering，由 release-service 重新校验执行器后再回 preparing。
+	if got := repo.runs["run_1"].Status; got != RunRecovering {
+		t.Fatalf("run status = %s, want recovering", got)
 	}
 }
 

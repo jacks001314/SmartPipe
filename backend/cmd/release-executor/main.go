@@ -33,6 +33,11 @@ type config struct {
 	Arch       string
 	Labels     []string
 	Once       bool
+	// Commands 控制是否长轮询 Agent 发来的遥控命令。
+	Commands      bool
+	WorkRoot      string
+	ExecAllowlist []string
+	PathPrepend   []string
 }
 
 type targetEnvelope struct {
@@ -47,11 +52,15 @@ func main() {
 		return
 	}
 	cfg := config{
-		ServiceURL: strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_SERVICE_URL")),
-		Token:      strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_SERVICE_TOKEN")),
-		ExecutorID: strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_EXECUTOR_ID")),
-		OS:         strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_EXECUTOR_OS")),
-		Arch:       strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_EXECUTOR_ARCH")),
+		ServiceURL:    strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_SERVICE_URL")),
+		Token:         strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_SERVICE_TOKEN")),
+		ExecutorID:    strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_EXECUTOR_ID")),
+		OS:            strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_EXECUTOR_OS")),
+		Arch:          strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_EXECUTOR_ARCH")),
+		Commands:      !strings.EqualFold(strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_EXECUTOR_COMMANDS")), "off"),
+		WorkRoot:      strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_EXECUTOR_WORK_ROOT")),
+		ExecAllowlist: splitCommaList(os.Getenv("SMARTPIPE_RELEASE_EXECUTOR_EXEC_ALLOWLIST")),
+		PathPrepend:   filepath.SplitList(os.Getenv("SMARTPIPE_RELEASE_EXECUTOR_PATH_PREPEND")),
 	}
 	flag.StringVar(&cfg.ServiceURL, "service-url", cfg.ServiceURL, "release-service base URL")
 	flag.StringVar(&cfg.Token, "token", cfg.Token, "release-service bearer token")
@@ -75,6 +84,7 @@ func main() {
 }
 
 func run(ctx context.Context, cfg config) error {
+	prepareExecutorPath(cfg)
 	client := &http.Client{Timeout: 30 * time.Second}
 	executor := releasev2.Executor{
 		ID: cfg.ExecutorID, OS: cfg.OS, Arch: cfg.Arch, Version: version, Status: "online",
@@ -96,6 +106,9 @@ func run(ctx context.Context, cfg config) error {
 		return fmt.Errorf("register executor: %w", regErr)
 	}
 	log.Printf("release executor %s (%s/%s) registered at %s", cfg.ExecutorID, cfg.OS, cfg.Arch, cfg.ServiceURL)
+	if cfg.Commands && !cfg.Once {
+		go runCommandLoop(ctx, cfg)
+	}
 	registerEvery := time.NewTicker(30 * time.Second)
 	defer registerEvery.Stop()
 	pollEvery := time.NewTicker(2 * time.Second)
@@ -128,12 +141,58 @@ func run(ctx context.Context, cfg config) error {
 	}
 }
 
+// prepareExecutorPath 把执行器目录下的 bin/ 放到 PATH 最前面。Agent 通过
+// executor_exec 安装的工具就落在这里，后续 probe 与构建命令无需改系统环境。
+func prepareExecutorPath(cfg config) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return
+	}
+	binDir := filepath.Join(filepath.Dir(exePath), "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		log.Printf("create executor bin dir failed: %v", err)
+	}
+	parts := []string{binDir}
+	for _, dir := range cfg.PathPrepend {
+		if dir = strings.TrimSpace(dir); dir != "" {
+			parts = append(parts, dir)
+		}
+	}
+	// launchd/systemd 拉起执行器时 PATH 往往只有 /usr/bin:/bin，Go、Homebrew
+	// 这类常见工具目录不在里面。追加存在的标准目录，构建脚本就不用自己改
+	// 环境，也不用把某台机器的路径写进产品配置。
+	home, _ := os.UserHomeDir()
+	for _, dir := range []string{
+		"/usr/local/go/bin",
+		"/opt/homebrew/bin",
+		"/usr/local/bin",
+		filepath.Join(home, ".local", "bin"),
+	} {
+		if dir == "" || dir == "/" {
+			continue
+		}
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			parts = append(parts, dir)
+		}
+	}
+	if current := os.Getenv("PATH"); current != "" {
+		parts = append(parts, current)
+	}
+	if err := os.Setenv("PATH", strings.Join(parts, string(os.PathListSeparator))); err != nil {
+		log.Printf("prepend executor PATH failed: %v", err)
+	}
+}
+
 func executeTarget(parent context.Context, client *http.Client, cfg config, env *targetEnvelope) error {
 	if env.Target == nil || env.Run == nil {
 		return errors.New("invalid target envelope")
 	}
-	ctx, cancel := context.WithTimeout(parent, 3*time.Hour)
-	defer cancel()
+	timeoutCtx, cancelTimeout := context.WithTimeout(parent, 3*time.Hour)
+	defer cancelTimeout()
+	// buildCtx 会被心跳在 run 被取消/判死时中止：取消 run 必须真的停掉构建，
+	// 否则执行器主循环被占住，后续 run 的 target 只能一直排队。
+	buildCtx, abortBuild := context.WithCancelCause(timeoutCtx)
+	defer abortBuild(nil)
 	workRoot, err := os.MkdirTemp("", "smartpipe-release-*")
 	if err != nil {
 		return err
@@ -142,62 +201,79 @@ func executeTarget(parent context.Context, client *http.Client, cfg config, env 
 	repoDir := filepath.Join(workRoot, "repo")
 	output := &logBuffer{max: 2 << 20}
 	log.Printf("start target %s run %s commit %s", env.Target.TargetID, env.Run.ID, env.Run.ResolvedCommit)
-	cloneEnv, cleanupCred, err := buildCloneEnv(workRoot, env.Run.Repo, env.Run.CloneCredential)
-	if err != nil {
-		return report(targetResult{err: err, output: output.String()}, client, cfg, env)
+	// 构建机不再自己 clone：控制面按计划冻结的提交提供源码包，
+	// 内网机器只需要能访问 SmartPipe。
+	if err := fetchSourceArchive(buildCtx, client, cfg, env, repoDir); err != nil {
+		return report(targetResult{err: fmt.Errorf("fetch source archive: %w", err), output: output.String()}, client, cfg, env)
 	}
-	defer cleanupCred()
-	cloneArgs := append(gitCloneArgs(cloneEnv), "clone", "--no-hardlinks", "--quiet", env.Run.Repo, repoDir)
-	fromArchive := false
-	// 内网构建机连不上代码托管时，git 会在黑洞连接上干等一兩分钟；给 clone 设上限，
-	// 超时就改走控制面的源码包。
-	cloneCtx, cancelClone := context.WithTimeout(ctx, 2*time.Minute)
-	cloneErr := runCommandEnv(cloneCtx, "", cloneEnv, "git", cloneArgs...)
-	cancelClone()
-	if err := cloneErr; err != nil {
-		// 构建机在内网时常常连不上代码托管，改从控制面取同一提交的源码。
-		log.Printf("git clone failed (%v); fetching source archive from %s", err, cfg.ServiceURL)
-		if aerr := fetchSourceArchive(ctx, client, cfg, env, repoDir); aerr != nil {
-			return report(targetResult{err: fmt.Errorf("git clone: %v；从控制面取源码失败：%w", err, aerr), output: output.String()}, client, cfg, env)
-		}
-		fromArchive = true
-		_, _ = output.Write([]byte("源码取自控制面（构建机无法直接 clone）：" + env.Run.ResolvedCommit + "\n"))
-	}
-	if !fromArchive {
-		if err := runCommandEnv(ctx, repoDir, cloneEnv, "git", "checkout", "--detach", env.Run.ResolvedCommit); err != nil {
-			return report(targetResult{err: err, output: output.String()}, client, cfg, env)
-		}
-	}
-	stopHeartbeat := startHeartbeat(ctx, client, cfg, env)
+	_, _ = output.Write([]byte("源码取自控制面：" + env.Run.ResolvedCommit + "；顶层：" + describeTopLevel(repoDir) + "\n"))
+	stopHeartbeat := startHeartbeat(timeoutCtx, client, cfg, env, abortBuild)
 	defer stopHeartbeat()
 
 	sink := newLogSink(client, cfg, env)
 	defer sink.Close()
 	streamed := io.MultiWriter(output, sink)
+	runEnv := []string{
+		"SMARTPIPE_RUN_ID=" + env.Run.ID,
+		"SMARTPIPE_VERSION=" + env.Run.Version,
+		"SMARTPIPE_TAG=" + env.Run.Tag,
+		"SMARTPIPE_BUILD_VERSION=" + env.Run.BuildVersion,
+		"SMARTPIPE_COMMIT=" + env.Run.ResolvedCommit,
+		"SMARTPIPE_CHANNEL=" + env.Run.Channel,
+	}
 
 	buildCommand := expandCommand(env.Target.BuildCommand, env.Run)
-	if err := runShell(ctx, repoDir, buildCommand, streamed); err != nil {
+	if err := runShellEnv(buildCtx, repoDir, buildCommand, runEnv, streamed); err != nil {
 		sink.Close()
+		if aborted(buildCtx) {
+			log.Printf("target %s aborted: %v", env.Target.TargetID, context.Cause(buildCtx))
+			return nil
+		}
 		return report(targetResult{err: fmt.Errorf("build: %w", err), output: output.String()}, client, cfg, env)
 	}
 	// 签名（codesign / signtool / notarytool 等）放在构建与校验之间：
 	// 校验命令可以检查签名产物，上传的制品也已经是签好的。
 	if signCommand := expandCommand(env.Target.SignCommand, env.Run); strings.TrimSpace(signCommand) != "" {
-		if err := runShell(ctx, repoDir, signCommand, streamed); err != nil {
+		if err := runShellEnv(buildCtx, repoDir, signCommand, runEnv, streamed); err != nil {
 			sink.Close()
+			if aborted(buildCtx) {
+				log.Printf("target %s aborted: %v", env.Target.TargetID, context.Cause(buildCtx))
+				return nil
+			}
 			return report(targetResult{err: fmt.Errorf("sign: %w", err), output: output.String()}, client, cfg, env)
 		}
 	}
 	verifyCommand := expandCommand(env.Target.VerifyCommand, env.Run)
-	if err := runShell(ctx, repoDir, verifyCommand, streamed); err != nil {
-		sink.Close()
-		return report(targetResult{err: fmt.Errorf("verify: %w", err), output: output.String()}, client, cfg, env)
+	if strings.TrimSpace(verifyCommand) != "" {
+		if err := runShellEnv(buildCtx, repoDir, verifyCommand, runEnv, streamed); err != nil {
+			sink.Close()
+			if aborted(buildCtx) {
+				log.Printf("target %s aborted: %v", env.Target.TargetID, context.Cause(buildCtx))
+				return nil
+			}
+			return report(targetResult{err: fmt.Errorf("verify: %w", err), output: output.String()}, client, cfg, env)
+		}
 	}
-	if err := uploadArtifacts(ctx, client, cfg, env, repoDir, streamed); err != nil {
+	manifest, err := uploadArtifacts(buildCtx, client, cfg, env, repoDir, streamed)
+	if err != nil {
 		sink.Close()
+		if aborted(buildCtx) {
+			log.Printf("target %s aborted: %v", env.Target.TargetID, context.Cause(buildCtx))
+			return nil
+		}
 		// 上传失败通常是对象存储/网络瞬时不可用：标记 retryable，由服务端把目标重排，
 		// 而不是把整次发布判死。
 		return report(targetResult{err: err, code: "artifact_upload_failed", retryable: true, output: output.String()}, client, cfg, env)
+	}
+	// 清单是本次构建的权威制品列表：服务端据此合并 run 级清单，下游灌库/
+	// 渠道/GitHub 都只认这份数据，不再依赖构建机上的 glob 结果。
+	if err := uploadManifest(buildCtx, client, cfg, env, manifest); err != nil {
+		sink.Close()
+		if aborted(buildCtx) {
+			log.Printf("target %s aborted: %v", env.Target.TargetID, context.Cause(buildCtx))
+			return nil
+		}
+		return report(targetResult{err: err, code: "artifact_manifest_failed", retryable: true, output: output.String()}, client, cfg, env)
 	}
 	sink.Close()
 	return report(targetResult{ok: true, output: output.String()}, client, cfg, env)
@@ -238,13 +314,23 @@ func report(result targetResult, client *http.Client, cfg config, env *targetEnv
 	return postJSON(ctx, client, cfg, "/internal/release-executors/"+cfg.ExecutorID+"/complete", body, nil)
 }
 
-func startHeartbeat(ctx context.Context, client *http.Client, cfg config, env *targetEnvelope) func() {
+// errRunNotActive 表示控制面已经不接受这个 target（run 被取消、失败或已收口）。
+// 心跳拿到 409 就中止构建，取消才会真正停掉构建进程。
+var errRunNotActive = errors.New("release run is no longer active")
+
+// aborted 判断构建是否因 run 不再活跃而中止；这种情况不再向控制面报失败，
+// 以免把一个已取消的 run 覆盖成 failed。
+func aborted(ctx context.Context) bool {
+	return errors.Is(context.Cause(ctx), errRunNotActive)
+}
+
+func startHeartbeat(ctx context.Context, client *http.Client, cfg config, env *targetEnvelope, abortBuild context.CancelCauseFunc) func() {
 	ctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
@@ -253,9 +339,14 @@ func startHeartbeat(ctx context.Context, client *http.Client, cfg config, env *t
 			case <-ticker.C:
 				body := map[string]any{"run_id": env.Run.ID, "target_id": env.Target.TargetID}
 				hbCtx, hbCancel := context.WithTimeout(context.Background(), 10*time.Second)
-				err := postJSON(hbCtx, client, cfg, "/internal/release-executors/"+cfg.ExecutorID+"/heartbeat", body, nil)
+				status, err := postJSONStatus(hbCtx, client, cfg, "/internal/release-executors/"+cfg.ExecutorID+"/heartbeat", body, nil)
 				hbCancel()
 				if err != nil {
+					if status == http.StatusConflict {
+						log.Printf("target %s run %s is no longer active; aborting build", env.Target.TargetID, env.Run.ID)
+						abortBuild(errRunNotActive)
+						return
+					}
 					log.Printf("target heartbeat failed: %v", err)
 				}
 			}
@@ -270,13 +361,23 @@ func postJSON(ctx context.Context, client *http.Client, cfg config, path string,
 }
 
 func postJSONMaybeNoContent(ctx context.Context, client *http.Client, cfg config, path string, body, out any) (bool, error) {
-	raw, err := json.Marshal(body)
+	status, err := postJSONStatus(ctx, client, cfg, path, body, out)
 	if err != nil {
 		return false, err
 	}
+	return status != http.StatusNoContent, nil
+}
+
+// postJSONStatus 与 postJSON 相同，但把 HTTP 状态码交给调用方：
+// 心跳要靠 409 区分"这个 target 已经不能继续"与普通网络错误。
+func postJSONStatus(ctx context.Context, client *http.Client, cfg config, path string, body, out any) (int, error) {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return 0, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(cfg.ServiceURL, "/")+path, bytes.NewReader(raw))
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if cfg.Token != "" {
@@ -284,22 +385,22 @@ func postJSONMaybeNoContent(ctx context.Context, client *http.Client, cfg config
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNoContent {
-		return false, nil
+		return resp.StatusCode, nil
 	}
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return false, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+		return resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
 	}
 	if out != nil && len(data) > 0 {
 		if err := json.Unmarshal(data, out); err != nil {
-			return false, err
+			return resp.StatusCode, err
 		}
 	}
-	return true, nil
+	return resp.StatusCode, nil
 }
 
 type logBuffer struct {
@@ -329,6 +430,10 @@ func (b *logBuffer) String() string {
 }
 
 func runShell(ctx context.Context, dir, command string, output io.Writer) error {
+	return runShellEnv(ctx, dir, command, nil, output)
+}
+
+func runShellEnv(ctx context.Context, dir, command string, extraEnv []string, output io.Writer) error {
 	if strings.TrimSpace(command) == "" {
 		return errors.New("empty command")
 	}
@@ -357,8 +462,58 @@ func runShell(ctx context.Context, dir, command string, output io.Writer) error 
 	cmd.Dir = dir
 	cmd.Stdout = output
 	cmd.Stderr = output
-	cmd.Env = append(os.Environ(), "CI=1", "SMARTPIPE_RELEASE=1")
+	env := append(os.Environ(), "CI=1", "SMARTPIPE_RELEASE=1")
+	env = append(env, extraEnv...)
+	cmd.Env = ensureLocaleEnv(env)
+	setProcessGroup(cmd)
 	return cmd.Run()
+}
+
+// defaultUTF8Locale 是非交互 SSH 会话下构建命令使用的回退 locale。
+// 构建机通过 SSH 启动时通常没有 LANG/LC_ALL，此时 macOS 上的 makensis
+// （NSIS 的 Unicode 构建）会以 std::bad_alloc 崩溃；Linux 上也会出现
+// 中文/emoji 文件名的编码问题。构建命令必须有可用的 UTF-8 locale。
+func defaultUTF8Locale() string {
+	if runtime.GOOS == "darwin" {
+		return "en_US.UTF-8"
+	}
+	return "C.UTF-8"
+}
+
+// ensureLocaleEnv 在环境里没有有效 UTF-8 locale 时补一个默认值。
+// 显式配了 UTF-8 locale 的调用方保持不变。
+func ensureLocaleEnv(env []string) []string {
+	if runtime.GOOS == "windows" {
+		return env
+	}
+	if localeIsUTF8(env) {
+		return env
+	}
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "LANG=") || strings.HasPrefix(kv, "LC_ALL=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	loc := defaultUTF8Locale()
+	// LC_ALL 必须一起设置：构建机上常见 LC_CTYPE=C（sshd/launchd 继承），
+	// 它会覆盖 LANG，单独的 LANG 不足以让 makensis 走 UTF-8 路径。
+	return append(out, "LANG="+loc, "LC_ALL="+loc)
+}
+
+func localeIsUTF8(env []string) bool {
+	for _, kv := range env {
+		name, value, ok := strings.Cut(kv, "=")
+		if !ok || (name != "LANG" && name != "LC_ALL") {
+			continue
+		}
+		value = strings.ToLower(strings.TrimSpace(value))
+		if strings.Contains(value, "utf-8") || strings.Contains(value, "utf8") {
+			return true
+		}
+	}
+	return false
 }
 
 func runCommand(ctx context.Context, dir, name string, args ...string) error {

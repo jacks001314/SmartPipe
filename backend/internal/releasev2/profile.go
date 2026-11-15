@@ -69,6 +69,14 @@ type ArtifactRule struct {
 	Glob        string `yaml:"glob" json:"glob"`
 	ContentType string `yaml:"content_type" json:"content_type,omitempty"`
 	Required    bool   `yaml:"required" json:"required"`
+	// OS/Arch 声明这批制品的真实平台。一次构建经常产出别的平台的组件
+	// （例如在 macOS 上交叉构建 windows/linux 的 nbot、node-runtime），
+	// 留空才回落到 target 自身的平台。
+	OS   string `yaml:"os,omitempty" json:"os,omitempty"`
+	Arch string `yaml:"arch,omitempty" json:"arch,omitempty"`
+	// Destinations 声明制品去向，例如 github、update:full、update:thin。
+	// 为空时执行器按 kind 推导默认值。
+	Destinations []string `yaml:"destinations,omitempty" json:"destinations,omitempty"`
 	// Signed 声明该角色的制品是否被 sign 步骤覆盖；nil 表示跟随目标：配了 sign 即视为已签名。
 	Signed *bool `yaml:"signed" json:"signed,omitempty"`
 }

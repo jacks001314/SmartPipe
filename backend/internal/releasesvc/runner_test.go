@@ -56,12 +56,7 @@ func TestRunnerAdvancesBuildOnlyRun(t *testing.T) {
 		}
 	}
 	f.targets[0].Status = releasev2.TargetReady
-	if err := r.Tick(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if f.runs[0].Status != releasev2.RunVerifying {
-		t.Fatalf("status=%s want verifying", f.runs[0].Status)
-	}
+	f.runs[0].ManifestStorageKey = "manifests/r1/run.json"
 	if err := r.Tick(ctx); err != nil {
 		t.Fatal(err)
 	}

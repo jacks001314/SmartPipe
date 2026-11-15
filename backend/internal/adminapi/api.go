@@ -37,10 +37,12 @@ type Config struct {
 	BotToken       string
 	SchedulerURL   string
 	SchedulerToken string
+	// ReleaseServiceURL 是控制面内部访问 release-service 的地址，
+	// 用于创建运行时冻结源码归档。
+	ReleaseServiceURL   string
+	ReleaseServiceToken string
 	// ReleaseAgent 负责把运行交给独立的 Codex 会话执行。
 	ReleaseAgent *releaseagent.Launcher
-	// AutoResumeAgentOff 关闭“批准后自动续跑发布 Agent”。
-	AutoResumeAgentOff bool
 	// CrashRetentionDays 原始崩溃包保留天数（0 表示用默认 30 天）。
 	CrashRetentionDays int
 	// RejectedRetentionDays 被拒绝上报的保留天数（0 表示默认 7 天）。
@@ -72,10 +74,13 @@ type API struct {
 	botAddr               string
 	botToken              string
 	schedulerURL          string
+	releaseServiceURL     string
+	releaseServiceToken   string
 	releaseAgent          *releaseagent.Launcher
-	autoResumeAgentOff    bool
 	eventTicketMu         sync.Mutex
 	eventTickets          map[string]eventTicket
+	versionProbeMu        sync.Mutex
+	versionProbes         map[string]versionProbeCacheEntry
 	schedulerToken        string
 	githubHTTPMu          sync.RWMutex
 	githubHTTP            *http.Client
@@ -104,7 +109,6 @@ func New(cfg Config) *API {
 		checker:               checker,
 		releaseV2:             releasev2.NewService(cfg.Store),
 		releaseAgent:          cfg.ReleaseAgent,
-		autoResumeAgentOff:    cfg.AutoResumeAgentOff,
 		token:                 token,
 		origins:               cfg.AllowOrigins,
 		devOpen:               cfg.DevOpen || token == "",
@@ -117,6 +121,8 @@ func New(cfg Config) *API {
 		botToken:              strings.TrimSpace(cfg.BotToken),
 		schedulerURL:          strings.TrimSpace(cfg.SchedulerURL),
 		schedulerToken:        strings.TrimSpace(cfg.SchedulerToken),
+		releaseServiceURL:     strings.TrimSpace(cfg.ReleaseServiceURL),
+		releaseServiceToken:   strings.TrimSpace(cfg.ReleaseServiceToken),
 		crashRetentionDays:    cfg.CrashRetentionDays,
 		rejectedRetentionDays: cfg.RejectedRetentionDays,
 		loginEnabled:          strings.TrimSpace(cfg.AdminPassword) != "",

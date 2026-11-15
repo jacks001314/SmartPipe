@@ -12,7 +12,121 @@ type migration struct {
 	sql     string
 }
 
+// releaseIntakeSQL 是发版入口（项目配置、源码冻结、执行器命令队列）所需的 DDL。
+// 所有语句都是幂等的，因此修复迁移可以安全地重复执行。
+const releaseIntakeSQL = `
+ALTER TABLE release_v2_runs ADD COLUMN IF NOT EXISTS source_sha256 TEXT NOT NULL DEFAULT '';
+ALTER TABLE release_v2_runs ADD COLUMN IF NOT EXISTS source_storage_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE release_v2_runs ADD COLUMN IF NOT EXISTS manifest_storage_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE release_v2_runs ADD COLUMN IF NOT EXISTS executor_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE release_v2_runs ADD COLUMN IF NOT EXISTS update_servers JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE release_v2_runs ADD COLUMN IF NOT EXISTS recovery_attempts INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE release_v2_targets ADD COLUMN IF NOT EXISTS manifest_path TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE release_v2_artifacts ADD COLUMN IF NOT EXISTS os TEXT NOT NULL DEFAULT '';
+ALTER TABLE release_v2_artifacts ADD COLUMN IF NOT EXISTS arch TEXT NOT NULL DEFAULT '';
+ALTER TABLE release_v2_artifacts ADD COLUMN IF NOT EXISTS destination JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+CREATE TABLE IF NOT EXISTS release_project_configs (
+    project_id             TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    builds                 JSONB NOT NULL DEFAULT '{}'::jsonb,
+    manifest_path          TEXT NOT NULL DEFAULT '',
+    version_file           TEXT NOT NULL DEFAULT '',
+    version_json_path      TEXT NOT NULL DEFAULT 'version',
+    build_version_template TEXT NOT NULL DEFAULT '{version}',
+    notes_path             TEXT NOT NULL DEFAULT '',
+    channel_order          JSONB NOT NULL DEFAULT '["beta","stable"]'::jsonb,
+    update_server_ids      JSONB NOT NULL DEFAULT '[]'::jsonb,
+    publishing             JSONB NOT NULL DEFAULT '{}'::jsonb,
+    policies               JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS release_executor_commands (
+    id            BIGSERIAL PRIMARY KEY,
+    executor_id   TEXT NOT NULL,
+    run_id        TEXT NOT NULL DEFAULT '',
+    target_id     TEXT NOT NULL DEFAULT '',
+    kind          TEXT NOT NULL,
+    command       TEXT NOT NULL DEFAULT '',
+    cwd           TEXT NOT NULL DEFAULT '',
+    payload       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status        TEXT NOT NULL DEFAULT 'queued',
+    exit_code     INTEGER,
+    output        TEXT NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
+    created_by    TEXT NOT NULL DEFAULT '',
+    expires_at    TIMESTAMPTZ,
+    started_at    TIMESTAMPTZ,
+    finished_at   TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS release_executor_commands_pending_idx
+  ON release_executor_commands (executor_id, status, id);
+`
+
 var migrations = []migration{
+
+	{
+		version: 56,
+		name:    "release_v2_quarantines",
+		sql: `
+CREATE TABLE IF NOT EXISTS release_v2_quarantines (
+    id          BIGSERIAL PRIMARY KEY,
+    run_id      TEXT NOT NULL,
+    artifact_id BIGINT,
+    service     TEXT NOT NULL DEFAULT '',
+    channel     TEXT NOT NULL DEFAULT '',
+    external_id TEXT NOT NULL DEFAULT '',
+    reason      TEXT NOT NULL,
+    detail      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    state       TEXT NOT NULL DEFAULT 'quarantined',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    resolved_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS release_v2_quarantines_run_idx
+  ON release_v2_quarantines (run_id, created_at DESC);
+`,
+	},
+
+	{
+		version: 55,
+		name:    "release_v2_active_channel_statuses",
+		sql: `
+DROP INDEX IF EXISTS release_v2_runs_active_channel_uq;
+CREATE UNIQUE INDEX IF NOT EXISTS release_v2_runs_active_channel_uq
+  ON release_v2_runs (project_id, channel)
+  WHERE status IN ('queued','preparing','building','verifying','artifacts_ready','needs_attention','staged','publishing');
+`,
+	},
+
+	{
+		version: 54,
+		name:    "release_v2_artifact_manifest_columns",
+		sql: `
+ALTER TABLE release_v2_artifacts ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE release_v2_artifacts ADD COLUMN IF NOT EXISTS path TEXT NOT NULL DEFAULT '';
+ALTER TABLE release_v2_artifacts ADD COLUMN IF NOT EXISTS destinations JSONB NOT NULL DEFAULT '[]'::jsonb;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name = 'release_v2_artifacts' AND column_name = 'destination'
+  ) THEN
+    UPDATE release_v2_artifacts SET destinations = destination
+     WHERE destinations = '[]'::jsonb AND destination <> '[]'::jsonb;
+  END IF;
+END $$;
+`,
+	},
+
+	{
+		version: 45,
+		name:    "release_intake",
+		sql:     releaseIntakeSQL,
+	},
 
 	{
 		version: 44,

@@ -71,6 +71,29 @@ type UpgradeBundle struct {
 	Metadata              BundleMetadata             `json:"metadata"`
 }
 
+// CurrentAttemptArtifacts drops artifacts left behind by superseded target
+// attempts. A retried target keeps its previous uploads in the artifact table,
+// so publishing everything would bind two installers to the same slot cell.
+func CurrentAttemptArtifacts(targets []Target, artifacts []Artifact) []Artifact {
+	if len(artifacts) == 0 {
+		return artifacts
+	}
+	attempt := make(map[string]int, len(targets))
+	for _, t := range targets {
+		attempt[t.TargetID] = t.Attempt
+	}
+	out := make([]Artifact, 0, len(artifacts))
+	for _, a := range artifacts {
+		if a.TargetID != "" {
+			if current, ok := attempt[a.TargetID]; ok && a.Attempt != current {
+				continue
+			}
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
 // BuildUpgradeBundle produces the canonical upgrade-bundle.json for a run.
 // It refuses to build when a required slot has no verified artifact, when a
 // digest is malformed, or when two artifacts claim the same slot cell.
@@ -129,14 +152,16 @@ func BuildUpgradeBundle(run *Run, targets []Target, artifacts []Artifact, layout
 			if a.Size <= 0 {
 				return nil, nil, "", fmt.Errorf("%w: artifact %s has no size", ErrInvalid, a.Name)
 			}
-			key := cell{os: t.OS, arch: t.Arch, slot: slot}
+			// 制品自己的平台优先：一台构建机会交叉产出其它平台的组件。
+			osName, archName := artifactPlatform(a, t)
+			key := cell{os: osName, arch: archName, slot: slot}
 			if prev, dup := seen[key]; dup {
-				return nil, nil, "", fmt.Errorf("%w: slot %s/%s/%s already provided by %s", ErrInvalid, slot, t.OS, t.Arch, prev)
+				return nil, nil, "", fmt.Errorf("%w: slot %s/%s/%s already provided by %s", ErrInvalid, slot, osName, archName, prev)
 			}
 			seen[key] = a.Name
 			matched++
 			slots = append(slots, BundleSlot{
-				Slot: slot, OS: t.OS, Arch: t.Arch, ArtifactID: a.ID, Name: a.Name,
+				Slot: slot, OS: osName, Arch: archName, ArtifactID: a.ID, Name: a.Name,
 				Size: a.Size, SHA256: a.SHA256, ContentType: a.ContentType,
 			})
 		}
@@ -144,19 +169,21 @@ func BuildUpgradeBundle(run *Run, targets []Target, artifacts []Artifact, layout
 			return nil, nil, "", fmt.Errorf("%w: slot %s has no artifacts for role %s", ErrInvalid, slot, role)
 		}
 	}
-	// Required targets must contribute at least one product slot.
+	// Required targets must contribute at least one product slot. 用 target_id
+	// 判断而不是平台：交叉构建的目标可以只贡献别的平台的槽位。
+	contributed := map[string]bool{}
+	for _, s := range slots {
+		if s.ArtifactID > 0 {
+			if a, ok := artifactsByID[s.ArtifactID]; ok {
+				contributed[a.TargetID] = true
+			}
+		}
+	}
 	for _, t := range targets {
 		if !t.Required {
 			continue
 		}
-		has := false
-		for _, s := range slots {
-			if s.OS == t.OS && s.Arch == t.Arch {
-				has = true
-				break
-			}
-		}
-		if !has {
+		if !contributed[t.TargetID] {
 			return nil, nil, "", fmt.Errorf("%w: required target %s has no product slot artifact", ErrInvalid, t.TargetID)
 		}
 	}
@@ -210,7 +237,14 @@ func BuildUpgradeBundle(run *Run, targets []Target, artifacts []Artifact, layout
 	}
 	for name, extra := range componentExtras {
 		sort.Slice(extra, func(i, j int) bool { return extra[i].Name < extra[j].Name })
-		components[name] = BundleComponent{Version: layout.ComponentVersions[name], Artifacts: extra}
+		version := strings.TrimSpace(layout.ComponentVersions[name])
+		if version == "" {
+			version = contentArtifactVersion(name, extra)
+		}
+		if version == "" {
+			return nil, nil, "", fmt.Errorf("%w: component %s has no version and none can be read from its artifacts", ErrInvalid, name)
+		}
+		components[name] = BundleComponent{Version: version, Artifacts: extra}
 	}
 	for name, version := range layout.ComponentVersions {
 		if _, ok := components[name]; !ok {
@@ -221,13 +255,20 @@ func BuildUpgradeBundle(run *Run, targets []Target, artifacts []Artifact, layout
 		}
 	}
 
+	// A rebuild of an unchanged run must reproduce the same digest, otherwise
+	// the stored bundle and the registered artifact drift apart. Anchor the
+	// timestamp on the run instead of the wall clock.
+	createdAt := run.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = now
+	}
 	bundle := &UpgradeBundle{
 		SchemaVersion: 1, ProductVersion: run.Version, BuildVersion: run.BuildVersion,
 		Channel: run.Channel, Commit: run.ResolvedCommit, ReleaseManifestSHA256: manifestSHA,
 		Components: components, Sources: layout.Sources,
 		Metadata: BundleMetadata{
 			RunID: run.ID, ProfileSHA256: run.ProfileSHA256, CreatedBy: "release-service",
-			CreatedAt: now.UTC().Format(time.RFC3339),
+			CreatedAt: createdAt.UTC().Format(time.RFC3339),
 		},
 	}
 	raw, err := canonicalJSON(bundle)
@@ -246,6 +287,55 @@ func canonicalJSON(v any) ([]byte, error) {
 	}
 	out := bytes.TrimRight(buf.Bytes(), "\n")
 	return out, nil
+}
+
+// artifactPlatform 返回制品真实的平台：制品自己登记的优先，其次才是 target。
+// 交叉构建（darwin/amd64 主机产出 windows/linux 组件）必须靠前者。
+func artifactPlatform(a Artifact, t Target) (string, string) {
+	osName := strings.ToLower(strings.TrimSpace(a.OS))
+	archName := strings.ToLower(strings.TrimSpace(a.Arch))
+	if osName == "" {
+		osName = t.OS
+	}
+	if archName == "" {
+		archName = t.Arch
+	}
+	return osName, archName
+}
+
+// contentArtifactVersion 从内容制品名 <component>-<version>.tar.gz 里读版本。
+// 内容版本由仓库里的 content-release.json 决定，项目配置不必再抄一份。
+func contentArtifactVersion(component string, extra []BundleArtifact) string {
+	prefix := component + "-"
+	for _, item := range extra {
+		name := strings.TrimSpace(item.Name)
+		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".tar.gz") {
+			continue
+		}
+		version := strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".tar.gz")
+		if isTripleVersion(version) {
+			return version
+		}
+	}
+	return ""
+}
+
+func isTripleVersion(value string) bool {
+	parts := strings.Split(strings.TrimSpace(value), ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func validDigest(value string) bool {

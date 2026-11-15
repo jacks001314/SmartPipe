@@ -27,14 +27,14 @@ type RunStatusSource interface {
 //   - 对象前缀里的运行在库里不存在（删除运行、早期直传未登记的孤儿）：超过宽限期后删除；
 //   - 其它状态（queued/building/built/published…）一律保留。
 type ArtifactJanitor struct {
-	Objects  ArtifactStore
-	Runs     RunStatusSource
-	Prefix   string
+	Objects   ArtifactStore
+	Runs      RunStatusSource
+	Prefix    string
 	Grace     time.Duration
 	Retention time.Duration
 	Interval  time.Duration
-	Now      func() time.Time
-	Logf     func(string, ...any)
+	Now       func() time.Time
+	Logf      func(string, ...any)
 }
 
 // Run 按间隔执行 Sweep，直到 ctx 取消。

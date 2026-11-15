@@ -13,15 +13,17 @@ import (
 )
 
 type fakeRepo struct {
-	mu       sync.Mutex
-	tokens   []releasev2.Token
-	sessions map[string]*releasev2.AgentSession
-	events   []releasev2.Event
-	revoked  []string
+	mu         sync.Mutex
+	tokens     []releasev2.Token
+	sessions   map[string]*releasev2.AgentSession
+	events     []releasev2.Event
+	revoked    []string
+	handedBack []string
+	threadIDs  map[string]string
 }
 
 func newFakeRepo() *fakeRepo {
-	return &fakeRepo{sessions: map[string]*releasev2.AgentSession{}}
+	return &fakeRepo{sessions: map[string]*releasev2.AgentSession{}, threadIDs: map[string]string{}}
 }
 
 func (f *fakeRepo) CreateReleaseV2Token(_ context.Context, token releasev2.Token) error {
@@ -53,6 +55,26 @@ func (f *fakeRepo) RevokeReleaseV2Token(_ context.Context, id string) error {
 	defer f.mu.Unlock()
 	f.revoked = append(f.revoked, id)
 	return nil
+}
+
+func (f *fakeRepo) MarkReleaseV2RunNeedsAttention(_ context.Context, runID, reason string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.handedBack = append(f.handedBack, runID+"|"+reason)
+	return true, nil
+}
+
+func (f *fakeRepo) SetReleaseV2RunAgentThreadID(_ context.Context, runID, threadID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.threadIDs[runID] = threadID
+	return nil
+}
+
+func (f *fakeRepo) threadID(runID string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.threadIDs[runID]
 }
 
 func (f *fakeRepo) AppendEvent(_ context.Context, ev releasev2.Event) error {
@@ -113,6 +135,14 @@ func TestLaunchRunsCodexWithScopedMCP(t *testing.T) {
 	if !strings.Contains(joined, "bearer_token_env_var=") {
 		t.Fatalf("missing bearer env override: %s", joined)
 	}
+	if !strings.Contains(joined, `mcp_servers.smartpipe_release.default_tools_approval_mode="approve"`) {
+		t.Fatalf("mcp tools must be auto-approved under approval_policy=never: %s", joined)
+	}
+	// release_import / github_release_sync 一次要传完整制品（约 2.4 GB），
+	// 4 分钟的默认上限会把真实发布打断，默认至少 20 分钟且可由调用方覆盖。
+	if !strings.Contains(joined, "mcp_servers.smartpipe_release.tool_timeout_sec=1200") {
+		t.Fatalf("mcp tool timeout must leave room for full artifact uploads: %s", joined)
+	}
 	tokenEnv := ""
 	for _, kv := range got.Env {
 		if strings.HasPrefix(kv, "SMARTPIPE_RELEASE_MCP_TOKEN=") {
@@ -144,6 +174,13 @@ func TestLaunchRunsCodexWithScopedMCP(t *testing.T) {
 	if final.ThreadID != "thr" || final.Summary == "" {
 		t.Fatalf("session metadata missing: %+v", final)
 	}
+	// 线程必须落盘并记到运行上，否则下一轮会话无法续用上下文。
+	if !got.PersistThread {
+		t.Fatal("release agent must persist its codex thread")
+	}
+	if repo.threadIDs["rrun_test"] != "thr" {
+		t.Fatalf("run thread id not stored: %+v", repo.threadIDs)
+	}
 	found := false
 	for _, ev := range repo.events {
 		if ev.Kind == "agent.started" {
@@ -152,6 +189,85 @@ func TestLaunchRunsCodexWithScopedMCP(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("missing agent.started event: %+v", repo.events)
+	}
+	threadEvent := false
+	for _, ev := range repo.events {
+		if ev.Kind == "agent.thread" {
+			threadEvent = true
+		}
+	}
+	if !threadEvent {
+		t.Fatalf("missing agent.thread event: %+v", repo.events)
+	}
+}
+
+func TestLaunchResumesStoredThread(t *testing.T) {
+	repo := newFakeRepo()
+	var got codexrunner.Spec
+	done := make(chan struct{})
+	runner := RunnerFunc(func(_ context.Context, spec codexrunner.Spec) (*codexrunner.Result, error) {
+		got = spec
+		close(done)
+		return &codexrunner.Result{Status: "completed", ThreadID: spec.ResumeThreadID, Resumed: true}, nil
+	})
+	launcher := New(repo, runner, Config{
+		Enabled: true, MCPURL: "http://127.0.0.1:18097/mcp", WorkRoot: t.TempDir(), Timeout: 5 * time.Second,
+	})
+	bundle := testBundle()
+	bundle.Run.Status = releasev2.RunNeedsAttention
+	bundle.Run.AgentThreadID = "thr_prev"
+	if _, err := launcher.Launch(context.Background(), bundle, Options{Actor: "system:attention"}); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	<-done
+	if got.ResumeThreadID != "thr_prev" {
+		t.Fatalf("resume thread id = %q, want thr_prev", got.ResumeThreadID)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && repo.threadIDs["rrun_test"] != "thr_prev" {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if repo.threadIDs["rrun_test"] != "thr_prev" {
+		t.Fatalf("resumed thread id not persisted: %+v", repo.threadIDs)
+	}
+}
+
+// 线程 id 必须在会话还在跑的时候就落库：attention 续跑的场景就是上一轮
+// 进程被杀，等到会话收尾再写，就永远没有机会写。
+func TestThreadPersistedBeforeSessionEnds(t *testing.T) {
+	repo := newFakeRepo()
+	release := make(chan struct{})
+	registered := make(chan struct{})
+	runner := RunnerFunc(func(_ context.Context, spec codexrunner.Spec) (*codexrunner.Result, error) {
+		if spec.OnThread == nil {
+			t.Error("spec.OnThread 必须设置：线程 id 要在会话结束前落库")
+			close(registered)
+			return &codexrunner.Result{Status: "completed"}, nil
+		}
+		spec.OnThread("thr_early", false)
+		close(registered)
+		<-release
+		return &codexrunner.Result{Status: "completed", ThreadID: "thr_early"}, nil
+	})
+	launcher := New(repo, runner, Config{
+		Enabled: true, MCPURL: "http://127.0.0.1:18097/mcp", WorkRoot: t.TempDir(), Timeout: 10 * time.Second,
+	})
+	if _, err := launcher.Launch(context.Background(), testBundle(), Options{Actor: "tester"}); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	<-registered
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && repo.threadID("rrun_test") != "thr_early" {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := repo.threadID("rrun_test"); got != "thr_early" {
+		close(release)
+		t.Fatalf("thread id not persisted while the session is still running: %q", got)
+	}
+	close(release)
+	waitDone := time.Now().Add(2 * time.Second)
+	for time.Now().Before(waitDone) && launcher.Running("rrun_test") {
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -195,12 +311,15 @@ func TestRedactRemovesTokens(t *testing.T) {
 	}
 }
 
-func TestPromptStopsAtApproval(t *testing.T) {
+func TestPromptRequiresNoApproval(t *testing.T) {
 	p := BuildPrompt(testBundle(), "http://x/mcp", "smartpipe_release")
-	for _, want := range []string{"approval", "release_approval_list", "darwin-arm64", "mac-01"} {
+	for _, want := range []string{"不需要审批", "darwin-arm64", "mac-01"} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("prompt missing %q", want)
 		}
+	}
+	if strings.Contains(p, "release_approval_list") {
+		t.Fatal("prompt should not ask the agent to wait for approvals")
 	}
 }
 
@@ -258,5 +377,23 @@ func TestLaunchEnforcesMaxSessions(t *testing.T) {
 	}
 	if _, err := launcher.Launch(context.Background(), second, Options{}); err != nil {
 		t.Fatalf("launch after slot freed: %v", err)
+	}
+}
+
+func TestAgentStatusAllowedCoversRecoverableStates(t *testing.T) {
+	for _, status := range []releasev2.RunStatus{
+		releasev2.RunArtifactsReady, releasev2.RunStaged, releasev2.RunNeedsAttention,
+		releasev2.RunRecovering, releasev2.RunPublishing, releasev2.RunPartiallyPublished,
+	} {
+		if !agentStatusAllowed(status) {
+			t.Fatalf("status %s should be agent-managed", status)
+		}
+	}
+	for _, status := range []releasev2.RunStatus{
+		releasev2.RunPublished, releasev2.RunBuilt, releasev2.RunFailed, releasev2.RunCancelled,
+	} {
+		if agentStatusAllowed(status) {
+			t.Fatalf("terminal status %s must not accept a new agent", status)
+		}
 	}
 }

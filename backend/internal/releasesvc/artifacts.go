@@ -33,17 +33,29 @@ type ControlStore interface {
 	AppendEvent(context.Context, releasev2.Event) error
 	AppendLogChunk(context.Context, string, string, string, int, string) error
 	AddArtifact(context.Context, releasev2.Artifact) (*releasev2.Artifact, error)
+	SetRunSource(context.Context, string, string, string) error
+	SetTargetManifest(context.Context, string, string, string) error
+	SetRunManifest(context.Context, string, string) error
+	ListTargets(context.Context, string) ([]releasev2.Target, error)
+	ClaimExecutorCommand(context.Context, string) (*releasev2.ExecutorCommand, error)
+	CompleteExecutorCommand(context.Context, int64, string, int, string, string) (bool, error)
+	ExpireExecutorCommands(context.Context) (int, error)
 }
 
 type artifactBeginRequest struct {
-	RunID       string `json:"run_id"`
-	TargetID    string `json:"target_id"`
-	Attempt     int    `json:"attempt"`
-	Role        string `json:"role"`
-	Name        string `json:"name"`
-	Size        int64  `json:"size"`
-	ContentType string `json:"content_type"`
-	SHA256      string `json:"sha256"`
+	RunID        string   `json:"run_id"`
+	TargetID     string   `json:"target_id"`
+	Attempt      int      `json:"attempt"`
+	Role         string   `json:"role"`
+	Name         string   `json:"name"`
+	Size         int64    `json:"size"`
+	ContentType  string   `json:"content_type"`
+	SHA256       string   `json:"sha256"`
+	Kind         string   `json:"kind,omitempty"`
+	Path         string   `json:"path,omitempty"`
+	OS           string   `json:"os,omitempty"`
+	Arch         string   `json:"arch,omitempty"`
+	Destinations []string `json:"destinations,omitempty"`
 }
 
 type artifactBeginResponse struct {
@@ -97,7 +109,9 @@ func (h *HTTPHandler) targetForUpload(ctx context.Context, in artifactBeginReque
 		return nil, err
 	}
 	switch target.Status {
-	case releasev2.TargetBuilding, releasev2.TargetVerifying, releasev2.TargetLeased:
+	// uploaded 表示"已有制品落库、清单还没交"。一个 target 可以有多个制品，
+	// 第一件上传完状态就会推进到 uploaded，后续制品必须继续被接受。
+	case releasev2.TargetBuilding, releasev2.TargetVerifying, releasev2.TargetLeased, releasev2.TargetUploaded:
 		return target, nil
 	default:
 		return nil, fmt.Errorf("target is %s, not building", target.Status)
@@ -168,6 +182,13 @@ func (h *HTTPHandler) beginArtifact(w http.ResponseWriter, r *http.Request, exec
 	query.Set("name", in.Name)
 	query.Set("size", strconv.FormatInt(in.Size, 10))
 	query.Set("content_type", in.ContentType)
+	query.Set("kind", in.Kind)
+	query.Set("path", in.Path)
+	query.Set("os", in.OS)
+	query.Set("arch", in.Arch)
+	for _, destination := range in.Destinations {
+		query.Add("destinations", destination)
+	}
 	relay := "/internal/release-executors/" + url.PathEscape(executorID) + "/artifacts/put?" + query.Encode()
 	writeJSON(w, http.StatusOK, artifactBeginResponse{
 		UploadURL: relay, Method: http.MethodPut, StorageKey: key, ExpiresIn: 1800, ContentType: in.ContentType,
@@ -190,6 +211,8 @@ func (h *HTTPHandler) putArtifact(w http.ResponseWriter, r *http.Request, execut
 	in := artifactBeginRequest{
 		RunID: q.Get("run_id"), TargetID: q.Get("target_id"), Role: q.Get("role"),
 		Name: q.Get("name"), ContentType: q.Get("content_type"),
+		Kind: q.Get("kind"), Path: q.Get("path"), OS: q.Get("os"), Arch: q.Get("arch"),
+		Destinations: q["destinations"],
 	}
 	in.Attempt, _ = strconv.Atoi(q.Get("attempt"))
 	in.Size, _ = strconv.ParseInt(q.Get("size"), 10, 64)
@@ -306,7 +329,10 @@ func (h *HTTPHandler) registerArtifact(ctx context.Context, executorID string, i
 	platformSigned := artifactSigned(target, in.Role)
 	artifact, err := h.Store.AddArtifact(ctx, releasev2.Artifact{
 		RunID: in.RunID, TargetID: in.TargetID, Attempt: attempt, Role: strings.TrimSpace(in.Role),
-		Name: path.Base(in.Name), ContentType: in.ContentType, Size: stored.Size, SHA256: stored.SHA256,
+		Kind: strings.TrimSpace(in.Kind), Path: strings.TrimSpace(in.Path),
+		OS: strings.ToLower(strings.TrimSpace(in.OS)), Arch: strings.ToLower(strings.TrimSpace(in.Arch)),
+		Destinations: releasev2.DefaultDestinations(in.Kind, in.Destinations),
+		Name:         path.Base(in.Name), ContentType: in.ContentType, Size: stored.Size, SHA256: stored.SHA256,
 		StorageKey: stored.Key, PlatformSigned: platformSigned,
 	})
 	if err != nil {

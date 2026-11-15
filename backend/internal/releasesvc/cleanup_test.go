@@ -104,11 +104,11 @@ func TestArtifactJanitorRetentionKeepsLatestPublished(t *testing.T) {
 		{Key: "releases/rrun_old_pub_other_project/t/app.zip", ModTime: now},
 	}}
 	statuses := fakeRunRetentions{
-		"rrun_old_built":              {Status: releasev2.RunBuilt, ProjectID: "p1", Channel: "stable", FinishedAt: ago(30), UpdatedAt: now.Add(-30 * time.Hour)},
-		"rrun_new_built":              {Status: releasev2.RunBuilt, ProjectID: "p1", Channel: "stable", FinishedAt: ago(1), UpdatedAt: now.Add(-time.Hour)},
-		"rrun_old_pub_superseded":     {Status: releasev2.RunPublished, ProjectID: "p1", Channel: "stable", FinishedAt: ago(40), UpdatedAt: now.Add(-40 * time.Hour)},
-		"rrun_new_pub_latest":         {Status: releasev2.RunPublished, ProjectID: "p1", Channel: "stable", FinishedAt: ago(10), UpdatedAt: now.Add(-10 * time.Hour)},
-		"rrun_old_pub_other_project":  {Status: releasev2.RunPublished, ProjectID: "p2", Channel: "stable", FinishedAt: ago(40), UpdatedAt: now.Add(-40 * time.Hour)},
+		"rrun_old_built":             {Status: releasev2.RunBuilt, ProjectID: "p1", Channel: "stable", FinishedAt: ago(30), UpdatedAt: now.Add(-30 * time.Hour)},
+		"rrun_new_built":             {Status: releasev2.RunBuilt, ProjectID: "p1", Channel: "stable", FinishedAt: ago(1), UpdatedAt: now.Add(-time.Hour)},
+		"rrun_old_pub_superseded":    {Status: releasev2.RunPublished, ProjectID: "p1", Channel: "stable", FinishedAt: ago(40), UpdatedAt: now.Add(-40 * time.Hour)},
+		"rrun_new_pub_latest":        {Status: releasev2.RunPublished, ProjectID: "p1", Channel: "stable", FinishedAt: ago(10), UpdatedAt: now.Add(-10 * time.Hour)},
+		"rrun_old_pub_other_project": {Status: releasev2.RunPublished, ProjectID: "p2", Channel: "stable", FinishedAt: ago(40), UpdatedAt: now.Add(-40 * time.Hour)},
 	}
 	j := &ArtifactJanitor{
 		Objects: objects, Runs: statuses, Retention: 24 * time.Hour,

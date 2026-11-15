@@ -25,6 +25,10 @@ type fakeControlStore struct {
 	requeueOK    bool
 	requeueCalls []string
 	finishCalls  []string
+	runSource    *releasev2.Run
+	run          *releasev2.Run
+	commands     []*releasev2.ExecutorCommand
+	completed    []string
 }
 
 func (f *fakeControlStore) GetExecutor(context.Context, string) (*releasev2.Executor, error) {
@@ -35,6 +39,10 @@ func (f *fakeControlStore) ClaimReleaseV2Target(context.Context, string, string,
 	return nil, nil
 }
 func (f *fakeControlStore) GetRun(context.Context, string) (*releasev2.Run, error) {
+	if f.run != nil {
+		copyRun := *f.run
+		return &copyRun, nil
+	}
 	return &releasev2.Run{ID: "run_1", Status: releasev2.RunBuilding}, nil
 }
 
@@ -80,6 +88,52 @@ func (f *fakeControlStore) AddArtifact(_ context.Context, a releasev2.Artifact) 
 	f.artifacts = append(f.artifacts, a)
 	return &a, nil
 }
+
+func (f *fakeControlStore) SetRunSource(_ context.Context, runID, sha256, storageKey string) error {
+	f.runSource = &releasev2.Run{ID: runID, SourceSHA256: sha256, SourceStorageKey: storageKey}
+	if f.run != nil {
+		f.run.SourceSHA256 = sha256
+		f.run.SourceStorageKey = storageKey
+	}
+	return nil
+}
+
+func (f *fakeControlStore) SetTargetManifest(_ context.Context, runID, targetID, storageKey string) error {
+	if f.target != nil && f.target.RunID == runID && f.target.TargetID == targetID {
+		f.target.ManifestPath = storageKey
+	}
+	return nil
+}
+
+func (f *fakeControlStore) SetRunManifest(_ context.Context, runID, storageKey string) error {
+	if f.run != nil && f.run.ID == runID {
+		f.run.ManifestStorageKey = storageKey
+	}
+	return nil
+}
+
+func (f *fakeControlStore) ListTargets(_ context.Context, runID string) ([]releasev2.Target, error) {
+	if f.target == nil || f.target.RunID != runID {
+		return nil, nil
+	}
+	return []releasev2.Target{*f.target}, nil
+}
+
+func (f *fakeControlStore) ClaimExecutorCommand(context.Context, string) (*releasev2.ExecutorCommand, error) {
+	if len(f.commands) == 0 {
+		return nil, store.ErrNotFound
+	}
+	cmd := f.commands[0]
+	f.commands = f.commands[1:]
+	return cmd, nil
+}
+
+func (f *fakeControlStore) CompleteExecutorCommand(_ context.Context, id int64, executorID string, exitCode int, output, message string) (bool, error) {
+	f.completed = append(f.completed, fmt.Sprintf("%d/%s/%d/%s", id, executorID, exitCode, output))
+	return true, nil
+}
+
+func (f *fakeControlStore) ExpireExecutorCommands(context.Context) (int, error) { return 0, nil }
 
 func TestArtifactRelayUploadRegistersDigest(t *testing.T) {
 	dir := t.TempDir()

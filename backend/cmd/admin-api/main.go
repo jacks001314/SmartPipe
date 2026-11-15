@@ -39,7 +39,7 @@ var version = "0.1.0-m0"
 func main() {
 	dsn := strings.TrimSpace(os.Getenv("SMARTPIPE_DSN"))
 	if dsn == "" {
-		log.Fatal("SMARTPIPE_DSN 未设置，例如 postgres://smartpipe:pwd@192.168.1.99:5432/smartpipe?sslmode=disable")
+		log.Fatal("SMARTPIPE_DSN 未设置，例如 postgres://user:pass@db-host:5432/smartpipe?sslmode=disable")
 	}
 	keyB64 := strings.TrimSpace(os.Getenv("SMARTPIPE_MASTER_KEY"))
 	if keyB64 == "-gen-key" {
@@ -78,10 +78,28 @@ func main() {
 	}
 	origins := splitCSV(os.Getenv("SMARTPIPE_CORS_ORIGINS"))
 
+	// release-service 与 admin-api 通常在同一容器内；未显式配置内部地址时
+	// 从监听地址推导，避免部署时两个地址各写一遍。
+	releaseServiceURL := strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_SERVICE_INTERNAL_URL"))
+	if releaseServiceURL == "" {
+		addr := envOr("SMARTPIPE_RELEASE_SERVICE_ADDR", ":8098")
+		if strings.HasPrefix(addr, ":") {
+			addr = "127.0.0.1" + addr
+		}
+		releaseServiceURL = "http://" + addr
+	}
+
 	releaseAgent := newReleaseAgentLauncher(context.Background(), st)
 	if releaseAgent != nil {
 		if n, cerr := st.CloseStaleAgentSessions(context.Background()); cerr == nil && n > 0 {
 			log.Printf("已把 %d 个遗留的发布 Agent 会话标记为失败", n)
+		}
+		// 会话随进程消失后，进行中的运行不会自己回到 needs_attention；
+		// 这里统一交回 attention worker 接管，避免重启后发布永久卡住。
+		if ids, rerr := st.RequeueOrphanedReleaseV2Runs(context.Background()); rerr != nil {
+			log.Printf("交回遗留发布运行失败: %v", rerr)
+		} else if len(ids) > 0 {
+			log.Printf("已把 %d 个进行中的发布运行交回 Agent 接管: %v", len(ids), ids)
 		}
 	}
 
@@ -100,6 +118,8 @@ func main() {
 		BotToken:              strings.TrimSpace(os.Getenv("SMARTPIPE_BOT_INTERNAL_TOKEN")),
 		SchedulerURL:          envOr("SMARTPIPE_SCHEDULER_URL", "http://127.0.0.1:8098"),
 		SchedulerToken:        strings.TrimSpace(os.Getenv("SMARTPIPE_SCHEDULER_TOKEN")),
+		ReleaseServiceURL:     releaseServiceURL,
+		ReleaseServiceToken:   strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_SERVICE_TOKEN")),
 		CrashRetentionDays:    envInt("SMARTPIPE_CRASH_RETENTION_DAYS", 30),
 		RejectedRetentionDays: envInt("SMARTPIPE_CRASH_REJECT_RETENTION_DAYS", 7),
 		AdminUser:             envOr("SMARTPIPE_ADMIN_USER", "admin"),
@@ -154,6 +174,13 @@ func main() {
 
 	if os.Getenv("SMARTPIPE_CRASH_RETENTION_SCHEDULE") != "off" {
 		api.StartRetentionWorker(context.Background(), time.Duration(envInt("SMARTPIPE_CRASH_RETENTION_HOURS", 6))*time.Hour)
+	}
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_AGENT_AUTO_ATTENTION")), "off") {
+		api.StartReleaseV2AttentionWorker(
+			context.Background(),
+			envDuration("SMARTPIPE_RELEASE_AGENT_ATTENTION_INTERVAL", 20*time.Second),
+			envInt("SMARTPIPE_RELEASE_AGENT_ATTENTION_MAX_ATTEMPTS", 5),
+		)
 	}
 
 	log.Printf("admin-api %s 监听 %s", version, addr)
@@ -237,6 +264,11 @@ func newReleaseAgentLauncher(ctx context.Context, st *store.Store) *releaseagent
 		if provider.BaseURL != "" {
 			env = append(env, "OPENAI_BASE_URL="+provider.BaseURL)
 		}
+		// 供应商是 chat 协议时必须显式告诉 Codex；codexrunner 默认按
+		// responses 拼地址，只支持 /chat/completions 的网关会直接断流。
+		if provider.WireAPI != "" {
+			env = append(env, "OPENAI_WIRE_API="+provider.WireAPI)
+		}
 		if key != "" {
 			env = append(env, "OPENAI_API_KEY="+key)
 		}
@@ -254,6 +286,7 @@ func newReleaseAgentLauncher(ctx context.Context, st *store.Store) *releaseagent
 		Sandbox:       envOr("SMARTPIPE_RELEASE_AGENT_SANDBOX", "read-only"),
 		Compatibility: envOr("SMARTPIPE_RELEASE_AGENT_COMPAT", "warn"),
 		Timeout:       time.Duration(envInt("SMARTPIPE_RELEASE_AGENT_TIMEOUT_MINUTES", 45)) * time.Minute,
+		ToolTimeout:   time.Duration(envInt("SMARTPIPE_RELEASE_AGENT_TOOL_TIMEOUT_SEC", 1200)) * time.Second,
 		MaxSessions:   envInt("SMARTPIPE_RELEASE_AGENT_MAX_SESSIONS", 0),
 		ModelEnv:      modelEnv,
 	})

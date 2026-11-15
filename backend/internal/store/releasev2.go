@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 
 const releaseV2RunColumns = `id, plan_id, project_id, repo, requested_by, trigger, mode, channel, status,
 version, build_version, tag, source_branch, source_commit, resolved_commit, profile_sha256, plan_sha256,
+source_sha256, source_storage_key, manifest_storage_key, executor_ids, update_servers, recovery_attempts,
 idempotency_key, agent_thread_id, notes_md, notes_sha256, approval_state, error_code, error_message,
 clone_credential, started_at, finished_at, created_at, updated_at`
 
@@ -153,6 +155,50 @@ func (s *Store) GetRun(ctx context.Context, id string) (*releasev2.Run, error) {
 	return run, err
 }
 
+// SetRunSource 记录一次运行的冻结源码归档，执行器之后只从这里取源码。
+func (s *Store) SetRunSource(ctx context.Context, runID, sha256, storageKey string) error {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE release_v2_runs SET source_sha256=$2, source_storage_key=$3, updated_at=now() WHERE id=$1`,
+		runID, sha256, storageKey)
+	if err != nil {
+		return fmt.Errorf("store: set run source: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetTargetManifest 记录某个 target 已上传的制品清单对象。
+func (s *Store) SetTargetManifest(ctx context.Context, runID, targetID, storageKey string) error {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE release_v2_targets SET manifest_path=$3, updated_at=now() WHERE run_id=$1 AND target_id=$2`,
+		runID, targetID, storageKey)
+	if err != nil {
+		return fmt.Errorf("store: set target manifest: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetRunManifest 记录一次运行合并后的完整制品清单对象。
+func (s *Store) SetRunManifest(ctx context.Context, runID, storageKey string) error {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE release_v2_runs SET manifest_storage_key=$2, updated_at=now() WHERE id=$1`, runID, storageKey)
+	if err != nil {
+		return fmt.Errorf("store: set run manifest: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) ListRuns(ctx context.Context, projectID string, limit int) ([]releasev2.Run, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
@@ -184,7 +230,7 @@ func (s *Store) ListTargets(ctx context.Context, runID string) ([]releasev2.Targ
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, run_id, target_id, os, arch, executor_id, required, status, attempt, lease_owner,
        lease_expires_at, build_command, sign_command, verify_command, artifact_rules, error_code, error_message,
-       started_at, finished_at, created_at, updated_at
+       manifest_path, started_at, finished_at, created_at, updated_at
   FROM release_v2_targets WHERE run_id=$1 ORDER BY target_id`, runID)
 	if err != nil {
 		return nil, fmt.Errorf("store: list release v2 targets: %w", err)
@@ -197,7 +243,7 @@ SELECT id, run_id, target_id, os, arch, executor_id, required, status, attempt, 
 		var rules []byte
 		if err := rows.Scan(&t.ID, &t.RunID, &t.TargetID, &t.OS, &t.Arch, &t.ExecutorID, &t.Required,
 			&t.Status, &t.Attempt, &t.LeaseOwner, &lease, &t.BuildCommand, &t.SignCommand, &t.VerifyCommand, &rules,
-			&t.ErrorCode, &t.ErrorMessage, &started, &finished, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			&t.ErrorCode, &t.ErrorMessage, &t.ManifestPath, &started, &finished, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(rules, &t.Artifacts)
@@ -212,7 +258,7 @@ SELECT id, run_id, target_id, os, arch, executor_id, required, status, attempt, 
 func (s *Store) ListArtifacts(ctx context.Context, runID string) ([]releasev2.Artifact, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, run_id, target_id, attempt, role, name, content_type, size, sha256, storage_key,
-       platform_signed, manifest_signed, created_at
+       kind, path, os, arch, destinations, platform_signed, manifest_signed, created_at
   FROM release_v2_artifacts WHERE run_id=$1 ORDER BY target_id, role, name`, runID)
 	if err != nil {
 		return nil, fmt.Errorf("store: list release v2 artifacts: %w", err)
@@ -221,10 +267,13 @@ SELECT id, run_id, target_id, attempt, role, name, content_type, size, sha256, s
 	out := []releasev2.Artifact{}
 	for rows.Next() {
 		var a releasev2.Artifact
+		var destinations []byte
 		if err := rows.Scan(&a.ID, &a.RunID, &a.TargetID, &a.Attempt, &a.Role, &a.Name, &a.ContentType,
-			&a.Size, &a.SHA256, &a.StorageKey, &a.PlatformSigned, &a.ManifestSigned, &a.CreatedAt); err != nil {
+			&a.Size, &a.SHA256, &a.StorageKey, &a.Kind, &a.Path, &a.OS, &a.Arch, &destinations,
+			&a.PlatformSigned, &a.ManifestSigned, &a.CreatedAt); err != nil {
 			return nil, err
 		}
+		_ = json.Unmarshal(destinations, &a.Destinations)
 		out = append(out, a)
 	}
 	return out, rows.Err()
@@ -233,16 +282,18 @@ SELECT id, run_id, target_id, attempt, role, name, content_type, size, sha256, s
 func (s *Store) AddArtifact(ctx context.Context, a releasev2.Artifact) (*releasev2.Artifact, error) {
 	row := s.db.QueryRowContext(ctx, `
 INSERT INTO release_v2_artifacts (
-  run_id, target_id, attempt, role, name, content_type, size, sha256, storage_key,
+  run_id, target_id, attempt, role, kind, path, os, arch, destinations, name, content_type, size, sha256, storage_key,
   platform_signed, manifest_signed
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 ON CONFLICT (run_id, target_id, attempt, role, name) DO UPDATE SET
-  content_type=EXCLUDED.content_type, size=EXCLUDED.size, sha256=EXCLUDED.sha256,
+  kind=EXCLUDED.kind, path=EXCLUDED.path, os=EXCLUDED.os, arch=EXCLUDED.arch,
+  destinations=EXCLUDED.destinations, content_type=EXCLUDED.content_type, size=EXCLUDED.size, sha256=EXCLUDED.sha256,
   storage_key=EXCLUDED.storage_key, platform_signed=EXCLUDED.platform_signed,
   manifest_signed=EXCLUDED.manifest_signed
 WHERE release_v2_artifacts.sha256=EXCLUDED.sha256
-RETURNING id, created_at`, a.RunID, a.TargetID, a.Attempt, a.Role, a.Name, a.ContentType, a.Size,
-		a.SHA256, a.StorageKey, a.PlatformSigned, a.ManifestSigned)
+RETURNING id, created_at`, a.RunID, a.TargetID, a.Attempt, a.Role, a.Kind, a.Path, a.OS, a.Arch,
+		mustJSON(a.Destinations), a.Name, a.ContentType, a.Size, a.SHA256, a.StorageKey,
+		a.PlatformSigned, a.ManifestSigned)
 	if err := row.Scan(&a.ID, &a.CreatedAt); err != nil {
 		if err == sql.ErrNoRows || isUniqueViolation(err) {
 			return nil, fmt.Errorf("%w: artifact already exists with a different digest", ErrConflict)
@@ -252,20 +303,47 @@ RETURNING id, created_at`, a.RunID, a.TargetID, a.Attempt, a.Role, a.Name, a.Con
 	return &a, nil
 }
 
+// ReplaceRunArtifact upserts a run-level artifact (target_id = ”) even when
+// its digest changed. Rebuilding the canonical upgrade bundle legitimately
+// produces new bytes, and AddArtifact would reject that as a conflict.
+func (s *Store) ReplaceRunArtifact(ctx context.Context, a releasev2.Artifact) (*releasev2.Artifact, error) {
+	row := s.db.QueryRowContext(ctx, `
+INSERT INTO release_v2_artifacts (
+  run_id, target_id, attempt, role, kind, path, os, arch, destinations, name, content_type, size, sha256, storage_key,
+  platform_signed, manifest_signed
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+ON CONFLICT (run_id, target_id, attempt, role, name) DO UPDATE SET
+  kind=EXCLUDED.kind, path=EXCLUDED.path, os=EXCLUDED.os, arch=EXCLUDED.arch,
+  destinations=EXCLUDED.destinations, content_type=EXCLUDED.content_type, size=EXCLUDED.size, sha256=EXCLUDED.sha256,
+  storage_key=EXCLUDED.storage_key, platform_signed=EXCLUDED.platform_signed,
+  manifest_signed=EXCLUDED.manifest_signed
+RETURNING id, created_at`, a.RunID, a.TargetID, a.Attempt, a.Role, a.Kind, a.Path, a.OS, a.Arch,
+		mustJSON(a.Destinations), a.Name, a.ContentType, a.Size, a.SHA256, a.StorageKey,
+		a.PlatformSigned, a.ManifestSigned)
+	if err := row.Scan(&a.ID, &a.CreatedAt); err != nil {
+		return nil, fmt.Errorf("store: replace release v2 artifact: %w", err)
+	}
+	return &a, nil
+}
+
 func (s *Store) UpdateRunStatus(ctx context.Context, id string, from, to releasev2.RunStatus, code, message string) (bool, error) {
 	res, err := s.db.ExecContext(ctx, `
 UPDATE release_v2_runs SET
   status=$3,
   error_code=CASE WHEN $4 <> '' THEN $4
-                  WHEN $3 IN ('queued','preparing','building','verifying','staged','publishing') THEN ''
+                  WHEN $3 IN ('queued','preparing','building','verifying','artifacts_ready','recovering','staged','publishing') THEN ''
                   ELSE error_code END,
   error_message=CASE WHEN $5 <> '' THEN $5
-                     WHEN $3 IN ('queued','preparing','building','verifying','staged','publishing') THEN ''
+                     WHEN $3 IN ('queued','preparing','building','verifying','artifacts_ready','recovering','staged','publishing') THEN ''
                      ELSE error_message END,
   started_at=COALESCE(started_at, CASE WHEN $3 IN ('preparing','building','verifying') THEN now() ELSE started_at END),
   finished_at=CASE WHEN $3 IN ('published','built','failed','cancelled') THEN now()
-                   WHEN $3 IN ('queued','preparing','building','verifying','staged','publishing') THEN NULL
+                   WHEN $3 IN ('queued','preparing','building','verifying','artifacts_ready','recovering','needs_attention','staged','publishing') THEN NULL
                    ELSE finished_at END,
+  -- 只有真正收口才清零。needs_attention 与 artifacts_ready 之间的来回
+  -- （runner 按事实状态收口、Agent 会话异常退出）属于同一轮恢复，清零会让
+  -- 重试上限失效并可能无限循环。
+  recovery_attempts=CASE WHEN $3 IN ('published','built','cancelled') THEN 0 ELSE recovery_attempts END,
   updated_at=now()
 WHERE id=$1 AND status=$2`, id, from, to, code, message)
 	if err != nil {
@@ -289,9 +367,11 @@ func appendReleaseV2EventTx(ctx context.Context, ex releaseV2Execer, e releasev2
 		detail = map[string]any{}
 	}
 	raw, _ := json.Marshal(detail)
+	// jsonb 不接受 \u0000 转义；命令输出里混入的 NUL 不该让整条事件丢失。
+	raw = bytes.ReplaceAll(raw, []byte(`\u0000`), []byte(`\uFFFD`))
 	if _, err := ex.ExecContext(ctx, `
 INSERT INTO release_v2_events (run_id, actor, kind, target_id, summary, detail)
-VALUES ($1,$2,$3,$4,$5,$6)`, e.RunID, e.Actor, e.Kind, e.TargetID, e.Summary, raw); err != nil {
+VALUES ($1,$2,$3,$4,$5,$6)`, e.RunID, e.Actor, e.Kind, e.TargetID, sanitizeText(e.Summary), raw); err != nil {
 		return fmt.Errorf("store: append release v2 event: %w", err)
 	}
 	return nil
@@ -467,13 +547,18 @@ func scanReleaseV2Plan(row rowScanner) (*releasev2.Plan, error) {
 func scanReleaseV2Run(row rowScanner) (*releasev2.Run, error) {
 	var r releasev2.Run
 	var started, finished sql.NullTime
+	var executorIDs, updateServers []byte
 	if err := row.Scan(&r.ID, &r.PlanID, &r.ProjectID, &r.Repo, &r.RequestedBy, &r.Trigger, &r.Mode,
 		&r.Channel, &r.Status, &r.Version, &r.BuildVersion, &r.Tag, &r.SourceBranch, &r.SourceCommit,
-		&r.ResolvedCommit, &r.ProfileSHA256, &r.PlanSHA256, &r.IdempotencyKey, &r.AgentThreadID,
+		&r.ResolvedCommit, &r.ProfileSHA256, &r.PlanSHA256, &r.SourceSHA256, &r.SourceStorageKey,
+		&r.ManifestStorageKey, &executorIDs, &updateServers, &r.RecoveryAttempts,
+		&r.IdempotencyKey, &r.AgentThreadID,
 		&r.NotesMD, &r.NotesSHA256, &r.ApprovalState, &r.ErrorCode, &r.ErrorMessage, &r.CloneCredential,
 		&started, &finished, &r.CreatedAt, &r.UpdatedAt); err != nil {
 		return nil, err
 	}
+	_ = json.Unmarshal(executorIDs, &r.ExecutorIDs)
+	_ = json.Unmarshal(updateServers, &r.UpdateServers)
 	r.StartedAt = nullTimePtr(started)
 	r.FinishedAt = nullTimePtr(finished)
 	return &r, nil
@@ -542,7 +627,7 @@ func (s *Store) ListActiveReleaseV2Runs(ctx context.Context, limit int) ([]relea
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT `+releaseV2RunColumns+`
   FROM release_v2_runs
- WHERE status IN ('queued','preparing','building','verifying','staged','publishing')
+ WHERE status IN ('queued','preparing','building','verifying','artifacts_ready','recovering','needs_attention','staged','publishing')
  ORDER BY created_at, id LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: list active release v2 runs: %w", err)
@@ -557,6 +642,55 @@ func (s *Store) ListActiveReleaseV2Runs(ctx context.Context, limit int) ([]relea
 		out = append(out, *run)
 	}
 	return out, rows.Err()
+}
+
+// ListAttentionReleaseV2Runs 返回需要交回发布 Agent 的运行。
+//
+// 它比 ListActiveReleaseV2Runs 多一个 partially_published：渠道指针已经推进、
+// GitHub 还没收口，会话一旦中断就没人继续，必须能被自动接管。单独开一条查询，
+// 是为了不让长期滞留的半发布运行挤占 runner 的活跃运行额度（runner 只看
+// 前 N 条，老运行排在前面会把新运行饿死）。
+func (s *Store) ListAttentionReleaseV2Runs(ctx context.Context, limit int) ([]releasev2.Run, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+releaseV2RunColumns+`
+  FROM release_v2_runs
+ WHERE status IN ('queued','preparing','building','verifying','artifacts_ready','recovering','needs_attention','staged','publishing','partially_published')
+ ORDER BY created_at, id LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: list attention release v2 runs: %w", err)
+	}
+	defer rows.Close()
+	out := []releasev2.Run{}
+	for rows.Next() {
+		run, err := scanReleaseV2Run(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *run)
+	}
+	return out, rows.Err()
+}
+
+// BumpReleaseV2RecoveryAttempts records one automatic Agent takeover for a run
+// that is waiting for attention. It returns 0 when the run already left
+// needs_attention / partially_published or reached max (max <= 0 means unlimited).
+// partially_published 也算待接管：渠道指针已经推进、GitHub 还没收口，会话一旦
+// 中断就没人继续，必须和 needs_attention 共用同一份重试预算，才不会无限接管。
+func (s *Store) BumpReleaseV2RecoveryAttempts(ctx context.Context, runID string, max int) (int, error) {
+	var attempts int
+	err := s.db.QueryRowContext(ctx, `
+UPDATE release_v2_runs SET recovery_attempts=recovery_attempts+1, updated_at=now()
+WHERE id=$1 AND status IN ('needs_attention','partially_published') AND ($2 <= 0 OR recovery_attempts < $2)
+RETURNING recovery_attempts`, runID, max).Scan(&attempts)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("store: bump release v2 recovery attempts: %w", err)
+	}
+	return attempts, nil
 }
 
 func (s *Store) ClaimReleaseV2Target(ctx context.Context, executorID, osName, arch string, leaseTTL time.Duration) (*releasev2.Target, error) {
@@ -583,7 +717,7 @@ FROM candidate
 WHERE t.id=candidate.id
 RETURNING t.id, t.run_id, t.target_id, t.os, t.arch, t.executor_id, t.required, t.status,
           t.attempt, t.lease_owner, t.lease_expires_at, t.build_command, t.sign_command, t.verify_command, t.artifact_rules,
-          t.error_code, t.error_message, t.started_at, t.finished_at, t.created_at, t.updated_at`,
+          t.error_code, t.error_message, t.manifest_path, t.started_at, t.finished_at, t.created_at, t.updated_at`,
 		executorID, strings.ToLower(osName), strings.ToLower(arch), leaseTTL.Seconds())
 	var target releasev2.Target
 	var lease, started, finished sql.NullTime
@@ -591,7 +725,7 @@ RETURNING t.id, t.run_id, t.target_id, t.os, t.arch, t.executor_id, t.required, 
 	if err := row.Scan(&target.ID, &target.RunID, &target.TargetID, &target.OS, &target.Arch,
 		&target.ExecutorID, &target.Required, &target.Status, &target.Attempt, &target.LeaseOwner,
 		&lease, &target.BuildCommand, &target.SignCommand, &target.VerifyCommand, &rules, &target.ErrorCode, &target.ErrorMessage,
-		&started, &finished, &target.CreatedAt, &target.UpdatedAt); err != nil {
+		&target.ManifestPath, &started, &finished, &target.CreatedAt, &target.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) || isUniqueViolation(err) {
 			return nil, ErrNotFound
 		}
@@ -613,7 +747,13 @@ UPDATE release_v2_targets SET
   status=CASE WHEN status='leased' THEN 'building' ELSE status END,
   lease_expires_at=now()+make_interval(secs => $4::double precision), updated_at=now()
 WHERE run_id=$1 AND target_id=$2 AND lease_owner=$3
-  AND status IN ('leased','building','verifying')`, runID, targetID, executorID, leaseTTL.Seconds())
+  AND status IN ('leased','building','verifying','uploaded')
+  AND EXISTS (
+    SELECT 1 FROM release_v2_runs r
+    WHERE r.id=$1 AND r.status IN (
+      'queued','preparing','building','verifying','artifacts_ready','staged','publishing','needs_attention','recovering'
+    )
+  )`, runID, targetID, executorID, leaseTTL.Seconds())
 	if err != nil {
 		return false, fmt.Errorf("store: heartbeat release v2 target: %w", err)
 	}
@@ -665,7 +805,9 @@ func (s *Store) RetryReleaseV2Target(ctx context.Context, runID, targetID string
 UPDATE release_v2_targets SET status='retry_queued', attempt=attempt+1,
   error_code='', error_message='', lease_owner='', lease_expires_at=NULL,
   started_at=NULL, finished_at=NULL, updated_at=now()
-WHERE run_id=$1 AND target_id=$2 AND status='failed'`, runID, targetID)
+-- uploaded 表示"制品传了一半、清单没交"（例如取消导致的构建中止）。这种 target
+-- 不是终态，必须允许重试，否则整条 run 会永远停在 needs_attention。
+WHERE run_id=$1 AND target_id=$2 AND status IN ('failed','uploaded')`, runID, targetID)
 	if err != nil {
 		return false, fmt.Errorf("store: retry release v2 target: %w", err)
 	}

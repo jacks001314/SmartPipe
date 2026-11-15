@@ -1,6 +1,7 @@
 package adminapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,20 +43,9 @@ func (a *API) startReleaseV2Agent(c iris.Context) {
 		a.releaseV2Error(c, err)
 		return
 	}
-	// 未显式指定模型时，沿用项目配置的模型与推理强度。
-	if in.Model == "" || in.Effort == "" {
-		if project, perr := a.store.GetProject(ctx, bundle.Run.ProjectID); perr == nil {
-			if in.Model == "" {
-				in.Model = project.CodexModel
-			}
-			if in.Effort == "" {
-				in.Effort = project.CodexReasoningEffort
-			}
-		}
-	}
-	session, err := a.releaseAgent.Launch(ctx, bundle, releaseagent.Options{
+	session, err := a.releaseAgent.Launch(ctx, bundle, a.releaseAgentOptions(ctx, bundle.Run.ProjectID, releaseagent.Options{
 		Scopes: in.Scopes, Model: strings.TrimSpace(in.Model), Effort: strings.TrimSpace(in.Effort), Actor: a.actor(c),
-	})
+	}))
 	if err != nil {
 		switch {
 		case errors.Is(err, releaseagent.ErrAlreadyRunning):
@@ -78,6 +68,35 @@ func (a *API) startReleaseV2Agent(c iris.Context) {
 	})
 	c.StatusCode(http.StatusAccepted)
 	_ = c.JSON(envelope{Data: session})
+}
+
+// releaseAgentOptions 在调用方没有显式指定时，优先使用项目配置的模型与推理
+// 强度；全局 SMARTPIPE_RELEASE_AGENT_MODEL 只作为最后的兜底。
+func (a *API) releaseAgentOptions(ctx context.Context, projectID string, opts releaseagent.Options) releaseagent.Options {
+	if opts.Model != "" && opts.Effort != "" {
+		return opts
+	}
+	if project, err := a.store.GetProject(ctx, projectID); err == nil {
+		if opts.Model == "" {
+			opts.Model = strings.TrimSpace(project.CodexModel)
+		}
+		if opts.Effort == "" {
+			opts.Effort = strings.TrimSpace(project.CodexReasoningEffort)
+		}
+	}
+	// 项目没配模型时跟配置台的默认模型走。留空会让 Codex 用它内置的默认
+	// 模型，而项目的供应商未必提供那个模型，Agent 一启动就 400 / 断流。
+	if opts.Model == "" {
+		if v, err := a.store.GetSetting(ctx, "codex_default_model"); err == nil {
+			opts.Model = strings.TrimSpace(v)
+		}
+	}
+	if opts.Effort == "" {
+		if v, err := a.store.GetSetting(ctx, "codex_default_effort"); err == nil {
+			opts.Effort = strings.TrimSpace(v)
+		}
+	}
+	return opts
 }
 
 func (a *API) getReleaseV2Agent(c iris.Context) {

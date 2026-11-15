@@ -134,6 +134,30 @@ func TestMergeNoProxyKeepsExistingEntries(t *testing.T) {
 	}
 }
 
+func TestEnsureLocaleEnvAddsUTF8WhenMissing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("locale fallback only applies to Unix build hosts")
+	}
+	got := ensureLocaleEnv([]string{"PATH=/usr/bin", "LANG=", "LC_ALL=C", "LC_CTYPE=C"})
+	joined := strings.Join(got, "\n")
+	if strings.Contains(joined, "LC_ALL=C") {
+		t.Fatalf("invalid LC_ALL should be replaced: %v", got)
+	}
+	for _, want := range []string{"LANG=" + defaultUTF8Locale(), "LC_ALL=" + defaultUTF8Locale()} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing %s in %v", want, got)
+		}
+	}
+}
+
+func TestEnsureLocaleEnvKeepsExplicitUTF8(t *testing.T) {
+	in := []string{"PATH=/usr/bin", "LC_ALL=en_US.utf8"}
+	got := ensureLocaleEnv(in)
+	if strings.Join(got, "\n") != strings.Join(in, "\n") {
+		t.Fatalf("explicit UTF-8 locale should be preserved: %v", got)
+	}
+}
+
 func TestGitCloneArgsWithoutCredential(t *testing.T) {
 	args := gitCloneArgs(nil)
 	joined := strings.Join(args, " ")

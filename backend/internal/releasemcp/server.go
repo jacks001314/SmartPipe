@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -36,7 +37,7 @@ type Server struct {
 	// Settings 读取界面保存的发版参数（升级服务地址、GitHub 地址、默认凭据等）；
 	// nil 时只用环境变量。
 	Settings SettingStore
-	Clock            func() time.Time
+	Clock    func() time.Time
 }
 
 func New(st *store.Store, service *releasev2.Service, version string) *Server {
@@ -106,6 +107,7 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 	}
 	p, authErr := s.authenticate(r)
 	if authErr != nil {
+		log.Printf("release-mcp auth failed: %v", authErr)
 		writeRPCError(w, req.ID, -32001, authErr.Error(), nil)
 		return
 	}
@@ -199,9 +201,15 @@ func (s *Server) callTool(ctx context.Context, p *principal, raw json.RawMessage
 	} else if result != nil && result.IsError {
 		status = "blocked"
 	}
+	detail := map[string]any{"status": status, "duration_ms": time.Since(start).Milliseconds(), "arguments": redactArguments(params.Arguments)}
+	if err != nil {
+		detail["error"] = err.Error()
+	} else if result != nil && result.IsError {
+		detail["error"] = result.StructuredContent
+	}
 	_ = s.Store.AppendEvent(ctx, releasev2.Event{
 		RunID: p.Run.ID, Actor: "agent:" + p.Token.ID, Kind: "mcp.tool", TargetID: stringArg(params.Arguments, "target"),
-		Summary: params.Name, Detail: map[string]any{"status": status, "duration_ms": time.Since(start).Milliseconds(), "arguments": redactArguments(params.Arguments)},
+		Summary: params.Name, Detail: detail,
 	})
 	if err != nil {
 		return blockedResult("tool_error", err.Error()), nil
@@ -214,6 +222,9 @@ func (s *Server) dispatch(ctx context.Context, p *principal, name string, args m
 		return nil, errors.New("tool is not allowed for this token")
 	}
 	if result, handled, err := s.dispatchWrite(ctx, p, name, args); handled {
+		return result, err
+	}
+	if result, handled, err := s.executorDispatch(ctx, p, name, args); handled {
 		return result, err
 	}
 	// GitHub 工具是单独一组实现；漏掉这一步时工具会在 tools/list 里可见，
@@ -236,12 +247,6 @@ func (s *Server) dispatch(ctx context.Context, p *principal, name string, args m
 		return textResult(items), nil
 	case "executor_list":
 		items, err := s.Store.ListExecutors(ctx)
-		if err != nil {
-			return nil, err
-		}
-		return textResult(items), nil
-	case "release_approval_list":
-		items, err := s.Store.ListApprovals(ctx, p.Run.ID, 20)
 		if err != nil {
 			return nil, err
 		}
@@ -273,6 +278,42 @@ func toolsFor(scopes []string) []map[string]any {
 		{
 			"name": "executor_list", "description": "List registered Windows/macOS/Linux build executors and their capabilities.",
 			"inputSchema": objectSchema(map[string]any{}),
+		},
+		{
+			"name": "executor_probe", "description": "Probe the bound build machine: executor version and install time, OS/arch, CPU, disk, toolchain versions and PATH. Use this first when a build fails on environment issues, or to confirm a redeployed executor is actually the one running.",
+			"inputSchema": objectSchema(map[string]any{
+				"executor": map[string]any{"type": "string", "description": "Executor id; optional when the run is bound to one machine."},
+			}),
+		},
+		{
+			"name": "executor_exec", "description": "Run an allowlisted shell command on the bound build machine to repair its environment. No approval is required; every command is audited.",
+			"inputSchema": objectSchemaRequired(map[string]any{
+				"executor":        map[string]any{"type": "string"},
+				"command":         map[string]any{"type": "string", "maxLength": 8000},
+				"cwd":             map[string]any{"type": "string"},
+				"timeout_seconds": map[string]any{"type": "integer", "minimum": 5, "maximum": 1800},
+			}, []string{"command"}),
+		},
+		{
+			"name": "executor_logs", "description": "Read the tail of a log file on the bound build machine (defaults to the executor work directory for relative paths).",
+			"inputSchema": objectSchemaRequired(map[string]any{
+				"executor": map[string]any{"type": "string"},
+				"path":     map[string]any{"type": "string"},
+				"lines":    map[string]any{"type": "integer", "minimum": 1, "maximum": 2000},
+			}, []string{"path"}),
+		},
+		{
+			"name": "executor_files", "description": "List a directory or stat a file on the bound build machine, including sizes and permissions.",
+			"inputSchema": objectSchema(map[string]any{
+				"executor": map[string]any{"type": "string"},
+				"path":     map[string]any{"type": "string"},
+			}),
+		},
+		{
+			"name": "executor_command_get", "description": "Read a previously issued executor command and its result by command id.",
+			"inputSchema": objectSchemaRequired(map[string]any{
+				"command_id": map[string]any{"type": "integer", "minimum": 1},
+			}, []string{"command_id"}),
 		},
 		{
 			"name": "release_event_list", "description": "Read release events using a monotonically increasing cursor.",
@@ -314,10 +355,6 @@ func toolsFor(scopes []string) []map[string]any {
 			}, []string{"notes"}),
 		},
 		{
-			"name": "release_approval_list", "description": "List publish approvals for the current run, including expiry and bound content hash.",
-			"inputSchema": objectSchema(map[string]any{}),
-		},
-		{
 			"name": "artifact_verify", "description": "Verify every required target produced its declared artifact roles and that stored digests match.",
 			"inputSchema": objectSchema(map[string]any{}),
 		},
@@ -330,6 +367,17 @@ func toolsFor(scopes []string) []map[string]any {
 			"inputSchema": objectSchema(map[string]any{
 				"credential": map[string]any{"type": "string", "description": "Credential reference configured on the server."},
 				"channel":    map[string]any{"type": "string"},
+				"services":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional subset of upgrade services; use it to retry only the ones that failed."},
+			}),
+		},
+		{
+			"name": "release_import", "description": "One-call import: build the canonical upgrade bundle when it is missing, then upload every artifact to each selected upgrade service in parallel. Failures are isolated per service; retry only the failed ones by passing services=[...]. No channel pointer moves here.",
+			"inputSchema": objectSchema(map[string]any{
+				"credential":       map[string]any{"type": "string", "description": "Credential reference configured on the server."},
+				"channel":          map[string]any{"type": "string"},
+				"services":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional subset of upgrade services; use it to retry only the ones that failed."},
+				"rebuild":          map[string]any{"type": "boolean", "description": "Force regenerating the canonical upgrade bundle before importing."},
+				"replace_existing": map[string]any{"type": "boolean", "description": "Overwrite an existing release of the same version when artifact digests differ. Off by default: the service refuses same-version byte changes and clients only compare versions, so raise the product version instead."},
 			}),
 		},
 		{
@@ -381,7 +429,17 @@ func toolsFor(scopes []string) []map[string]any {
 			}),
 		},
 		{
-			"name": "release_publish", "description": "Final publish entry. Re-verifies targets, checks the approval gate and promotes the staged channel pointer. CAS expectations are optional; the server reads the current pointer when they are omitted.",
+			"name": "github_release_sync", "description": "One-call GitHub publish: reuse or create the draft, upload every verified artifact, check name/size/digest, publish, then read the release back. Safe to repeat.",
+			"inputSchema": objectSchema(map[string]any{
+				"credential": map[string]any{"type": "string"},
+				"release_id": map[string]any{"type": "integer", "description": "Defaults to the draft created for this run."},
+				"tag":        map[string]any{"type": "string"},
+				"name":       map[string]any{"type": "string"},
+				"body":       map[string]any{"type": "string"},
+			}),
+		},
+		{
+			"name": "release_publish", "description": "Final publish entry. Re-verifies targets and promotes the staged channel pointer. No human approval is required. CAS expectations are optional; the server reads the current pointer when they are omitted.",
 			"inputSchema": objectSchema(map[string]any{
 				"credential":               map[string]any{"type": "string", "description": "Credential reference; defaults to the project publishing.update_service.credential."},
 				"expected_current_version": map[string]any{"type": "string", "description": "Optional CAS expectation; omit to use the current channel pointer."},
@@ -417,25 +475,27 @@ func allowedTool(scopes []string, name string) bool {
 		return releasev2.HasScope(scopes, "artifact.read")
 	case "executor_list":
 		return releasev2.HasScope(scopes, "executor.read")
+	case "executor_probe", "executor_logs", "executor_files", "executor_command_get":
+		return releasev2.HasScope(scopes, "executor.read")
+	case "executor_exec":
+		return releasev2.HasScope(scopes, "build.write")
 	case "build_dispatch", "build_wait":
 		return releasev2.HasScope(scopes, "build.read") || releasev2.HasScope(scopes, "build.write")
 	case "build_retry", "release_notes_save":
 		return releasev2.HasScope(scopes, "release.write")
 	case "build_logs":
 		return releasev2.HasScope(scopes, "build.read") || releasev2.HasScope(scopes, "build.write") || releasev2.HasScope(scopes, "release.read")
-	case "release_approval_list":
-		return releasev2.HasScope(scopes, "release.read")
 	case "artifact_verify":
 		return releasev2.HasScope(scopes, "artifact.read") || releasev2.HasScope(scopes, "artifact.write")
 	case "update_bundle_build":
 		return releasev2.HasScope(scopes, "artifact.write")
-	case "update_import_stage":
+	case "update_import_stage", "release_import":
 		return releasev2.HasScope(scopes, "update.write")
 	case "update_import_get":
 		return releasev2.HasScope(scopes, "update.read") || releasev2.HasScope(scopes, "update.write")
 	case "update_channel_promote":
 		return releasev2.HasScope(scopes, "update.publish")
-	case "github_draft_create", "github_asset_upload", "github_release_publish":
+	case "github_draft_create", "github_asset_upload", "github_release_publish", "github_release_sync":
 		return releasev2.HasScope(scopes, "github.write")
 	case "github_release_get":
 		return releasev2.HasScope(scopes, "github.read") || releasev2.HasScope(scopes, "github.write")
@@ -506,6 +566,11 @@ func intArg(args map[string]any, key string, def int) int {
 func stringArg(args map[string]any, key string) string {
 	v, _ := args[key].(string)
 	return strings.TrimSpace(v)
+}
+
+func boolArg(args map[string]any, key string) bool {
+	v, _ := args[key].(bool)
+	return v
 }
 
 func firstNonEmpty(values ...string) string {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -58,6 +59,23 @@ func (s *Server) runProfile(ctx context.Context, projectID string) (*releasev2.P
 	project, err := s.Store.GetProject(ctx, projectID)
 	if err != nil {
 		return nil, "", err
+	}
+	// 新链路把发版配方放在项目配置里；有配置时不再依赖仓库内的 smartpipe.yaml。
+	if cfg, cerr := s.Store.GetProjectReleaseConfig(ctx, projectID); cerr == nil && len(cfg.Builds) > 0 {
+		targets := make(map[string]releasev2.TargetConfig, len(cfg.Builds))
+		for id, recipe := range cfg.Builds {
+			parts := strings.SplitN(id, "-", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			targets[id] = releasev2.TargetConfig{
+				OS: parts[0], Arch: parts[1], Build: recipe.Build, Sign: recipe.Sign, Verify: recipe.Verify,
+				Timeout: recipe.Timeout, Artifacts: append([]releasev2.ArtifactRule(nil), recipe.Artifacts...),
+			}
+		}
+		return &releasev2.Profile{Version: 1, Release: &releasev2.ReleaseConfig{
+			Targets: targets, Publishing: cfg.Publishing, Policies: cfg.Policies,
+		}}, "project-config:" + projectID, nil
 	}
 	rel := strings.TrimSpace(project.ReleaseProfile)
 	if rel == "" {
@@ -174,6 +192,13 @@ func (s *Server) dispatchWrite(ctx context.Context, p *principal, name string, a
 		}
 		return result, true, nil
 
+	case "release_import":
+		result, err := s.releaseImport(ctx, p, args)
+		if err != nil {
+			return nil, true, err
+		}
+		return result, true, nil
+
 	case "update_import_get":
 		result, err := s.getImport(ctx, p, args)
 		if err != nil {
@@ -282,7 +307,7 @@ func (s *Server) buildBundle(ctx context.Context, p *principal) (*toolResult, er
 	if stored.SHA256 != digest {
 		return blockedResult("digest_mismatch", "storage digest does not match the canonical bundle digest"), nil
 	}
-	artifact, err := s.Store.AddArtifact(ctx, releasev2.Artifact{
+	artifact, err := s.Store.ReplaceRunArtifact(ctx, releasev2.Artifact{
 		RunID: run.ID, TargetID: "", Attempt: 1, Role: "upgrade_bundle", Name: "upgrade-bundle.json",
 		ContentType: "application/json", Size: stored.Size, SHA256: stored.SHA256, StorageKey: key,
 	})
@@ -322,7 +347,7 @@ func (s *Server) runSnapshot(ctx context.Context, p *principal) (*releasev2.Run,
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return run, targets, artifacts, nil
+	return run, targets, releasev2.CurrentAttemptArtifacts(targets, artifacts), nil
 }
 
 func requireReadyTargets(targets []releasev2.Target) string {
@@ -375,40 +400,54 @@ func (s *Server) bundleObject(ctx context.Context, p *principal) (*releasev2.Art
 // verifyArtifacts checks that every required target produced every declared
 // artifact role and that the stored bytes still match the registered digest.
 func (s *Server) verifyArtifacts(ctx context.Context, p *principal) (*toolResult, error) {
-	_, targets, artifacts, err := s.runSnapshot(ctx, p)
+	run, targets, artifacts, err := s.runSnapshot(ctx, p)
 	if err != nil {
 		return nil, err
 	}
 	if s.Objects == nil {
 		return blockedResult("storage_not_configured", "release artifact storage is not configured"), nil
 	}
-	blockers := artifactGaps(targets, artifacts)
-	verified := 0
+	manifest, err := s.loadRunManifest(ctx, run)
+	if err != nil {
+		return blockedResult("run_manifest_unavailable", err.Error()), nil
+	}
+	blockers := append(artifactGaps(targets, artifacts), manifestBlockers(run, targets, artifacts, manifest)...)
+	byKey := map[string]releasev2.Artifact{}
 	for _, a := range artifacts {
-		if strings.TrimSpace(a.StorageKey) == "" {
-			blockers = append(blockers, fmt.Sprintf("%s/%s has no storage key", a.TargetID, a.Role))
-			continue
-		}
-		stat, err := s.Objects.Stat(ctx, a.StorageKey)
-		if err != nil {
-			blockers = append(blockers, fmt.Sprintf("%s/%s storage: %v", a.TargetID, a.Role, err))
-			continue
-		}
-		if stat.SHA256 == "" {
-			// Objects written through a pre-signed URL carry no metadata digest;
-			// fall back to hashing the stored bytes before declaring them valid.
-			if digest, size, herr := hashStoredObject(ctx, s.Objects, a.StorageKey); herr != nil {
-				blockers = append(blockers, fmt.Sprintf("%s/%s storage: %v", a.TargetID, a.Role, herr))
+		byKey[artifactKey(a.TargetID, a.Role, a.Name)] = a
+	}
+	verified := 0
+	for _, tm := range manifest.Targets {
+		for _, item := range tm.Artifacts {
+			a, ok := byKey[artifactKey(tm.TargetID, item.Role, item.Name)]
+			if !ok {
 				continue
-			} else {
-				stat.SHA256, stat.Size = digest, size
 			}
+			if strings.TrimSpace(a.StorageKey) == "" {
+				blockers = append(blockers, fmt.Sprintf("%s/%s has no storage key", a.TargetID, a.Role))
+				continue
+			}
+			stat, err := s.Objects.Stat(ctx, a.StorageKey)
+			if err != nil {
+				blockers = append(blockers, fmt.Sprintf("%s/%s storage: %v", a.TargetID, a.Role, err))
+				continue
+			}
+			if stat.SHA256 == "" {
+				// Objects written through a pre-signed URL carry no metadata digest;
+				// fall back to hashing the stored bytes before declaring them valid.
+				if digest, size, herr := hashStoredObject(ctx, s.Objects, a.StorageKey); herr != nil {
+					blockers = append(blockers, fmt.Sprintf("%s/%s storage: %v", a.TargetID, a.Role, herr))
+					continue
+				} else {
+					stat.SHA256, stat.Size = digest, size
+				}
+			}
+			if stat.SHA256 != a.SHA256 || stat.Size != a.Size {
+				blockers = append(blockers, fmt.Sprintf("%s/%s digest mismatch", a.TargetID, a.Role))
+				continue
+			}
+			verified++
 		}
-		if stat.SHA256 != a.SHA256 || stat.Size != a.Size {
-			blockers = append(blockers, fmt.Sprintf("%s/%s digest mismatch", a.TargetID, a.Role))
-			continue
-		}
-		verified++
 	}
 	if len(blockers) > 0 {
 		sort.Strings(blockers)
@@ -416,9 +455,32 @@ func (s *Server) verifyArtifacts(ctx context.Context, p *principal) (*toolResult
 	}
 	_ = s.Store.AppendEvent(ctx, releasev2.Event{
 		RunID: p.Run.ID, Actor: "agent:" + p.Token.ID, Kind: "artifacts.verified",
-		Summary: "artifacts verified", Detail: map[string]any{"artifacts": verified, "targets": len(targets)},
+		Summary: "artifacts verified", Detail: map[string]any{"artifacts": verified, "targets": len(targets), "manifest": run.ManifestStorageKey},
 	})
-	return textResult(map[string]any{"verified": verified, "targets": len(targets), "state": "ok"}), nil
+	return textResult(map[string]any{"verified": verified, "targets": len(targets), "manifest": run.ManifestStorageKey, "state": "ok"}), nil
+}
+
+func (s *Server) loadRunManifest(ctx context.Context, run *releasev2.Run) (*releasev2.RunArtifactManifest, error) {
+	key := strings.TrimSpace(run.ManifestStorageKey)
+	if key == "" {
+		return nil, fmt.Errorf("run artifact manifest has not been assembled yet")
+	}
+	obj, err := s.Objects.Open(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("open run manifest %s: %w", key, err)
+	}
+	defer obj.Close()
+	var manifest releasev2.RunArtifactManifest
+	if err := json.NewDecoder(io.LimitReader(obj, 8<<20)).Decode(&manifest); err != nil {
+		return nil, fmt.Errorf("decode run manifest %s: %w", key, err)
+	}
+	if manifest.Schema != releasev2.ArtifactManifestSchema {
+		return nil, fmt.Errorf("unsupported run manifest schema %d", manifest.Schema)
+	}
+	if manifest.RunID != run.ID {
+		return nil, fmt.Errorf("run manifest belongs to %s, not %s", manifest.RunID, run.ID)
+	}
+	return &manifest, nil
 }
 
 func hashStoredObject(ctx context.Context, objects releasev2.ObjectStore, key string) (string, int64, error) {
@@ -454,6 +516,74 @@ func artifactGaps(targets []releasev2.Target, artifacts []releasev2.Artifact) []
 	return gaps
 }
 
+func artifactKey(targetID, role, name string) string {
+	return targetID + "\x00" + role + "\x00" + name
+}
+
+// manifestBlockers compares the stored artifact rows with the run-level
+// manifest. The manifest is authoritative: missing rows, unmatched digests and
+// extra stored files all block publishing.
+func manifestBlockers(run *releasev2.Run, targets []releasev2.Target, artifacts []releasev2.Artifact, manifest *releasev2.RunArtifactManifest) []string {
+	if manifest == nil {
+		return []string{"run manifest is missing"}
+	}
+	stored := map[string]releasev2.Artifact{}
+	for _, a := range artifacts {
+		stored[artifactKey(a.TargetID, a.Role, a.Name)] = a
+	}
+	var blockers []string
+	seenTargets := map[string]bool{}
+	manifestKeys := map[string]bool{}
+	entries := 0
+	for _, tm := range manifest.Targets {
+		if err := tm.Validate(); err != nil {
+			blockers = append(blockers, fmt.Sprintf("target %s manifest: %v", tm.TargetID, err))
+			continue
+		}
+		if tm.RunID != run.ID {
+			blockers = append(blockers, fmt.Sprintf("target %s manifest belongs to %s", tm.TargetID, tm.RunID))
+			continue
+		}
+		if seenTargets[tm.TargetID] {
+			blockers = append(blockers, fmt.Sprintf("duplicate target manifest %s", tm.TargetID))
+			continue
+		}
+		seenTargets[tm.TargetID] = true
+		for _, item := range tm.Artifacts {
+			entries++
+			key := artifactKey(tm.TargetID, item.Role, item.Name)
+			manifestKeys[key] = true
+			a, ok := stored[key]
+			if !ok {
+				blockers = append(blockers, fmt.Sprintf("%s/%s (%s) is in the run manifest but not stored", tm.TargetID, item.Role, item.Name))
+				continue
+			}
+			if a.SHA256 != item.SHA256 || a.Size != item.Size {
+				blockers = append(blockers, fmt.Sprintf("%s/%s (%s) digest or size differs from the run manifest", tm.TargetID, item.Role, item.Name))
+			}
+		}
+	}
+	if entries == 0 {
+		blockers = append(blockers, "run manifest contains no artifacts")
+	}
+	for _, t := range targets {
+		if t.Required && !seenTargets[t.TargetID] {
+			blockers = append(blockers, fmt.Sprintf("required target %s has no manifest", t.TargetID))
+		}
+	}
+	for _, a := range artifacts {
+		if a.TargetID == "" {
+			// Run-level artifacts (the canonical upgrade bundle) are not part of
+			// any target manifest; they are produced by the server itself.
+			continue
+		}
+		if !manifestKeys[artifactKey(a.TargetID, a.Role, a.Name)] {
+			blockers = append(blockers, fmt.Sprintf("%s/%s (%s) is stored but missing from the run manifest", a.TargetID, a.Role, a.Name))
+		}
+	}
+	return blockers
+}
+
 // finishPublish publishes the GitHub draft when one exists, verifies its asset
 // digests, and records partially_published when GitHub fails after the channel
 // pointer already moved.
@@ -462,6 +592,14 @@ func (s *Server) finishPublish(ctx context.Context, p *principal, run *releasev2
 	from := run.Status
 	actor := "agent:" + p.Token.ID
 	githubID := s.githubDraftID(ctx, runID)
+	// 制品声明了 github 目的地却没同步过 Release 时不能收口成 published：
+	// 升级服务已经发出去、GitHub 却没有发行版，界面和外部都会以为发布成功。
+	if githubID == 0 && githubDestinationArtifacts(artifacts) {
+		_, _ = s.Service.Transition(ctx, runID, from, releasev2.RunPartiallyPublished, actor, "github release not synced")
+		_ = s.Store.AppendEvent(ctx, releasev2.Event{RunID: runID, Actor: actor, Kind: "github.sync_missing",
+			Summary: "制品声明了 github 目的地，但还没有同步 GitHub Release"})
+		return
+	}
 	if githubID != 0 {
 		owner, repo, err := s.githubRepo(ctx, p.Run.ProjectID)
 		if err != nil {
@@ -477,19 +615,42 @@ func (s *Server) finishPublish(ctx context.Context, p *principal, run *releasev2
 				return
 			}
 		}
-		published, err := s.githubClient(ctx).PublishRelease(ctx, ghCredential, owner, repo, githubID)
+		_, err = s.githubClient(ctx).PublishRelease(ctx, ghCredential, owner, repo, githubID)
 		if err != nil {
 			_, _ = s.Service.Transition(ctx, runID, from, releasev2.RunPartiallyPublished, actor, "github publish failed: "+err.Error())
 			_ = s.Store.AppendEvent(ctx, releasev2.Event{RunID: runID, Actor: actor, Kind: "github.publish_failed",
 				Summary: "github publish failed after channel promote", Detail: map[string]any{"error": err.Error()}})
 			return
 		}
+		verified, verifyErr := s.githubClient(ctx).GetRelease(ctx, ghCredential, owner, repo, githubID)
+		if verifyErr != nil {
+			_, _ = s.Service.Transition(ctx, runID, from, releasev2.RunPartiallyPublished, actor, "github read-back failed: "+verifyErr.Error())
+			_ = s.Store.AppendEvent(ctx, releasev2.Event{RunID: runID, Actor: actor, Kind: "github.verify_failed",
+				Summary: "github release published but could not be read back", Detail: map[string]any{"error": verifyErr.Error()}})
+			return
+		}
+		if gaps := verifyGitHubAssets(verified, artifacts); len(gaps) > 0 {
+			_, _ = s.Service.Transition(ctx, runID, from, releasev2.RunPartiallyPublished, actor, "github assets changed after publish")
+			_ = s.Store.AppendEvent(ctx, releasev2.Event{RunID: runID, Actor: actor, Kind: "github.verify_failed",
+				Summary: "github assets incomplete after publish", Detail: map[string]any{"gaps": gaps}})
+			return
+		}
 		_, _ = s.Store.UpsertPublication(ctx, releasev2.Publication{RunID: runID, Provider: "github", State: "published",
-			ExternalID: fmt.Sprint(published.ID), ExternalURL: published.HTMLURL})
+			ExternalID: fmt.Sprint(verified.ID), ExternalURL: verified.HTMLURL})
 		_ = s.Store.AppendEvent(ctx, releasev2.Event{RunID: runID, Actor: actor, Kind: "github.published",
-			Summary: "github release published", Detail: map[string]any{"url": published.HTMLURL}})
+			Summary: "github release published and verified", Detail: map[string]any{"url": verified.HTMLURL, "assets": len(verified.Assets)}})
 	}
 	_, _ = s.Service.Transition(ctx, runID, from, releasev2.RunPublished, actor, "channel and release verified")
+}
+
+// githubDestinationArtifacts 报告是否有制品需要上传到 GitHub Release。
+func githubDestinationArtifacts(artifacts []releasev2.Artifact) bool {
+	for _, artifact := range artifacts {
+		if deliversTo(artifact, "github") {
+			return true
+		}
+	}
+	return false
 }
 
 // updateCredential 解析升级服务凭据引用：显式参数 > 项目发版配置 > 服务端默认。

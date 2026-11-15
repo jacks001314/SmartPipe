@@ -5,12 +5,28 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"smartpipe/backend/internal/releasev2"
 )
 
 const agentSessionColumns = `id, run_id, project_id, status, actor, model, thread_id, turn_id,
        summary, last_error, token_id, started_at, finished_at, created_at, updated_at`
+
+// SetReleaseV2RunAgentThreadID 记住这条运行的 Codex 线程 id，供后续会话续用。
+// 刻意不碰 updated_at：attention worker 用它判断「这个运行停住了多久」，
+// 写线程 id 不是状态变化，提前刷新会让接管冷却失效。
+func (s *Store) SetReleaseV2RunAgentThreadID(ctx context.Context, runID, threadID string) error {
+	runID, threadID = strings.TrimSpace(runID), strings.TrimSpace(threadID)
+	if runID == "" || threadID == "" {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE release_v2_runs SET agent_thread_id=$2 WHERE id=$1`, runID, threadID); err != nil {
+		return fmt.Errorf("store: set release v2 run agent thread: %w", err)
+	}
+	return nil
+}
 
 func scanAgentSession(row interface{ Scan(...any) error }) (*releasev2.AgentSession, error) {
 	var s releasev2.AgentSession
@@ -121,4 +137,67 @@ WHERE status IN ('starting','running')`)
 	}
 	n, _ := res.RowsAffected()
 	return int(n), nil
+}
+
+// MarkReleaseV2RunNeedsAttention 把仍然进行中的运行交回 Agent。Agent 会话
+// 异常退出或超时后，运行本身不会自动进入 needs_attention，attention worker
+// 也就不会再接管；这里补上这一步，保证失败能自愈而不是停住。
+//
+// 有目标还在构建机上跑时不动：Agent 会话的整轮超时（默认 30 分钟）比
+// Electron 全量构建短，会话结束时把 run 拽回 needs_attention 只会白烧一次
+// 重试预算。留在 building，等目标完成后由 runner 推进到制品就绪/已构建。
+func (s *Store) MarkReleaseV2RunNeedsAttention(ctx context.Context, runID, reason string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE release_v2_runs SET status='needs_attention', updated_at=now()
+ WHERE id=$1 AND status IN ('queued','preparing','building','verifying','artifacts_ready','recovering','staged','publishing')
+   AND NOT EXISTS (
+     SELECT 1 FROM release_v2_targets t
+      WHERE t.run_id=$1 AND t.status IN ('queued','leased','building','verifying','uploaded')
+   )`, runID)
+	if err != nil {
+		return false, fmt.Errorf("store: mark release v2 run needs attention: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 1 && strings.TrimSpace(reason) != "" {
+		_ = appendReleaseV2EventTx(ctx, s.db, releasev2.Event{
+			RunID: runID, Actor: "release-agent", Kind: "run.status",
+			Summary: "发布 Agent 会话结束，运行交回自动接管",
+			Detail:  map[string]any{"reason": reason},
+		})
+	}
+	return n == 1, nil
+}
+
+// RequeueOrphanedReleaseV2Runs 把控制面重启后失去 Agent 的进行中运行交回
+// needs_attention，让 attention worker 重新接管。进程内的 Agent 会话随重启
+// 消失，但数据库状态不会自己回到 needs_attention；不处理的话这些运行会
+// 永远停在 building/recovering，只能人工介入。
+func (s *Store) RequeueOrphanedReleaseV2Runs(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+WITH moved AS (
+  UPDATE release_v2_runs SET status='needs_attention', updated_at=now()
+   WHERE status IN ('queued','preparing','building','verifying','artifacts_ready','recovering','staged','publishing')
+     AND NOT EXISTS (
+       SELECT 1 FROM release_v2_targets t
+        WHERE t.run_id=release_v2_runs.id
+          AND t.status IN ('queued','leased','building','verifying','uploaded')
+     )
+  RETURNING id
+)
+INSERT INTO release_v2_events (run_id, actor, kind, summary, detail)
+SELECT id, 'system:startup', 'run.status', '控制面重启后交回 Agent 接管', '{"reason":"control plane restarted"}'::jsonb FROM moved
+RETURNING run_id`)
+	if err != nil {
+		return nil, fmt.Errorf("store: requeue orphaned release v2 runs: %w", err)
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

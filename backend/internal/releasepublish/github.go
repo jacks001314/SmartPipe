@@ -100,6 +100,34 @@ func (c *GitHubClient) GetRelease(ctx context.Context, credentialRef, owner, rep
 	return &out, nil
 }
 
+// GetReleaseByTag 按 tag 查询已有 Release（草稿或已发布）。
+// 同版本重发时用它复用远端 Release，而不是再建一个撞名的草稿。
+func (c *GitHubClient) GetReleaseByTag(ctx context.Context, credentialRef, owner, repo, tag string) (*GitHubRelease, error) {
+	var out GitHubRelease
+	if err := c.doJSON(ctx, credentialRef, http.MethodGet,
+		fmt.Sprintf("/repos/%s/%s/releases/tags/%s", owner, repo, url.PathEscape(tag)), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetRepo 校验凭据能否访问仓库。GitHub 对无权限的私有库返回 404，
+// 所以选凭据时必须实际读一次仓库，不能只看令牌是否有效。
+func (c *GitHubClient) GetRepo(ctx context.Context, credentialRef, owner, repo string) error {
+	var out struct {
+		FullName string `json:"full_name"`
+	}
+	return c.doJSON(ctx, credentialRef, http.MethodGet,
+		fmt.Sprintf("/repos/%s/%s", owner, repo), nil, &out)
+}
+
+// DeleteAsset 删除 Release 上的附件。已发布 Release 不能覆盖同名附件，
+// 重发新构建前必须先删掉旧附件。
+func (c *GitHubClient) DeleteAsset(ctx context.Context, credentialRef, owner, repo string, assetID int64) error {
+	return c.doJSON(ctx, credentialRef, http.MethodDelete,
+		fmt.Sprintf("/repos/%s/%s/releases/assets/%d", owner, repo, assetID), nil, nil)
+}
+
 // UploadAsset streams an artifact into an existing draft release.
 func (c *GitHubClient) UploadAsset(ctx context.Context, credentialRef, owner, repo string, releaseID int64, name, contentType string, body io.Reader, size int64) (*GitHubAsset, error) {
 	if strings.TrimSpace(name) == "" {
@@ -114,7 +142,13 @@ func (c *GitHubClient) UploadAsset(ctx context.Context, credentialRef, owner, re
 	}
 	target := fmt.Sprintf("%s/repos/%s/%s/releases/%d/assets?name=%s",
 		c.uploadBase(), url.PathEscape(owner), url.PathEscape(repo), releaseID, url.QueryEscape(name))
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, body)
+	var reader io.Reader
+	if body != nil {
+		// net/http closes a request body that implements io.Closer. The caller
+		// opened the object and owns its lifetime, so hide Close here.
+		reader = noCloseReader{reader: body}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, reader)
 	if err != nil {
 		return nil, err
 	}
@@ -192,6 +226,9 @@ func (c *GitHubClient) doJSON(ctx context.Context, ref, method, path string, bod
 	payload, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode == http.StatusConflict || resp.StatusCode == http.StatusUnprocessableEntity {
 		return fmt.Errorf("%w: %s", ErrConflictRemote, remoteMessage(payload, resp.Status))
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("%w: %s", ErrNotFoundRemote, remoteMessage(payload, resp.Status))
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("%w: %s", ErrRemote, remoteMessage(payload, resp.Status))

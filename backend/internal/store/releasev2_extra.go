@@ -97,14 +97,14 @@ func (s *Store) GetTarget(ctx context.Context, runID, targetID string) (*release
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, run_id, target_id, os, arch, executor_id, required, status, attempt, lease_owner,
        lease_expires_at, build_command, sign_command, verify_command, artifact_rules, error_code, error_message,
-       started_at, finished_at, created_at, updated_at
+       manifest_path, started_at, finished_at, created_at, updated_at
   FROM release_v2_targets WHERE run_id=$1 AND target_id=$2`, runID, targetID)
 	var t releasev2.Target
 	var lease, started, finished sql.NullTime
 	var rules []byte
 	if err := row.Scan(&t.ID, &t.RunID, &t.TargetID, &t.OS, &t.Arch, &t.ExecutorID, &t.Required,
 		&t.Status, &t.Attempt, &t.LeaseOwner, &lease, &t.BuildCommand, &t.SignCommand, &t.VerifyCommand, &rules,
-		&t.ErrorCode, &t.ErrorMessage, &started, &finished, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		&t.ErrorCode, &t.ErrorMessage, &t.ManifestPath, &started, &finished, &t.CreatedAt, &t.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -121,16 +121,19 @@ SELECT id, run_id, target_id, os, arch, executor_id, required, status, attempt, 
 func (s *Store) GetArtifact(ctx context.Context, runID, targetID, role, name string) (*releasev2.Artifact, error) {
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, run_id, target_id, attempt, role, name, content_type, size, sha256, storage_key,
-       platform_signed, manifest_signed, created_at
+       kind, path, os, arch, destinations, platform_signed, manifest_signed, created_at
   FROM release_v2_artifacts WHERE run_id=$1 AND target_id=$2 AND role=$3 AND name=$4`,
 		runID, targetID, role, name)
 	var a releasev2.Artifact
+	var destinations []byte
 	if err := row.Scan(&a.ID, &a.RunID, &a.TargetID, &a.Attempt, &a.Role, &a.Name, &a.ContentType,
-		&a.Size, &a.SHA256, &a.StorageKey, &a.PlatformSigned, &a.ManifestSigned, &a.CreatedAt); err != nil {
+		&a.Size, &a.SHA256, &a.StorageKey, &a.Kind, &a.Path, &a.OS, &a.Arch, &destinations,
+		&a.PlatformSigned, &a.ManifestSigned, &a.CreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("store: get release v2 artifact: %w", err)
 	}
+	_ = json.Unmarshal(destinations, &a.Destinations)
 	return &a, nil
 }

@@ -27,7 +27,7 @@ func (s *Service) DispatchBuild(ctx context.Context, runID, actor string) (*Run,
 		return nil, err
 	}
 	switch run.Status {
-	case RunQueued, RunBlocked:
+	case RunQueued, RunBlocked, RunNeedsAttention:
 		ok, err := s.repo.UpdateRunStatus(ctx, run.ID, run.Status, RunPreparing, "", "")
 		if err != nil {
 			return nil, err
@@ -40,14 +40,15 @@ func (s *Service) DispatchBuild(ctx context.Context, runID, actor string) (*Run,
 			Summary: "build dispatched", Detail: map[string]any{"from": run.Status},
 		})
 		return s.GetRun(ctx, run.ID)
-	case RunPreparing, RunBuilding, RunVerifying:
+	case RunPreparing, RunBuilding, RunVerifying, RunRecovering:
 		return run, nil
 	default:
 		return nil, fmt.Errorf("%w: cannot dispatch build in %s", ErrState, run.Status)
 	}
 }
 
-// RetryTarget requeues a failed target for another executor attempt.
+// RetryTarget requeues a failed target for another executor attempt。
+// uploaded 也算可重试：制品传了一半、清单没交，是中止而不是完成。
 func (s *Service) RetryTarget(ctx context.Context, runID, targetID, actor, reason string) (*Target, error) {
 	run, err := s.GetRun(ctx, runID)
 	if err != nil {
@@ -61,7 +62,7 @@ func (s *Service) RetryTarget(ctx context.Context, runID, targetID, actor, reaso
 	if err != nil {
 		return nil, err
 	}
-	if target.Status != TargetFailed {
+	if target.Status != TargetFailed && target.Status != TargetUploaded {
 		return nil, fmt.Errorf("%w: target %s is %s", ErrState, targetID, target.Status)
 	}
 	ok, err := s.repo.RetryReleaseV2Target(ctx, runID, targetID)
@@ -75,11 +76,11 @@ func (s *Service) RetryTarget(ctx context.Context, runID, targetID, actor, reaso
 		RunID: runID, Actor: firstNonEmpty(actor, "agent"), Kind: "target.retry_requested", TargetID: targetID,
 		Summary: firstNonEmpty(reason, "target requeued after failure"),
 	})
-	// A blocked or failed run resumes as soon as a retry is requested.
-	if run.Status == RunBlocked || run.Status == RunFailed {
-		if ok, err := s.repo.UpdateRunStatus(ctx, runID, run.Status, RunPreparing, "", ""); err == nil && ok {
+	// A blocked, failed, or attention run resumes as soon as a retry is requested.
+	if run.Status == RunBlocked || run.Status == RunFailed || run.Status == RunNeedsAttention {
+		if ok, err := s.repo.UpdateRunStatus(ctx, runID, run.Status, RunRecovering, "", ""); err == nil && ok {
 			_ = s.repo.AppendEvent(ctx, Event{RunID: runID, Actor: firstNonEmpty(actor, "agent"), Kind: "run.status",
-				Summary: "resumed after target retry", Detail: map[string]any{"from": run.Status, "to": RunPreparing}})
+				Summary: "resumed after target retry", Detail: map[string]any{"from": run.Status, "to": RunRecovering}})
 		}
 	}
 	return s.repo.GetTarget(ctx, runID, targetID)

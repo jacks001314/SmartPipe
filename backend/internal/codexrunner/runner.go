@@ -65,6 +65,15 @@ type Spec struct {
 	// OnEvent 可选地接收 app-server 的原始流式通知。调度器用它把 Codex 的
 	// 消息、命令输出和文件变更实时投影到控制台；普通调用方可以留空。
 	OnEvent func(Event)
+	// ResumeThreadID 非空时续用已有线程，而不是新开一个。线程必须是持久化的
+	// （PersistThread=true）；续用失败会自动回退到新线程，不让整轮直接失败。
+	ResumeThreadID string
+	// PersistThread 让 app-server 把这轮线程落盘，后续才能按 id 续用。
+	// 发布 Agent 需要它：构建要几十分钟，会话超时后必须能接着上次的上下文。
+	PersistThread bool
+	// OnThread 在线程一建立（新建或续用）就回调。调用方要把线程 id 持久化，
+	// 否则进程被杀时会话白跑：下一次只能开新线程，前面的上下文全丢。
+	OnThread func(threadID string, resumed bool)
 }
 
 // Event 是一条已按到达顺序读出的 Codex app-server 通知。
@@ -80,6 +89,7 @@ type Result struct {
 	Status        string `json:"status"`
 	TurnID        string `json:"turn_id,omitempty"`
 	ThreadID      string `json:"thread_id,omitempty"`
+	Resumed       bool   `json:"resumed,omitempty"`
 	FinalResponse string `json:"final_response,omitempty"`
 	ResponseBytes int    `json:"response_bytes"`
 	ItemCount     int    `json:"item_count"`
@@ -197,7 +207,6 @@ func Run(ctx context.Context, spec Spec) (*Result, error) {
 	}
 	defer func() { _ = client.Close() }()
 
-	ephemeral := true
 	sandbox := codex.SandboxModeWorkspaceWrite
 	switch strings.ToLower(strings.TrimSpace(spec.Sandbox)) {
 	case "read-only":
@@ -207,16 +216,46 @@ func Run(ctx context.Context, spec Spec) (*Result, error) {
 		// Codex 自带沙箱起不来，只能关掉内层沙箱。
 		sandbox = codex.SandboxModeDangerFullAccess
 	}
-	thread, err := client.StartThread(runCtx, codex.ThreadStartOptions{
-		Cwd:              spec.WorkDir,
-		Model:            strings.TrimSpace(spec.Model),
-		ApprovalPolicy:   codex.ApprovalPolicyNever,
-		SandboxPolicy:    sandbox,
-		BaseInstructions: strings.TrimSpace(spec.BaseInstructions),
-		Ephemeral:        &ephemeral,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("codexrunner: start thread: %w", err)
+	var thread *codex.Thread
+	resumed := false
+	if resumeID := strings.TrimSpace(spec.ResumeThreadID); resumeID != "" {
+		thread, err = client.ResumeThread(runCtx, codex.ThreadResumeOptions{
+			ThreadID:         resumeID,
+			Cwd:              spec.WorkDir,
+			Model:            strings.TrimSpace(spec.Model),
+			ApprovalPolicy:   codex.ApprovalPolicyNever,
+			Sandbox:          sandbox,
+			BaseInstructions: strings.TrimSpace(spec.BaseInstructions),
+		})
+		if err != nil {
+			// 线程可能已经被清理、或者上一轮没落盘。续不上就退回新线程：
+			// 少一份上下文，总比整轮发布直接失败好。
+			if spec.LogWriter != nil {
+				fmt.Fprintf(spec.LogWriter, "codexrunner: resume thread %s failed, starting a new one: %v\n", resumeID, err)
+			}
+			thread = nil
+		} else {
+			resumed = true
+		}
+	}
+	if thread == nil {
+		ephemeral := !spec.PersistThread
+		thread, err = client.StartThread(runCtx, codex.ThreadStartOptions{
+			Cwd:              spec.WorkDir,
+			Model:            strings.TrimSpace(spec.Model),
+			ApprovalPolicy:   codex.ApprovalPolicyNever,
+			SandboxPolicy:    sandbox,
+			BaseInstructions: strings.TrimSpace(spec.BaseInstructions),
+			Ephemeral:        &ephemeral,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("codexrunner: start thread: %w", err)
+		}
+	}
+	if spec.OnThread != nil {
+		if id := strings.TrimSpace(thread.ID()); id != "" {
+			spec.OnThread(id, resumed)
+		}
 	}
 
 	turnOpts := &codex.TurnOptions{}
@@ -240,7 +279,7 @@ func Run(ctx context.Context, spec Spec) (*Result, error) {
 	}
 	defer stream.Close()
 
-	result := &Result{ThreadID: thread.ID()}
+	result := &Result{ThreadID: thread.ID(), Resumed: resumed}
 	var finalText string
 	var turnErrMsg string
 	done := false
@@ -453,6 +492,11 @@ func isolateCodexHome(env []string) []string {
 		}
 	}
 	home := strings.TrimSpace(os.Getenv("SMARTPIPE_CODEX_HOME"))
+	if home == "" {
+		// 部署里显式配了 CODEX_HOME（持久卷）时必须复用它：退回到临时目录会让
+		// 登录态随容器重启消失，Agent 会话直接 401。
+		home = strings.TrimSpace(os.Getenv("CODEX_HOME"))
+	}
 	if home == "" {
 		home = filepath.Join(os.TempDir(), "smartpipe-codex-home")
 	}

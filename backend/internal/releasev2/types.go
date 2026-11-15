@@ -52,11 +52,14 @@ const (
 	RunPreparing          RunStatus = "preparing"
 	RunBuilding           RunStatus = "building"
 	RunVerifying          RunStatus = "verifying"
+	RunArtifactsReady     RunStatus = "artifacts_ready"
 	RunStaged             RunStatus = "staged"
 	RunPublishing         RunStatus = "publishing"
 	RunPublished          RunStatus = "published"
 	RunPartiallyPublished RunStatus = "partially_published"
 	RunBuilt              RunStatus = "built"
+	RunNeedsAttention     RunStatus = "needs_attention"
+	RunRecovering         RunStatus = "recovering"
 	RunFailed             RunStatus = "failed"
 	RunBlocked            RunStatus = "blocked"
 	RunCancelled          RunStatus = "cancelled"
@@ -162,35 +165,41 @@ type Plan struct {
 }
 
 type Run struct {
-	ID              string     `json:"id"`
-	PlanID          string     `json:"plan_id"`
-	ProjectID       string     `json:"project_id"`
-	Repo            string     `json:"repo"`
-	RequestedBy     string     `json:"requested_by"`
-	Trigger         string     `json:"trigger"`
-	Mode            Mode       `json:"mode"`
-	Channel         string     `json:"channel"`
-	Status          RunStatus  `json:"status"`
-	Version         string     `json:"version"`
-	BuildVersion    string     `json:"build_version"`
-	Tag             string     `json:"tag"`
-	SourceBranch    string     `json:"source_branch"`
-	SourceCommit    string     `json:"source_commit"`
-	ResolvedCommit  string     `json:"resolved_commit"`
-	ProfileSHA256   string     `json:"profile_sha256"`
-	PlanSHA256      string     `json:"plan_sha256"`
-	IdempotencyKey  string     `json:"idempotency_key,omitempty"`
-	CloneCredential string     `json:"clone_credential,omitempty"`
-	AgentThreadID   string     `json:"agent_thread_id,omitempty"`
-	NotesMD         string     `json:"notes_md"`
-	NotesSHA256     string     `json:"notes_sha256"`
-	ApprovalState   string     `json:"approval_state"`
-	ErrorCode       string     `json:"error_code,omitempty"`
-	ErrorMessage    string     `json:"error_message,omitempty"`
-	StartedAt       *time.Time `json:"started_at,omitempty"`
-	FinishedAt      *time.Time `json:"finished_at,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	ID                 string     `json:"id"`
+	PlanID             string     `json:"plan_id"`
+	ProjectID          string     `json:"project_id"`
+	Repo               string     `json:"repo"`
+	RequestedBy        string     `json:"requested_by"`
+	Trigger            string     `json:"trigger"`
+	Mode               Mode       `json:"mode"`
+	Channel            string     `json:"channel"`
+	Status             RunStatus  `json:"status"`
+	Version            string     `json:"version"`
+	BuildVersion       string     `json:"build_version"`
+	Tag                string     `json:"tag"`
+	SourceBranch       string     `json:"source_branch"`
+	SourceCommit       string     `json:"source_commit"`
+	ResolvedCommit     string     `json:"resolved_commit"`
+	ProfileSHA256      string     `json:"profile_sha256"`
+	PlanSHA256         string     `json:"plan_sha256"`
+	SourceSHA256       string     `json:"source_sha256,omitempty"`
+	SourceStorageKey   string     `json:"source_storage_key,omitempty"`
+	ManifestStorageKey string     `json:"manifest_storage_key,omitempty"`
+	ExecutorIDs        []string   `json:"executor_ids,omitempty"`
+	UpdateServers      []string   `json:"update_servers,omitempty"`
+	RecoveryAttempts   int        `json:"recovery_attempts,omitempty"`
+	IdempotencyKey     string     `json:"idempotency_key,omitempty"`
+	CloneCredential    string     `json:"clone_credential,omitempty"`
+	AgentThreadID      string     `json:"agent_thread_id,omitempty"`
+	NotesMD            string     `json:"notes_md"`
+	NotesSHA256        string     `json:"notes_sha256"`
+	ApprovalState      string     `json:"approval_state"`
+	ErrorCode          string     `json:"error_code,omitempty"`
+	ErrorMessage       string     `json:"error_message,omitempty"`
+	StartedAt          *time.Time `json:"started_at,omitempty"`
+	FinishedAt         *time.Time `json:"finished_at,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 type Target struct {
@@ -209,6 +218,7 @@ type Target struct {
 	SignCommand    string         `json:"sign_command,omitempty"`
 	VerifyCommand  string         `json:"verify_command,omitempty"`
 	Artifacts      []ArtifactRule `json:"artifacts,omitempty"`
+	ManifestPath   string         `json:"manifest_path,omitempty"`
 	ErrorCode      string         `json:"error_code,omitempty"`
 	ErrorMessage   string         `json:"error_message,omitempty"`
 	StartedAt      *time.Time     `json:"started_at,omitempty"`
@@ -223,6 +233,11 @@ type Artifact struct {
 	TargetID       string    `json:"target_id"`
 	Attempt        int       `json:"attempt"`
 	Role           string    `json:"role"`
+	Kind           string    `json:"kind,omitempty"`
+	Path           string    `json:"path,omitempty"`
+	OS             string    `json:"os,omitempty"`
+	Arch           string    `json:"arch,omitempty"`
+	Destinations   []string  `json:"destinations,omitempty"`
 	Name           string    `json:"name"`
 	ContentType    string    `json:"content_type"`
 	Size           int64     `json:"size"`
@@ -247,6 +262,22 @@ type Publication struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
+// Quarantine records an artifact or a channel that had to be isolated during
+// publication, together with the reason and the rollback outcome.
+type Quarantine struct {
+	ID         int64          `json:"id"`
+	RunID      string         `json:"run_id"`
+	ArtifactID int64          `json:"artifact_id,omitempty"`
+	Service    string         `json:"service,omitempty"`
+	Channel    string         `json:"channel,omitempty"`
+	ExternalID string         `json:"external_id,omitempty"`
+	Reason     string         `json:"reason"`
+	Detail     map[string]any `json:"detail,omitempty"`
+	State      string         `json:"state"`
+	CreatedAt  time.Time      `json:"created_at"`
+	ResolvedAt *time.Time     `json:"resolved_at,omitempty"`
+}
+
 type Event struct {
 	ID        int64          `json:"id"`
 	RunID     string         `json:"run_id"`
@@ -256,43 +287,6 @@ type Event struct {
 	Summary   string         `json:"summary"`
 	Detail    map[string]any `json:"detail,omitempty"`
 	CreatedAt time.Time      `json:"created_at"`
-}
-
-type Approval struct {
-	ID            string     `json:"id"`
-	RunID         string     `json:"run_id"`
-	Kind          string     `json:"kind"`
-	Actor         string     `json:"actor"`
-	Reason        string     `json:"reason"`
-	ContentSHA256 string     `json:"content_sha256"`
-	State         string     `json:"state"`
-	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-}
-
-// ApprovalPolicy reports whether a channel needs a human approval before the
-// channel pointer may move, and how long an approval stays valid.
-func ApprovalPolicy(policies map[string]any, channel string) (bool, time.Duration) {
-	ttl := 2 * time.Hour
-	raw, ok := policies["approvals"].(map[string]any)
-	if !ok {
-		return strings.EqualFold(channel, "stable"), ttl
-	}
-	if v := strings.TrimSpace(toString(raw["ttl"])); v != "" {
-		if parsed, err := time.ParseDuration(v); err == nil && parsed > 0 {
-			ttl = parsed
-		}
-	}
-	channels := stringList(raw["required_channels"])
-	if len(channels) == 0 {
-		return strings.EqualFold(channel, "stable"), ttl
-	}
-	for _, c := range channels {
-		if strings.EqualFold(c, channel) {
-			return true, ttl
-		}
-	}
-	return false, ttl
 }
 
 // SignatureRequired 报告发版配置是否要求制品在发布前具备平台签名
@@ -570,16 +564,19 @@ func RunFromPlan(plan *Plan, idempotencyKey, requestedBy string) (*Run, []Target
 
 func CanTransition(from, to RunStatus) bool {
 	allowed := map[RunStatus][]RunStatus{
-		RunQueued:             {RunPreparing, RunBlocked, RunCancelled, RunFailed},
-		RunPreparing:          {RunBuilding, RunBlocked, RunCancelled, RunFailed},
-		RunBuilding:           {RunVerifying, RunStaged, RunBuilt, RunBlocked, RunCancelled, RunFailed},
-		RunVerifying:          {RunStaged, RunBuilt, RunBlocked, RunCancelled, RunFailed},
-		RunStaged:             {RunPublishing, RunBlocked, RunCancelled, RunFailed},
-		RunPublishing:         {RunPublished, RunPartiallyPublished, RunBlocked, RunFailed},
-		RunPartiallyPublished: {RunPublishing, RunPublished, RunBlocked, RunFailed},
-		RunBlocked:            {RunQueued, RunPreparing, RunBuilding, RunCancelled, RunFailed},
-		RunFailed:             {RunPreparing, RunCancelled},
-		RunBuilt:              {RunPublishing, RunCancelled},
+		RunQueued:             {RunPreparing, RunBlocked, RunNeedsAttention, RunCancelled, RunFailed},
+		RunPreparing:          {RunBuilding, RunBlocked, RunNeedsAttention, RunCancelled, RunFailed},
+		RunBuilding:           {RunArtifactsReady, RunVerifying, RunStaged, RunBuilt, RunBlocked, RunNeedsAttention, RunCancelled, RunFailed},
+		RunVerifying:          {RunArtifactsReady, RunStaged, RunBuilt, RunBlocked, RunNeedsAttention, RunCancelled, RunFailed},
+		RunArtifactsReady:     {RunStaged, RunPublishing, RunBuilt, RunBlocked, RunNeedsAttention, RunCancelled, RunFailed},
+		RunStaged:             {RunPublishing, RunBlocked, RunNeedsAttention, RunCancelled, RunFailed},
+		RunPublishing:         {RunPublished, RunPartiallyPublished, RunBlocked, RunNeedsAttention, RunFailed},
+		RunPartiallyPublished: {RunPublishing, RunPublished, RunBlocked, RunNeedsAttention, RunFailed},
+		RunNeedsAttention:     {RunRecovering, RunPreparing, RunBuilding, RunArtifactsReady, RunCancelled, RunFailed, RunBlocked},
+		RunRecovering:         {RunQueued, RunPreparing, RunBuilding, RunVerifying, RunCancelled, RunFailed, RunBlocked},
+		RunBlocked:            {RunQueued, RunPreparing, RunBuilding, RunNeedsAttention, RunCancelled, RunFailed},
+		RunFailed:             {RunPreparing, RunNeedsAttention, RunCancelled},
+		RunBuilt:              {RunPublishing, RunNeedsAttention, RunCancelled},
 	}
 	for _, candidate := range allowed[from] {
 		if candidate == to {
