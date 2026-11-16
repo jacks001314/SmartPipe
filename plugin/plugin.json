@@ -1,0 +1,9 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "smartpipe",
+  "version": "0.1.0",
+  "description": "Issue 驱动的自动化开发管道：GitHub Issue 建单、方案审批、补丁验证、提交推送与发版。",
+  "author": {
+    "name": "SmartPipe"
+  }
+}

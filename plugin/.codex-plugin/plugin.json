@@ -1,0 +1,27 @@
+{
+  "name": "smartpipe",
+  "version": "0.1.0",
+  "description": "Issue 驱动的自动化开发管道：GitHub Issue 建单、方案审批、补丁验证、提交推送与发版。",
+  "author": {
+    "name": "SmartPipe"
+  },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "SmartPipe 管道",
+    "shortDescription": "Issue → 方案审批 → 补丁验证 → 提交 → 发版",
+    "longDescription": "把 GitHub Issue 变成可审批、可验证、可发版的工作流：lead 生成方案等待 /approve，dev 提交补丁，patch-verifier 在干净副本上跑必过命令，lead 提交并推送，最后按 ready 标签发版。",
+    "developerName": "SmartPipe",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "brandColor": "#1F6FEB",
+    "defaultPrompt": [
+      "查看我项目里待处理的 Issue",
+      "为当前 Issue 写出实施方案并提交审批"
+    ]
+  }
+}

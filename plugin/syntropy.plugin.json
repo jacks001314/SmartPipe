@@ -1,0 +1,46 @@
+{
+  "id": "syntropy.smartpipe",
+  "version": "0.1.0",
+  "type": "experience",
+  "displayName": "SmartPipe 管道",
+  "description": "配置 SmartPipe 网关地址与 Agent 令牌，查看当前角色可见的工具与连通状态。",
+  "ui": {
+    "entry": "ui/index.html",
+    "preferredSize": {
+      "width": 1080,
+      "height": 720
+    }
+  },
+  "host": {
+    "entry": "host/server.mjs",
+    "runtime": "node",
+    "optional": false
+  },
+  "contributes": {
+    "tabs": [
+      {
+        "id": "smartpipe",
+        "title": "SmartPipe 管道",
+        "icon": "git-branch",
+        "scope": "task"
+      }
+    ],
+    "settings": [
+      {
+        "id": "smartpipe.settings",
+        "title": "SmartPipe 连接",
+        "buttonLabel": "打开 SmartPipe 设置"
+      }
+    ]
+  },
+  "permissions": [
+    "task.context.read",
+    "network.local",
+    "host.execute"
+  ],
+  "skills": [
+    "./skills/smartpipe-workflow",
+    "./skills/smartpipe-ops"
+  ],
+  "mcpServers": {}
+}

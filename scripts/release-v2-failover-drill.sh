@@ -74,6 +74,7 @@ pass "替身地址：primary=$PRIMARY_URL backup=$BACKUP_URL github=$GH_URL"
 
 mkdir -p "$FAKE_DIR" "$WORK_HOST"
 PRIMARY_STARTED=0 BACKUP_STARTED=0 GH_STARTED=0
+ORPHAN_CREDS=()
 SETTINGS_BACKUP="$WORK_HOST/settings.backup.json"
 chmod 700 "$WORK_HOST"
 # 容器以 10001 运行，要能穿过工作目录读到仓库。
@@ -148,7 +149,19 @@ restore_settings() {
   fi
 }
 
-cleanup() { restore_settings; stop_started; }
+cleanup_credentials() {
+  local name id
+  for name in "${ORPHAN_CREDS[@]:-}"; do
+    [[ -n "$name" ]] || continue
+    id=$(api "$ADMIN/admin/credentials" 2>/dev/null \
+      | python3 -c 'import json,sys; d=json.load(sys.stdin)["data"]; print(next((c["id"] for c in d if c.get("name") == sys.argv[1]), ""))' "$name")
+    [[ -n "$id" ]] || continue
+    api -X DELETE "$ADMIN/admin/credentials/$id" >/dev/null 2>&1 \
+      && echo "PASS: 已清理演练凭据 $name" \
+      || echo "WARN: 清理演练凭据 $name 失败" >&2
+  done
+}
+cleanup() { restore_settings; stop_started; cleanup_credentials; }
 trap cleanup EXIT
 
 # 设置接口返回 {"data": {...}} 包装，而 PUT 只认顶层字段；
@@ -192,6 +205,7 @@ ensure_credential() {
   present=$(api "$ADMIN/admin/credentials" 2>/dev/null | jf "any(c.get('name')==\"$name\" for c in d['data'])")
   if [[ "$present" != "True" ]]; then
     api -X POST -d "{\"kind\":\"$kind\",\"name\":\"$name\",\"value\":\"$name\"}" "$ADMIN/admin/credentials" >/dev/null || fail "登记凭据 $name 失败"
+    ORPHAN_CREDS+=("$name")
     pass "已登记演练用凭据（$name）"
   fi
 }

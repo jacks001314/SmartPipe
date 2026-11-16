@@ -1,0 +1,11 @@
+{
+  "name": "smartpipe-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SmartPipe 的 Syntropy / Codex 插件包（skills + MCP 桥接 + 桌面配置页）",
+  "scripts": {
+    "doctor": "node scripts/bridge.mjs --doctor",
+    "package": "node scripts/package.mjs"
+  }
+}

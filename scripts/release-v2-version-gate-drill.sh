@@ -58,6 +58,7 @@ chmod 700 "$WORK_HOST"
 chown "$APP_UID:$APP_GID" "$WORK_HOST"
 SETTINGS_BACKUP="$WORK_HOST/settings.backup.json"
 STARTED=()
+ORPHAN_CREDS=()
 
 stop_listener() {
   local port=$1 pids
@@ -116,7 +117,19 @@ restore_settings() {
   echo "WARN: 恢复发布设置失败，备份在 $SETTINGS_BACKUP" >&2
 }
 
-cleanup() { restore_settings; stop_started; }
+cleanup_credentials() {
+  local name id
+  for name in "${ORPHAN_CREDS[@]:-}"; do
+    [[ -n "$name" ]] || continue
+    id=$(api "$ADMIN/admin/credentials" 2>/dev/null \
+      | python3 -c 'import json,sys; d=json.load(sys.stdin)["data"]; print(next((c["id"] for c in d if c.get("name") == sys.argv[1]), ""))' "$name")
+    [[ -n "$id" ]] || continue
+    api -X DELETE "$ADMIN/admin/credentials/$id" >/dev/null 2>&1 \
+      && echo "PASS: 已清理演练凭据 $name" \
+      || echo "WARN: 清理演练凭据 $name 失败" >&2
+  done
+}
+cleanup() { restore_settings; stop_started; cleanup_credentials; }
 trap cleanup EXIT
 
 curl -fsS "$ADMIN/healthz" >/dev/null || fail "admin-api 不健康"
@@ -148,7 +161,10 @@ pass "发布设置已切到替身（退出自动恢复）"
 ensure_credential() {
   local kind=$1 name=$2 present
   present=$(api "$ADMIN/admin/credentials" 2>/dev/null | jf "any(c.get('name')==\"$name\" for c in d['data'])")
-  [[ "$present" == "True" ]] || api -X POST -d "{\"kind\":\"$kind\",\"name\":\"$name\",\"value\":\"$name\"}" "$ADMIN/admin/credentials" >/dev/null || fail "登记凭据 $name 失败"
+  if [[ "$present" != "True" ]]; then
+    api -X POST -d "{\"kind\":\"$kind\",\"name\":\"$name\",\"value\":\"$name\"}" "$ADMIN/admin/credentials" >/dev/null || fail "登记凭据 $name 失败"
+    ORPHAN_CREDS+=("$name")
+  fi
 }
 ensure_credential github_pat "$GH_CRED"
 ensure_credential release_update "$CRED"

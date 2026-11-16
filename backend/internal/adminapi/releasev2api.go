@@ -287,7 +287,7 @@ func (a *API) refreshProjectClone(ctx context.Context, project *store.Project, b
 		return ""
 	}
 	token := ""
-	if tok, err := gitToken(ctx, a.store, &project.ID); err == nil {
+	if tok, err := gitToken(ctx, a.store, &project.ID, remote); err == nil {
 		token = tok
 	}
 	if strings.TrimSpace(branch) == "" {

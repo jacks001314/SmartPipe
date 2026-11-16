@@ -1,12 +1,18 @@
 package adminapi
 
 import (
+	"context"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"smartpipe/backend/internal/bridge"
+	"smartpipe/backend/internal/store"
 )
 
 func fixtureGit(t *testing.T, repo string, args ...string) string {
@@ -132,5 +138,58 @@ func TestPushWithoutCredentialFailsClosed(t *testing.T) {
 	}
 	if body["error"].(map[string]any)["code"] != "git_credential_unavailable" {
 		t.Fatalf("body: %+v", body)
+	}
+}
+
+func TestResolvePushRemoteSkipsCredentialWithoutRepoAccess(t *testing.T) {
+	bridge.ResetCredentialCache()
+	t.Cleanup(bridge.ResetCredentialCache)
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/example/app" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer valid-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"message":"Bad credentials"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"full_name":"example/app","private":true}`))
+	}))
+	t.Cleanup(gh.Close)
+
+	_, st := newTestAPI(t, "")
+	ctx := context.Background()
+	project, err := st.CreateProject(ctx, &store.Project{
+		Name: "push-fallback", GitHubRepoURL: "https://github.com/example/app",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	good, err := st.CreateCredential(ctx, &project.ID, store.CredentialGitHubPAT, "real-pat", "valid-token",
+		map[string]any{"api_base": gh.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateCredential(ctx, &project.ID, store.CredentialGitHubPAT, "rehearsal", "bad-token",
+		map[string]any{"api_base": gh.URL}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec("UPDATE credentials SET created_at = now() - interval '1 hour' WHERE id=$1", good.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	remote, err := (&API{store: st}).resolvePushRemote(ctx, project, "/unused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	password, _ := u.User.Password()
+	if u.User.Username() != "x-access-token" || password != "valid-token" {
+		t.Fatalf("expected usable PAT, got %q", remote)
 	}
 }

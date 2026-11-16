@@ -7,13 +7,11 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/kataras/iris/v12"
 
 	"smartpipe/backend/internal/bridge"
 	"smartpipe/backend/internal/gate"
-	"smartpipe/backend/internal/github"
 	"smartpipe/backend/internal/patch"
 	"smartpipe/backend/internal/store"
 )
@@ -228,10 +226,14 @@ func (a *API) listRepoOps(c iris.Context) {
 // resolvePushRemote 用项目配置的仓库地址 + 服务端凭据拼出带 token 的远端，token 不出进程。
 func (a *API) resolvePushRemote(ctx context.Context, project *store.Project, repo string) (string, error) {
 	target := strings.TrimSpace(repo)
-	// repo 通常指向本地工作副本；远端以项目配置的仓库地址为准。
-	isHTTP := strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://")
-	if !isHTTP && project != nil && strings.TrimSpace(project.GitHubRepoURL) != "" {
-		target = strings.TrimSpace(project.GitHubRepoURL)
+	fromProject := false
+	// repo 通常指向本地工作副本；远端以项目配置的仓库地址为准，Agent 传入的
+	// HTTP(S) 地址不能覆盖项目远端，否则服务端凭据会被发到任意主机。
+	if project != nil {
+		if configured := strings.TrimSpace(project.GitHubRepoURL); configured != "" {
+			target = configured
+			fromProject = true
+		}
 	}
 	if target == "" {
 		return "", fmt.Errorf("未提供仓库地址，项目也未配置 github_repo_url")
@@ -248,7 +250,13 @@ func (a *API) resolvePushRemote(ctx context.Context, project *store.Project, rep
 		v := project.ID
 		projectID = &v
 	}
-	token, err := gitToken(ctx, a.store, projectID)
+	// 只有项目配置的远端才确认凭据能访问该仓库；显式传入的 HTTP(S) 远端
+	// 可能是任意 Git 服务，不能拿 GitHub API 去探测。
+	tokenRepo := ""
+	if fromProject {
+		tokenRepo = target
+	}
+	token, err := gitToken(ctx, a.store, projectID, tokenRepo)
 	if err != nil {
 		return "", err
 	}
@@ -260,55 +268,19 @@ func (a *API) resolvePushRemote(ctx context.Context, project *store.Project, rep
 	return u.String(), nil
 }
 
-// gitToken 按项目 → 全局顺序解析可用的 Git/HTTP token。
-func gitToken(ctx context.Context, st *store.Store, projectID *string) (string, error) {
-	all, err := st.ListCredentials(ctx, nil)
+// gitToken 解析能访问目标仓库的 GitHub token；repo 为空时只按优先级取第一份。
+// 凭据库可能同时存在演练用的假 token 和真实 PAT，必须验证仓库可访问后再用，
+// 否则先返回的失效 token 会让所有推送卡在 422。
+func gitToken(ctx context.Context, st *store.Store, projectID *string, repo string) (string, error) {
+	client, err := bridge.ClientForRepo(ctx, st, projectID, repo)
 	if err != nil {
 		return "", err
 	}
-	pick := func(kind string) []store.Credential {
-		var scoped, global []store.Credential
-		for _, c := range all {
-			if !c.Enabled || c.Kind != kind {
-				continue
-			}
-			if projectID != nil && c.ProjectID != nil && *c.ProjectID == *projectID {
-				scoped = append(scoped, c)
-			}
-			if c.ProjectID == nil {
-				global = append(global, c)
-			}
-		}
-		return append(scoped, global...)
+	token := strings.TrimSpace(client.Token)
+	if token == "" {
+		return "", fmt.Errorf("GitHub 凭据没有返回可用 token")
 	}
-	var lastErr error
-	for _, c := range append(pick(store.CredentialGitHubPAT), pick(store.CredentialGitHubApp)...) {
-		kind, secret, meta, err := st.GetSecret(ctx, c.ID)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if kind == store.CredentialGitHubPAT {
-			return secret, nil
-		}
-		apiBase := metaStr(meta, "api_base", "https://api.github.com")
-		appID := metaStr(meta, "app_id", "")
-		installID := metaStr(meta, "installation_id", "")
-		if appID == "" || installID == "" {
-			lastErr = fmt.Errorf("github_app 凭据缺少 app_id/installation_id")
-			continue
-		}
-		token, _, err := github.InstallationToken(ctx, apiBase, appID, installID, secret, time.Now())
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		return token, nil
-	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("没有可用的 GitHub 凭据（github_pat / github_app）")
-	}
-	return "", lastErr
+	return token, nil
 }
 
 func (a *API) commentIssueQuiet(ctx context.Context, projectID, issueRef, body string) {

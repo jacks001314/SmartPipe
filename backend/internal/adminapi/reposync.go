@@ -62,7 +62,7 @@ func (a *API) syncProjectRepo(c iris.Context) {
 		_ = c.JSON(envelope{Err: &apiError{Code: "repo_not_configured", Message: "项目未配置 GitHub 仓库"}})
 		return
 	}
-	token, terr := gitToken(ctx, a.store, &project.ID)
+	token, terr := gitToken(ctx, a.store, &project.ID, remote)
 	if terr != nil {
 		c.StatusCode(http.StatusServiceUnavailable)
 		_ = c.JSON(envelope{Err: &apiError{Code: "git_credential_unavailable", Message: terr.Error()}})

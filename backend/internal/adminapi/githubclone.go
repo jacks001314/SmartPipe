@@ -156,7 +156,7 @@ func (a *API) cloneGitHubRepository(c iris.Context) {
 	}
 
 	auth := ""
-	if token, terr := gitToken(ctx, a.store, nil); terr == nil {
+	if token, terr := gitToken(ctx, a.store, nil, full); terr == nil {
 		auth = token
 	}
 	proxy := a.githubProxyURL(ctx)

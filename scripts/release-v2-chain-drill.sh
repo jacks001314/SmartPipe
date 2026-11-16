@@ -46,6 +46,7 @@ GH_URL="http://$GW:$GH_PORT"
 mkdir -p "$FAKE_DIR" "$WORK_HOST"
 SETTINGS_BACKUP="$WORK_HOST/settings.backup.json"
 STARTED=()
+ORPHAN_CREDS=()
 start_update() {
   local port=$1 name=$2
   ( cd /opt/smartpipe && nohup python3 scripts/fake-update-service.py --host 0.0.0.0 --port "$port" > "$FAKE_DIR/chain-$name.log" 2>&1 & echo $! > "$FAKE_DIR/chain-$name.pid" )
@@ -77,7 +78,19 @@ restore_settings() {
   curl -fsS -X PUT -H "$AUTH" -H "$CT" --data-binary @"$SETTINGS_BACKUP" "$ADMIN/admin/releases/v2/settings" >/dev/null \
     && echo "PASS: 发布设置已恢复" || echo "FAIL: 恢复发布设置失败（备份 $SETTINGS_BACKUP）" >&2
 }
-cleanup() { restore_settings; stop_started; }
+cleanup_credentials() {
+  local name id
+  for name in "${ORPHAN_CREDS[@]:-}"; do
+    [[ -n "$name" ]] || continue
+    id=$(api "$ADMIN/admin/credentials" 2>/dev/null \
+      | python3 -c 'import json,sys; d=json.load(sys.stdin)["data"]; print(next((c["id"] for c in d if c.get("name") == sys.argv[1]), ""))' "$name")
+    [[ -n "$id" ]] || continue
+    api -X DELETE "$ADMIN/admin/credentials/$id" >/dev/null 2>&1 \
+      && echo "PASS: 已清理演练凭据 $name" \
+      || echo "WARN: 清理演练凭据 $name 失败" >&2
+  done
+}
+cleanup() { restore_settings; stop_started; cleanup_credentials; }
 trap cleanup EXIT
 
 curl -fsS "$ADMIN/healthz" >/dev/null || fail "admin-api 不健康"
@@ -115,7 +128,10 @@ pass "发布设置已切到 chain-primary / chain-backup + 假 GitHub（退出�
 ensure_credential() {
   local kind=$1 name=$2 present
   present=$(curl -fsS -H "$AUTH" "$ADMIN/admin/credentials" | python3 -c "import json,sys; d=json.load(sys.stdin)['data']; print(any(c.get('name')=='$name' for c in d))")
-  [[ "$present" == "True" ]] || curl -fsS -X POST -H "$AUTH" -H "$CT" -d "{\"kind\":\"$kind\",\"name\":\"$name\",\"value\":\"$name\"}" "$ADMIN/admin/credentials" >/dev/null
+  if [[ "$present" != "True" ]]; then
+    curl -fsS -X POST -H "$AUTH" -H "$CT" -d "{\"kind\":\"$kind\",\"name\":\"$name\",\"value\":\"$name\"}" "$ADMIN/admin/credentials" >/dev/null
+    ORPHAN_CREDS+=("$name")
+  fi
 }
 ensure_credential release_update "$CRED"
 ensure_credential github_pat "$GH_CRED"

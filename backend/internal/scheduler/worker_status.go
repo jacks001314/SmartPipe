@@ -25,11 +25,13 @@ func isWorkerStatusQuestion(text string) bool {
 		}
 		return false
 	}
-	status := has("状态", "进度", "有没有", "是否", "到哪", "开始修", "在修",
-		"修完", "修复了吗", "有修复吗", "修好了吗", "完成了吗")
+	fixStatus := []string{"开始修", "在修", "修完", "修复了吗", "修复了没", "修复了没有",
+		"有修复吗", "有修复没", "修好了吗", "修好了没", "修好了没有", "修没修", "修复没",
+		"解决了吗", "解决没有", "改好了吗", "处理好了吗"}
+	status := append([]string{"状态", "进度", "有没有", "是否", "到哪", "完成了吗"}, fixStatus...)
 	return (has("worker") && (status || has("派发"))) ||
 		(has("派发") && (status || has("修复") || has("worker"))) ||
-		(has("修复") && has("进度", "到哪", "开始修", "在修", "修完", "修复了吗", "有修复吗", "修好了吗", "完成了吗")) ||
+		(has("修复") && has(status...)) ||
 		(has("pr") && status) ||
 		(has("进度") && (has("#") || has("issue")))
 }
@@ -63,6 +65,15 @@ func parseWorkerControl(text string) (action string, explicit bool) {
 		!strings.Contains(t, "吗") && !strings.Contains(t, "有没有") && !strings.Contains(t, "是否"):
 		return "fix", false
 	case strings.Contains(t, "重新派发") || strings.Contains(t, "重新排队"):
+		return "fix", false
+	case strings.Contains(t, "复核") || strings.Contains(t, "复查") || strings.Contains(t, "复验"):
+		if referencedIssue(text) > 0 || strings.Contains(t, "worker") || strings.Contains(t, "机器人") {
+			return "fix", false
+		}
+		return "", false
+	case (strings.Contains(t, "就修") || strings.Contains(t, "修一下") ||
+		strings.Contains(t, "再修") || strings.Contains(t, "重新修")) &&
+		(referencedIssue(text) > 0 || strings.Contains(t, "worker")):
 		return "fix", false
 	default:
 		return "", false
