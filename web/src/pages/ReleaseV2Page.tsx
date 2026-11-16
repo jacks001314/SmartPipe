@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
-import type { Project, ReleaseV2AgentView, ReleaseV2Bundle, ReleaseV2Event, ReleaseV2Executor, ReleaseV2ExecutorDeployResult, ReleaseV2Preview, ReleaseV2Run } from "../types";
+import type { Project, ReleaseV2AgentView, ReleaseV2Bundle, ReleaseV2Event, ReleaseV2Executor, ReleaseV2ExecutorDeployResult, ReleaseV2Preview, ReleaseV2Run, ReleaseV2Target } from "../types";
 import type { Notify } from "../App";
 import { ReleaseV2ConfigModal } from "./ReleaseV2ConfigModal";
 
@@ -170,6 +170,71 @@ function LongTaskProgress({ events }: { events: ReleaseV2Event[] }) {
                 {row.error && <span>{row.error}</span>}
               </div>
             </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+function stripAnsi(value: string) {
+  return value.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "");
+}
+
+type BuildLogView = { target: string; lines: string[]; updatedAt: number };
+
+// collectBuildLogs 把构建机回传的 target.log 分片按目标聚合，保留最后 160 行。
+function collectBuildLogs(events: ReleaseV2Event[]): Map<string, BuildLogView> {
+  const rows = new Map<string, BuildLogView>();
+  for (const event of events) {
+    if (event.kind !== "target.log") continue;
+    const chunk = typeof event.detail?.chunk === "string" ? stripAnsi(event.detail.chunk) : "";
+    if (!chunk) continue;
+    const target = event.target_id || "build";
+    const row = rows.get(target) ?? { target, lines: [], updatedAt: 0 };
+    rows.set(target, row);
+    row.updatedAt = Date.parse(event.created_at) || row.updatedAt;
+    for (const line of chunk.split("\n")) {
+      if (!line.trim()) continue;
+      row.lines.push(line.replace(/\r$/, ""));
+    }
+    if (row.lines.length > 160) row.lines = row.lines.slice(-160);
+  }
+  return rows;
+}
+
+function BuildProgress({ targets, events }: { targets: ReleaseV2Target[]; events: ReleaseV2Event[] }) {
+  const logs = collectBuildLogs(events);
+  const [now, setNow] = useState(() => Date.now());
+  const running = targets.some((target) => ["building", "queued", "leased", "preparing"].includes(target.status));
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 2000);
+    return () => window.clearInterval(timer);
+  }, [running]);
+  const rows = targets.filter((target) => logs.has(target.target_id)
+    || ["building", "queued", "leased", "preparing"].includes(target.status));
+  if (rows.length === 0) return null;
+  return (
+    <>
+      <h4>构建进度</h4>
+      <div className="build-log-grid">
+        {rows.map((target) => {
+          const log = logs.get(target.target_id);
+          const last = log && log.lines.length > 0 ? log.lines[log.lines.length - 1] : "";
+          return (
+            <details key={target.target_id} className="build-log" open={Boolean(log)}>
+              <summary>
+                <span className="build-log-head">
+                  <b className="mono">{target.target_id}</b>
+                  {statusChip(target.status)}
+                  <span className="tiny muted">尝试 {target.attempt}</span>
+                </span>
+                <span className="tiny muted build-log-last">{last || "暂无构建输出"}</span>
+                {log && <span className="tiny muted">最后输出 {agoLabel(now, log.updatedAt)}</span>}
+              </summary>
+              <pre className="build-log-body">{log ? log.lines.join("\n") : "构建机尚未回传日志"}</pre>
+            </details>
           );
         })}
       </div>
@@ -775,6 +840,7 @@ export function ReleaseV2Page({ notify, view = "runs", runId, onBack, onOpenRun 
                 ))}
               </tbody>
             </table>
+            <BuildProgress targets={detail.targets} events={detail.events} />
             <h4>制品</h4>
             <table className="table">
               <thead><tr><th>角色</th><th>文件</th><th>大小</th><th>SHA-256</th></tr></thead>
@@ -810,7 +876,7 @@ export function ReleaseV2Page({ notify, view = "runs", runId, onBack, onOpenRun 
             <table className="table">
               <thead><tr><th>时间</th><th>执行者</th><th>类型</th><th>摘要</th></tr></thead>
               <tbody>
-                {detail.events.filter((e) => !isProgressEvent(e.kind)).slice(-40).reverse().map((e) => (
+                {detail.events.filter((e) => !isProgressEvent(e.kind) && e.kind !== "target.log").slice(-40).reverse().map((e) => (
                   <tr key={e.id}>
                     <td className="tiny">{when(e.created_at)}</td>
                     <td className="tiny">{e.actor}</td>

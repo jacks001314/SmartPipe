@@ -1314,3 +1314,10 @@ input, select, textarea { font-family: inherit; color: var(--ink); }
 .long-task-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
 .long-task-file { margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .long-task-meta { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.build-log-grid { display: grid; gap: 10px; margin-bottom: 14px; }
+.build-log { border: 1px solid var(--line); border-radius: var(--radius); background: #fbfcfe; padding: 10px 12px; }
+.build-log summary { cursor: pointer; display: flex; flex-direction: column; gap: 4px; list-style: none; }
+.build-log summary::-webkit-details-marker { display: none; }
+.build-log-head { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.build-log-last { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.build-log-body { margin: 10px 0 0; padding: 10px 12px; background: #0f172a; color: #d7e3f4; border-radius: var(--radius-sm); font-size: 12px; line-height: 1.5; max-height: 260px; overflow: auto; }
