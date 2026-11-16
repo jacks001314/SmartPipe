@@ -96,7 +96,7 @@ function collectLongTasks(events: ReleaseV2Event[]): LongTaskRow[] {
     } else if (event.kind.endsWith(".service_done")) {
       row.phase = "done";
       row.rate = 0;
-      if (bytesDone !== undefined) row.bytesDone = bytesDone;
+      row.bytesDone = row.bytesTotal;
     } else if (event.kind.endsWith(".service_failed")) {
       row.phase = "failed";
       row.rate = 0;
