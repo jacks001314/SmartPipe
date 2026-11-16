@@ -285,7 +285,10 @@ func newReleaseAgentLauncher(ctx context.Context, st *store.Store) *releaseagent
 		Effort:        strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_AGENT_EFFORT")),
 		Sandbox:       envOr("SMARTPIPE_RELEASE_AGENT_SANDBOX", "read-only"),
 		Compatibility: envOr("SMARTPIPE_RELEASE_AGENT_COMPAT", "warn"),
-		Timeout:       time.Duration(envInt("SMARTPIPE_RELEASE_AGENT_TIMEOUT_MINUTES", 45)) * time.Minute,
+		// 一次真实发布要构建多平台产物、把 GB 级制品灌进多个升级服务，
+		// 45 分钟会在 release_import 中途被杀掉（生产事故：0.5.18 stable
+		// 导入 45 分钟时 context deadline exceeded）。默认放宽到 3 小时。
+		Timeout:       time.Duration(envInt("SMARTPIPE_RELEASE_AGENT_TIMEOUT_MINUTES", 180)) * time.Minute,
 		// release_import 要真实上传全部制品：Syntropy 0.5.18 是 4 GB 级别，
 		// 两个升级服务并行也要 20 分钟以上。20 分钟的默认值会在真发版时把
 		// 客户端连接掐断，而服务端其实已经灌完，Agent 只能重来一遍。
