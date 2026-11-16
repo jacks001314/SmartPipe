@@ -15,11 +15,22 @@ const TABS: { key: ReleaseTab; label: string; hint: string }[] = [
 // ReleaseCenterPage 把发版相关的三个页面收进一个入口：v2 运行、旧版发版、发版设置。
 // 页面本身继续复用原有组件，旧路由（#release / #releaseV2 / #releaseSettings）
 // 通过 initialTab 落到对应页签。
-export function ReleaseCenterPage({ notify, initialTab = "create" }: { notify: Notify; initialTab?: ReleaseTab }) {
+export function ReleaseCenterPage({ notify, initialTab = "create", runId, onNavigate, onOpenRun }: {
+  notify: Notify;
+  initialTab?: ReleaseTab;
+  runId?: string;
+  onNavigate?: (page: "releaseCenter") => void;
+  onOpenRun?: (id: string) => void;
+}) {
   const [tab, setTab] = useState<ReleaseTab>(initialTab);
   useEffect(() => {
     setTab(initialTab);
   }, [initialTab]);
+
+  // 运行详情是独立页面（#releaseRun/<id>），不在这里叠卡片。
+  if (runId) {
+    return <ReleaseV2Page notify={notify} view="run" runId={runId} onBack={() => onNavigate?.("releaseCenter")} />;
+  }
 
   return (
     <>
@@ -37,7 +48,7 @@ export function ReleaseCenterPage({ notify, initialTab = "create" }: { notify: N
           </button>
         ))}
       </div>
-      {tab !== "settings" && <ReleaseV2Page notify={notify} view={tab} />}
+      {tab !== "settings" && <ReleaseV2Page notify={notify} view={tab} onOpenRun={onOpenRun} />}
       {tab === "settings" && <ReleaseV2SettingsPage notify={notify} />}
     </>
   );

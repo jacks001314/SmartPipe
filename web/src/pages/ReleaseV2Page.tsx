@@ -30,9 +30,15 @@ function statusChip(status: string) {
 
 const ALL_SCOPES = ["release.read", "executor.read", "artifact.read", "build.read", "release.write", "artifact.write", "update.read", "update.write", "update.publish", "github.write", "release.publish"];
 
-export type ReleaseV2View = "create" | "runs" | "executors";
+export type ReleaseV2View = "create" | "runs" | "executors" | "run";
 
-export function ReleaseV2Page({ notify, view = "runs" }: { notify: Notify; view?: ReleaseV2View }) {
+export function ReleaseV2Page({ notify, view = "runs", runId, onBack, onOpenRun }: {
+  notify: Notify;
+  view?: ReleaseV2View;
+  runId?: string;
+  onBack?: () => void;
+  onOpenRun?: (id: string) => void;
+}) {
   const [runs, setRuns] = useState<ReleaseV2Run[]>([]);
   const [executors, setExecutors] = useState<ReleaseV2Executor[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -231,6 +237,11 @@ export function ReleaseV2Page({ notify, view = "runs" }: { notify: Notify; view?
   }, [openRun]);
 
   useEffect(() => () => stopStream(), [stopStream]);
+
+  // 详情独立页直接按 runId 加载，刷新或分享链接都能落回来。
+  useEffect(() => {
+    if (view === "run" && runId) void openRun(runId);
+  }, [view, runId, openRun]);
 
   async function startAgent(id: string) {
     setBusy(true);
@@ -529,7 +540,7 @@ export function ReleaseV2Page({ notify, view = "runs" }: { notify: Notify; view?
                   <td>{r.channel}</td>
                   <td className="mono tiny">{shortHash(r.resolved_commit)}</td>
                   <td className="tiny">{when(r.created_at)}</td>
-                  <td><button className="btn small" onClick={() => void openRun(r.id)}>详情</button></td>
+                  <td><button className="btn small" onClick={() => (onOpenRun ? onOpenRun(r.id) : void openRun(r.id))}>详情</button></td>
                 </tr>
               ))}
             </tbody>
@@ -537,7 +548,11 @@ export function ReleaseV2Page({ notify, view = "runs" }: { notify: Notify; view?
         </div>
       </div>
 
-      {detail && view === "runs" && (
+      {view === "run" && !detail && (
+        <div className="card"><div className="card-body muted small">正在读取运行详情…</div></div>
+      )}
+
+      {detail && (view === "runs" || view === "run") && (
         <div className="card">
           <div className="card-head">
             <div>
@@ -547,10 +562,11 @@ export function ReleaseV2Page({ notify, view = "runs" }: { notify: Notify; view?
               </div>
             </div>
             <div className="btn-row">
+              {view === "run" && <button className="btn" onClick={() => onBack?.()}>返回列表</button>}
               <button className="btn" disabled={busy} onClick={() => void openRun(detail.run.id)}>刷新</button>
               <button className="btn" disabled={busy} onClick={() => void issueToken(detail.run.id)}>签发 Agent Token</button>
               <button className="btn danger" disabled={busy} onClick={() => void cancelRun(detail.run.id)}>取消</button>
-              <button className="btn" onClick={() => { stopStream(); setDetail(null); }}>关闭</button>
+              {view !== "run" && <button className="btn" onClick={() => { stopStream(); setDetail(null); }}>关闭</button>}
             </div>
           </div>
           <div className="card-body">
