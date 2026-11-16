@@ -530,10 +530,12 @@ func (a *API) configuredUpdateServices(ctx context.Context) ([]releaseUpdateServ
 }
 
 func (a *API) readVersionFile(ctx context.Context, client *github.Client, project *store.Project, cfg *releasev2.ProjectReleaseConfig, branch string) string {
-	path := strings.TrimSpace(cfg.VersionFile)
-	if path == "" {
+	files := releaseVersionFiles(cfg)
+	if len(files) == 0 {
 		return ""
 	}
+	// 多文件配置时以第一个文件为准；写入时会把所有文件都改成同一个版本。
+	path := files[0]
 	if client != nil {
 		if content, ok, err := client.ReadFile(ctx, project.GitHubRepoURL, branch, path); err == nil && ok {
 			return versionFromJSON(content, cfg.VersionJSONPath)
