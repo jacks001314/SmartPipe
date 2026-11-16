@@ -23,7 +23,7 @@ function bytes(size: number) {
 }
 
 function statusChip(status: string) {
-  const ok = ["published", "built", "ready"].includes(status);
+  const ok = ["published", "built", "ready", "online", "finished"].includes(status);
   const warn = ["staged", "publishing", "verifying", "artifacts_ready", "building", "preparing", "queued", "leased", "uploaded", "partially_published"].includes(status);
   return <span className={"chip " + (ok ? "ok" : warn ? "warn" : "bad")}><span className="dot" />{status}</span>;
 }
