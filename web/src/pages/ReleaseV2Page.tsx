@@ -351,9 +351,10 @@ export function ReleaseV2Page({ notify, view = "runs", runId, onBack, onOpenRun 
           <div>
             <div className="card-title">新建发布</div>
             <div className="card-sub">选择项目、升级服务器和构建机；版本、源码包、构建、灌库和发布都由 Agent 自动完成。</div>
+            <div className="tiny">构建命令与制品规则改「项目发版配置」；服务地址、令牌、GitHub 与对象存储改「全局设置」。</div>
           </div>
           <div className="btn-row">
-            <button className="btn" disabled={!form.project_id} onClick={() => setConfigOpen(true)}>发版配置</button>
+            <button className="btn" disabled={!form.project_id} title="项目级：构建命令、制品规则、渠道顺序与默认升级服务" onClick={() => setConfigOpen(true)}>项目发版配置</button>
             <button className="btn" onClick={() => void load()}>刷新</button>
           </div>
         </div>

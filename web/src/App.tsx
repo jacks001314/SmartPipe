@@ -49,7 +49,7 @@ const META: Record<PageKey, { crumb: string; title: string; sub: string }> = {
   releaseCenter: { crumb: "运行中心 / 发版", title: "发版", sub: "计划、运行、构建机与发布设置集中在一个入口。" },
   releaseRun: { crumb: "运行中心 / 发版 / 运行详情", title: "运行详情", sub: "单个发版运行的目标、制品、事件与 Agent 会话。" },
   release: { crumb: "运行中心 / 发版", title: "发版", sub: "旧链接 #release 已并入发版运行。" },
-  releaseSettings: { crumb: "配置中心 / 发版设置", title: "发版设置", sub: "在这里填写真实升级服务、GitHub 与对象存储的参数；保存后立即生效。" },
+  releaseSettings: { crumb: "配置中心 / 发版全局设置", title: "发版全局设置", sub: "升级服务地址与令牌、GitHub 与对象存储；保存后立即生效。项目级的构建与制品规则在「项目发版配置」里。" },
   releaseV2: { crumb: "运行中心 / 发版 v2", title: "发版运行 v2", sub: "计划、构建机、目标进度、制品摘要、升级渠道与 GitHub 发布状态。" },
   crash: { crumb: "配置中心 / 崩溃上报", title: "崩溃上报", sub: "客户端 crash_bundle 脱敏、指纹去重、限流与自动建单。" },
   audit: { crumb: "配置中心 / 审计日志", title: "审计日志", sub: "记录项目、凭据与流水线的管理操作，不保存明文秘密。" },

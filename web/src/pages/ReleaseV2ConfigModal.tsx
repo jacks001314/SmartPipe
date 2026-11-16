@@ -259,7 +259,7 @@ export function ReleaseV2ConfigModal({
         <div className="modal-head">
           <div>
             <div className="modal-title">项目发版配置</div>
-            <div className="modal-sub">{project ? project.name + " · " + project.id : "未选择项目"}；发布入口仍然只让用户选择项目、升级服务器和构建机。</div>
+            <div className="modal-sub">{project ? project.name + " · " + project.id : "未选择项目"}；这里是项目级配置（构建命令、制品规则、渠道顺序、默认升级服务）。升级服务的地址和令牌在「全局设置」里维护。</div>
           </div>
           <button className="icon-btn" disabled={saving} onClick={onClose} aria-label="关闭">×</button>
         </div>
