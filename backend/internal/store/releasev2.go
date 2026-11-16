@@ -674,15 +674,20 @@ func (s *Store) ListAttentionReleaseV2Runs(ctx context.Context, limit int) ([]re
 }
 
 // BumpReleaseV2RecoveryAttempts records one automatic Agent takeover for a run
-// that is waiting for attention. It returns 0 when the run already left
-// needs_attention / partially_published or reached max (max <= 0 means unlimited).
+// that is waiting for attention. It returns 0 when the run already left the
+// attention-managed states or reached max (max <= 0 means unlimited).
 // partially_published 也算待接管：渠道指针已经推进、GitHub 还没收口，会话一旦
 // 中断就没人继续，必须和 needs_attention 共用同一份重试预算，才不会无限接管。
+// artifacts_ready / recovering / staged / publishing 同理：publish 模式的接管
+// 起点经常就是这几个中间态（构建刚完成、灌库刚失败），排除在外会让重试永远
+// 记不上数，最终变成无限空转。
 func (s *Store) BumpReleaseV2RecoveryAttempts(ctx context.Context, runID string, max int) (int, error) {
 	var attempts int
 	err := s.db.QueryRowContext(ctx, `
 UPDATE release_v2_runs SET recovery_attempts=recovery_attempts+1, updated_at=now()
-WHERE id=$1 AND status IN ('needs_attention','partially_published') AND ($2 <= 0 OR recovery_attempts < $2)
+WHERE id=$1
+  AND status IN ('needs_attention','partially_published','artifacts_ready','recovering','staged','publishing')
+  AND ($2 <= 0 OR recovery_attempts < $2)
 RETURNING recovery_attempts`, runID, max).Scan(&attempts)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

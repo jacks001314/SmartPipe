@@ -82,6 +82,19 @@ func (a *API) resumeAttentionRuns(ctx context.Context, maxAttempts int, cooldown
 		}
 		last[run.ID] = time.Now()
 
+		// 先占一次重试预算再启动会话。放到启动之后会失效：会话一启动就会把
+		// 运行推进出新状态，BumpReleaseV2RecoveryAttempts 的状态条件不满足，
+		// 静默返回 0，重试上限永远达不到。真实事故：一个被版本冲突拦下的
+		// 运行在 3 小时里空转了 217 个会话。
+		attempts, bumpErr := a.store.BumpReleaseV2RecoveryAttempts(ctx, run.ID, maxAttempts)
+		if bumpErr != nil {
+			log.Printf("发布 Agent attention 记录尝试次数 %s 失败: %v", run.ID, bumpErr)
+			continue
+		}
+		if attempts == 0 {
+			continue
+		}
+
 		bundle, err := a.releaseV2.GetRunBundle(ctx, run.ID, 0, 1)
 		if err != nil {
 			log.Printf("发布 Agent attention 读取运行 %s 失败: %v", run.ID, err)
@@ -98,10 +111,6 @@ func (a *API) resumeAttentionRuns(ctx context.Context, maxAttempts int, cooldown
 				Summary: "自动接管 needs_attention 运行失败", Detail: map[string]any{"error": err.Error()},
 			})
 			continue
-		}
-		attempts, bumpErr := a.store.BumpReleaseV2RecoveryAttempts(ctx, run.ID, maxAttempts)
-		if bumpErr != nil {
-			log.Printf("发布 Agent attention 记录尝试次数 %s 失败: %v", run.ID, bumpErr)
 		}
 		_ = a.store.AppendEvent(ctx, releasev2.Event{
 			RunID: run.ID, Actor: "system:attention", Kind: "agent.attention_resume",
