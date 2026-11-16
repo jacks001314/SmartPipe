@@ -362,7 +362,7 @@ export function ReleaseV2Page({ notify, view = "runs", runId, onBack, onOpenRun 
             <label className="field">
               <span>项目</span>
               <select value={form.project_id} onChange={(e) => setForm({ project_id: e.target.value })}>
-                {projects.map((p) => <option key={p.id} value={p.id}>{p.name || p.id}</option>)}
+                {projects.filter((p) => p.enabled !== false).map((p) => <option key={p.id} value={p.id}>{p.name || p.id}</option>)}
               </select>
             </label>
             <label className="field wide">
