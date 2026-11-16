@@ -67,7 +67,7 @@ type Config struct {
 	// ToolTimeout 是单次 MCP 工具调用的上限。release_import / github_release_sync
 	// 一次要传完整制品（Syntropy 全量约 2.4 GB），4 分钟根本不够；导入本身按
 	// 「同一 cell 摘要一致就跳过」可续传，超时后用同样的参数再调即可。
-	ToolTimeout   time.Duration
+	ToolTimeout time.Duration
 	// MaxSessions 限制同时运行的发布 Agent 会话数；0 表示不限制。
 	MaxSessions      int
 	TokenTTL         time.Duration
@@ -87,9 +87,10 @@ func (c Config) withDefaults() Config {
 		c.Sandbox = "read-only"
 	}
 	if c.TokenTTL <= 0 {
-		// 0 表示不限制会话时长；令牌仍然需要一个期限，给足一天。
+		// 0 表示不限制会话时长；令牌仍然需要一个期限，但要覆盖 GB 级制品
+		// 上传/灌库可能持续数天的情况。
 		if c.Timeout <= 0 {
-			c.TokenTTL = 24 * time.Hour
+			c.TokenTTL = 7 * 24 * time.Hour
 		} else {
 			c.TokenTTL = c.Timeout + 30*time.Minute
 		}

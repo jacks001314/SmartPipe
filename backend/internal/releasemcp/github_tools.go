@@ -269,7 +269,7 @@ func (s *Server) githubDispatch(ctx context.Context, p *principal, name string, 
 		if gaps := verifyGitHubAssets(current, gateArtifacts); len(gaps) > 0 {
 			return blockedResult("github_assets_incomplete", strings.Join(gaps, "; ")), true, nil
 		}
-		release, err := client.PublishRelease(ctx, credential, owner, repo, releaseID)
+		release, err := client.UpdateRelease(ctx, credential, owner, repo, releaseID, githubPublishOptions(gateRun, current))
 		if err != nil {
 			return nil, true, err
 		}

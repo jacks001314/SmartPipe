@@ -615,7 +615,7 @@ func (s *Server) finishPublish(ctx context.Context, p *principal, run *releasev2
 				return
 			}
 		}
-		_, err = s.githubClient(ctx).PublishRelease(ctx, ghCredential, owner, repo, githubID)
+		_, err = s.githubClient(ctx).UpdateRelease(ctx, ghCredential, owner, repo, githubID, githubPublishOptions(run, release))
 		if err != nil {
 			_, _ = s.Service.Transition(ctx, runID, from, releasev2.RunPartiallyPublished, actor, "github publish failed: "+err.Error())
 			_ = s.Store.AppendEvent(ctx, releasev2.Event{RunID: runID, Actor: actor, Kind: "github.publish_failed",

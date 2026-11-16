@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -139,7 +140,21 @@ func (c *UpdateClient) client() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
-	return &http.Client{Timeout: 30 * time.Minute}
+	return longHaulHTTPClient
+}
+
+// longHaulHTTPClient moves GB-scale artifacts. A total request deadline would
+// abort a healthy upload on a slow link, so only connection establishment is
+// bounded; callers cancel through the request context when they really need to.
+var longHaulHTTPClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ExpectContinueTimeout: 5 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		ForceAttemptHTTP2:     true,
+	},
 }
 
 func (c *UpdateClient) url(path string) (string, error) {

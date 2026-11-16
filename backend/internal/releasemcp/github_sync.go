@@ -22,6 +22,24 @@ func deliversTo(artifact releasev2.Artifact, destination string) bool {
 	return false
 }
 
+// githubPublishOptions keeps GitHub's "Latest" badge on the stable line.
+//
+// A tag can be created by a beta run first (prerelease=true) and reused by the
+// stable run later; GitHub only moves Latest when the published release is not
+// a prerelease and make_latest says so. Non-stable runs must not demote an
+// already published stable release, so they only force prerelease on drafts.
+func githubPublishOptions(run *releasev2.Run, release *releasepublish.GitHubRelease) releasepublish.PublishOptions {
+	if run != nil && run.Channel == "stable" {
+		prerelease := false
+		return releasepublish.PublishOptions{Prerelease: &prerelease, MakeLatest: "true"}
+	}
+	if release != nil && release.Draft {
+		prerelease := true
+		return releasepublish.PublishOptions{Prerelease: &prerelease, MakeLatest: "false"}
+	}
+	return releasepublish.PublishOptions{}
+}
+
 // githubStaleAssets 返回“属于本次版本、但本次发布不再产出”的旧资产。
 // 只按版本号过滤，避免清掉 Release 上与本次版本无关的文件。
 func githubStaleAssets(release *releasepublish.GitHubRelease, artifacts []releasev2.Artifact, version string) []releasepublish.GitHubAsset {
@@ -199,10 +217,8 @@ func (s *Server) githubSync(ctx context.Context, p *principal, args map[string]a
 	if gaps := verifyGitHubAssets(after, artifacts); len(gaps) > 0 {
 		return blockedResult("github_assets_incomplete", fmt.Sprintf("上传后校验未通过：%v", gaps)), nil
 	}
-	if after.Draft {
-		if _, err := client.PublishRelease(ctx, credential, owner, repo, releaseID); err != nil {
-			return nil, err
-		}
+	if _, err := client.UpdateRelease(ctx, credential, owner, repo, releaseID, githubPublishOptions(run, after)); err != nil {
+		return nil, err
 	}
 	final, err := client.GetRelease(ctx, credential, owner, repo, releaseID)
 	if err != nil {

@@ -813,17 +813,13 @@ func (s *Server) publishStaged(ctx context.Context, p *principal, service update
 			return nil, "", fmt.Errorf("渠道 %s 在推进过程中被其他发布改动，请重新读取后再试", channel)
 		}
 	}
-	existing, derr := service.Client.GetDistribution(ctx, credential, channel, run.Version)
-	switch {
-	case derr == nil && sameDistribution(existing.Components, bom):
-	case derr != nil && !errors.Is(derr, releasepublish.ErrNotFoundRemote):
-		return nil, "", fmt.Errorf("读取 BOM %s/%s: %w", channel, run.Version, derr)
-	default:
-		if _, err := service.Client.PublishDistribution(ctx, credential, releasepublish.PublishDistributionRequest{
-			Channel: channel, ProductVersion: run.Version, Components: bom,
-		}); err != nil {
-			return nil, "", fmt.Errorf("发布 BOM %s/%s: %w", channel, run.Version, err)
-		}
+	// 覆盖式发布：升级服务把「清零历史版本」放在 PublishDistribution 里执行。
+	// 这里即使 BOM 内容没变也要再发布一次，否则重发同一版本时上一次失败留下的
+	// 未引用发布（以及旧版本）会一直留在账本里，界面上看起来就是「多了好几条」。
+	if _, err := service.Client.PublishDistribution(ctx, credential, releasepublish.PublishDistributionRequest{
+		Channel: channel, ProductVersion: run.Version, Components: bom,
+	}); err != nil {
+		return nil, "", fmt.Errorf("发布 BOM %s/%s: %w", channel, run.Version, err)
 	}
 	pointer, err := service.Client.Latest(ctx, credential, channel)
 	if err != nil {

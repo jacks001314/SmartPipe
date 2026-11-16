@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 )
 
 // GitHubRelease is the subset of the GitHub release payload the release plane
@@ -47,7 +46,7 @@ func (c *GitHubClient) client() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
-	return &http.Client{Timeout: 30 * time.Minute}
+	return longHaulHTTPClient
 }
 
 func (c *GitHubClient) apiBase() string {
@@ -178,14 +177,35 @@ func (c *GitHubClient) UploadAsset(ctx context.Context, credentialRef, owner, re
 	return &asset, nil
 }
 
-func (c *GitHubClient) PublishRelease(ctx context.Context, credentialRef, owner, repo string, releaseID int64) (*GitHubRelease, error) {
+// PublishOptions controls the flags applied when a release is published or
+// refreshed. MakeLatest uses GitHub's make_latest enum ("true", "false").
+type PublishOptions struct {
+	Prerelease *bool
+	MakeLatest string
+}
+
+// UpdateRelease publishes a draft and refreshes the flags of an existing
+// release. Stable runs use it to clear a prerelease flag left by an earlier
+// beta run for the same tag and to claim the repository's "Latest" badge;
+// GitHub keeps that badge on the previous stable release otherwise.
+func (c *GitHubClient) UpdateRelease(ctx context.Context, credentialRef, owner, repo string, releaseID int64, opts PublishOptions) (*GitHubRelease, error) {
 	var out GitHubRelease
 	body := map[string]any{"draft": false}
+	if opts.Prerelease != nil {
+		body["prerelease"] = *opts.Prerelease
+	}
+	if value := strings.TrimSpace(opts.MakeLatest); value != "" {
+		body["make_latest"] = value
+	}
 	if err := c.doJSON(ctx, credentialRef, http.MethodPatch,
 		fmt.Sprintf("/repos/%s/%s/releases/%d", owner, repo, releaseID), body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
+}
+
+func (c *GitHubClient) PublishRelease(ctx context.Context, credentialRef, owner, repo string, releaseID int64) (*GitHubRelease, error) {
+	return c.UpdateRelease(ctx, credentialRef, owner, repo, releaseID, PublishOptions{})
 }
 
 func (c *GitHubClient) resolve(ctx context.Context, ref string) (string, error) {

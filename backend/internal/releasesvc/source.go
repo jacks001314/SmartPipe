@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"smartpipe/backend/internal/releasev2"
 )
@@ -246,7 +245,9 @@ func (h *HTTPHandler) serveSource(w http.ResponseWriter, r *http.Request, execut
 
 // archiveCommit 在临时目录里生成该提交的归档文件；本地镜像里没有这个提交时先 fetch 一次。
 func archiveCommit(parent context.Context, dir, remote, commit string) (string, func(), error) {
-	ctx, cancel := context.WithTimeout(parent, 10*time.Minute)
+	// 大仓库的 git fetch / archive 在慢磁盘或冷缓存上可能跑很久；固定 10 分钟
+	// 会把健康的源码冻结砍断。取消交给调用方 context。
+	ctx, cancel := context.WithCancel(parent)
 	hasCommit := func() bool {
 		cmd := exec.CommandContext(ctx, "git", "-C", dir, "cat-file", "-e", commit+"^{commit}")
 		return cmd.Run() == nil

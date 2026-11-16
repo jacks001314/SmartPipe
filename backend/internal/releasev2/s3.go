@@ -8,6 +8,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -51,7 +52,20 @@ func (s *S3Store) client() *http.Client {
 	if s.HTTP != nil {
 		return s.HTTP
 	}
-	return &http.Client{Timeout: 2 * time.Hour}
+	return s3HTTPClient
+}
+
+// s3HTTPClient 不在整个请求上设总时长：制品是 GB 级，慢链路会把健康的
+// 上传砍断。只限制建连/TLS 握手，取消交给调用方 context。
+var s3HTTPClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ExpectContinueTimeout: 5 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		ForceAttemptHTTP2:     true,
+	},
 }
 
 func (s *S3Store) objectKey(key string) string {
