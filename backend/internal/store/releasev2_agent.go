@@ -126,17 +126,57 @@ func (s *Store) ListAgentSessions(ctx context.Context, runID string, limit int) 
 }
 
 // CloseStaleAgentSessions marks sessions left behind by a restart as failed so
-// the console does not show a phantom running agent forever.
+// the console does not show a phantom running agent forever, and hands their
+// runs back to the attention worker.
+//
+// 只关会话是不够的：控制面在制品就绪之后、灌库/发布之前重启，run 会停在
+// artifacts_ready，既没有活跃会话也不在 attention 的候选状态里，于是一直
+// 停着。这里在关掉僵尸会话后，把「没有活跃会话、也没有目标在构建机跑」的
+// Agent 阶段运行交回 needs_attention。
 func (s *Store) CloseStaleAgentSessions(ctx context.Context) (int, error) {
-	res, err := s.db.ExecContext(ctx, `
-UPDATE release_v2_agent_sessions SET status='failed', last_error=COALESCE(NULLIF(last_error,''),'agent process lost'),
-  finished_at=now(), updated_at=now()
-WHERE status IN ('starting','running')`)
+	rows, err := s.db.QueryContext(ctx, `
+WITH closed AS (
+  UPDATE release_v2_agent_sessions
+     SET status='failed', last_error=COALESCE(NULLIF(last_error,''),'agent process lost'),
+         finished_at=now(), updated_at=now()
+   WHERE status IN ('starting','running')
+  RETURNING run_id
+)
+SELECT run_id FROM closed`)
 	if err != nil {
 		return 0, fmt.Errorf("store: close stale release agent sessions: %w", err)
 	}
-	n, _ := res.RowsAffected()
-	return int(n), nil
+	var runIDs []string
+	for rows.Next() {
+		var runID string
+		if err := rows.Scan(&runID); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		runIDs = append(runIDs, runID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+	if len(runIDs) == 0 {
+		return 0, nil
+	}
+	// 只交回「进程被硬杀」的那几个运行：会话已经自己结束的运行（比如被
+	// 版本冲突拦下来、Agent 有意停在 artifacts_ready）不在此列，否则每次
+	// 重启都会把它们重新拉起来撞同一个墙。
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE release_v2_runs r SET status='needs_attention', updated_at=now()
+ WHERE r.id = ANY($1::text[])
+   AND r.status IN ('artifacts_ready','recovering','staged','publishing')
+   AND NOT EXISTS (
+     SELECT 1 FROM release_v2_targets t
+      WHERE t.run_id=r.id AND t.status IN ('queued','leased','building','verifying','uploaded')
+   )`, runIDs); err != nil {
+		return len(runIDs), fmt.Errorf("store: hand back orphaned release runs: %w", err)
+	}
+	return len(runIDs), nil
 }
 
 // MarkReleaseV2RunNeedsAttention 把仍然进行中的运行交回 Agent。Agent 会话

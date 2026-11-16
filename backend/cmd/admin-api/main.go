@@ -286,9 +286,12 @@ func newReleaseAgentLauncher(ctx context.Context, st *store.Store) *releaseagent
 		Sandbox:       envOr("SMARTPIPE_RELEASE_AGENT_SANDBOX", "read-only"),
 		Compatibility: envOr("SMARTPIPE_RELEASE_AGENT_COMPAT", "warn"),
 		Timeout:       time.Duration(envInt("SMARTPIPE_RELEASE_AGENT_TIMEOUT_MINUTES", 45)) * time.Minute,
-		ToolTimeout:   time.Duration(envInt("SMARTPIPE_RELEASE_AGENT_TOOL_TIMEOUT_SEC", 1200)) * time.Second,
-		MaxSessions:   envInt("SMARTPIPE_RELEASE_AGENT_MAX_SESSIONS", 0),
-		ModelEnv:      modelEnv,
+		// release_import 要真实上传全部制品：Syntropy 0.5.18 是 4 GB 级别，
+		// 两个升级服务并行也要 20 分钟以上。20 分钟的默认值会在真发版时把
+		// 客户端连接掐断，而服务端其实已经灌完，Agent 只能重来一遍。
+		ToolTimeout: time.Duration(envInt("SMARTPIPE_RELEASE_AGENT_TOOL_TIMEOUT_SEC", 3600)) * time.Second,
+		MaxSessions: envInt("SMARTPIPE_RELEASE_AGENT_MAX_SESSIONS", 0),
+		ModelEnv:    modelEnv,
 	})
 	_ = ctx
 	log.Printf("发布 Agent 已启用：MCP %s，工作目录 %s", mcpURL, workRoot)
