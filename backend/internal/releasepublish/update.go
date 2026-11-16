@@ -290,6 +290,24 @@ func (c *UpdateClient) UploadArtifact(ctx context.Context, credentialRef, releas
 	return &out, nil
 }
 
+// SetArtifactSources registers alternate public download URLs for one artifact
+// cell. The service keeps deriving its primary URL from its own public base and
+// stores the rest, in order, for clients that probe several sources.
+func (c *UpdateClient) SetArtifactSources(ctx context.Context, credentialRef, releaseID, slot, platformOS, arch string, urls []string) (*Artifact, error) {
+	releaseID = strings.TrimSpace(releaseID)
+	slot = strings.TrimSpace(slot)
+	if releaseID == "" || slot == "" {
+		return nil, fmt.Errorf("%w: release id and slot are required", ErrInvalid)
+	}
+	path := fmt.Sprintf("/v1/admin/releases/%s/artifacts/%s/%s/%s/sources",
+		url.PathEscape(releaseID), url.PathEscape(slot), platformSegment(platformOS), platformSegment(arch))
+	var out Artifact
+	if err := c.do(ctx, credentialRef, http.MethodPut, path, map[string][]string{"urls": urls}, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // PublishRelease points the (component, channel) pointer at this release.
 func (c *UpdateClient) PublishRelease(ctx context.Context, credentialRef, releaseID string) error {
 	releaseID = strings.TrimSpace(releaseID)

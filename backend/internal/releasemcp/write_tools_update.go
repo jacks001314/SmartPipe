@@ -155,6 +155,10 @@ func (s *Server) stageImport(ctx context.Context, p *principal, args map[string]
 	channel := firstNonEmpty(stringArg(args, "channel"), run.Channel)
 	replaceExisting, _ := args["replace_existing"].(bool)
 
+	// 备用下载来源取「所有启用的升级服务」，而不是本次选中的子集：每个服务的签名
+	// 清单都要带上别的服务地址，客户端在某个来源不可达时才能换源。
+	downloadSources := s.updateTargets(ctx)
+
 	byID := make(map[int64]releasev2.Artifact, len(artifacts))
 	for _, a := range artifacts {
 		byID[a.ID] = a
@@ -176,7 +180,7 @@ func (s *Server) stageImport(ctx context.Context, p *principal, args map[string]
 			defer wg.Done()
 			progress := newUploadProgress(s.Store, run.ID, "agent:"+p.Token.ID, "update_import", service.Name, service.URL, fileCount)
 			progress.begin(ctx)
-			staged, err := s.stageToService(ctx, service, credential, run, channel, bundle, layout, byID, replaceExisting, progress)
+			staged, err := s.stageToService(ctx, service, credential, run, channel, bundle, layout, byID, replaceExisting, downloadSources, progress)
 			if err != nil {
 				progress.failed(ctx, err)
 			} else {
@@ -412,7 +416,7 @@ func (s *Server) checkVersionConflicts(ctx context.Context, service updateTarget
 
 // stageToService does the per-service work: ensure components, find or create
 // the release, then upload every artifact cell that is missing or different.
-func (s *Server) stageToService(ctx context.Context, service updateTarget, credential string, run *releasev2.Run, channel string, bundle releasev2.UpgradeBundle, layout releasev2.BundleLayout, byID map[int64]releasev2.Artifact, replaceExisting bool, progress *uploadProgress) (*serviceStage, error) {
+func (s *Server) stageToService(ctx context.Context, service updateTarget, credential string, run *releasev2.Run, channel string, bundle releasev2.UpgradeBundle, layout releasev2.BundleLayout, byID map[int64]releasev2.Artifact, replaceExisting bool, downloadSources []updateTarget, progress *uploadProgress) (*serviceStage, error) {
 	if !replaceExisting {
 		conflict, err := s.checkVersionConflicts(ctx, service, credential, bundle, layout)
 		if err != nil {
@@ -481,24 +485,31 @@ func (s *Server) stageToService(ctx context.Context, service updateTarget, crede
 			if digest != "" && existing[cell] == digest {
 				out.skipped++
 				progress.skipFile(ctx, file)
-				return nil
+			} else {
+				reader, err := s.Objects.Open(ctx, source.StorageKey)
+				if err != nil {
+					return fmt.Errorf("读取制品 %s: %w", source.Name, err)
+				}
+				started := time.Now()
+				_, uploadErr := service.Client.UploadArtifact(ctx, credential, rel.ID, slot, platformOS, arch, filename, digest, size, progress.startFile(ctx, file, reader))
+				closeErr := reader.Close()
+				if uploadErr != nil {
+					return fmt.Errorf("上传 %s %s: %w", name, cell, uploadErr)
+				}
+				if closeErr != nil {
+					return fmt.Errorf("关闭制品 %s: %w", source.Name, closeErr)
+				}
+				existing[cell] = digest
+				out.uploaded++
+				progress.finishFile(ctx, file, time.Since(started))
 			}
-			reader, err := s.Objects.Open(ctx, source.StorageKey)
-			if err != nil {
-				return fmt.Errorf("读取制品 %s: %w", source.Name, err)
+			// 字节就位后登记候选下载来源；跳过（远端已存在同摘要）的也要写，这样
+			// 重跑一次导入就能补齐老清单里缺失的 urls。
+			if urls := artifactSourceURLs(downloadSources, digest); len(urls) > 0 {
+				if _, err := service.Client.SetArtifactSources(ctx, credential, rel.ID, slot, platformOS, arch, urls); err != nil {
+					return fmt.Errorf("登记 %s %s 的备用来源: %w", name, cell, err)
+				}
 			}
-			started := time.Now()
-			_, uploadErr := service.Client.UploadArtifact(ctx, credential, rel.ID, slot, platformOS, arch, filename, digest, size, progress.startFile(ctx, file, reader))
-			closeErr := reader.Close()
-			if uploadErr != nil {
-				return fmt.Errorf("上传 %s %s: %w", name, cell, uploadErr)
-			}
-			if closeErr != nil {
-				return fmt.Errorf("关闭制品 %s: %w", source.Name, closeErr)
-			}
-			existing[cell] = digest
-			out.uploaded++
-			progress.finishFile(ctx, file, time.Since(started))
 			return nil
 		}
 		for _, slot := range component.Slots {
@@ -927,6 +938,30 @@ func artifactCell(slot, platformOS, arch string) string {
 		return slot + "/content"
 	}
 	return slot + "/" + platformOS + "/" + arch
+}
+
+// artifactSourceURLs 把每个启用升级服务的公开下载入口展开成该摘要的候选地址。
+// 服务端只把与自身主地址不同的项存成备用来源，客户端按测速结果挑一个下载。
+func artifactSourceURLs(services []updateTarget, digest string) []string {
+	digest = normalizeDigest(digest)
+	if digest == "" {
+		return nil
+	}
+	urls := make([]string, 0, len(services))
+	seen := make(map[string]struct{}, len(services))
+	for _, service := range services {
+		base := strings.TrimRight(strings.TrimSpace(service.URL), "/")
+		if base == "" {
+			continue
+		}
+		candidate := base + "/v1/blobs/" + digest
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		urls = append(urls, candidate)
+	}
+	return urls
 }
 
 func normalizeDigest(value string) string {

@@ -1,6 +1,7 @@
 package releasemcp
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -30,6 +31,26 @@ func TestContentArtifactNameUsesServiceConvention(t *testing.T) {
 		if err != nil || got != tc.want {
 			t.Fatalf("%s %q = %q, %v; want %q", tc.name, tc.filename, got, err, tc.want)
 		}
+	}
+}
+
+func TestArtifactSourceURLsExpandEveryService(t *testing.T) {
+	services := []updateTarget{
+		{Name: "cdn", URL: "https://cdn.example.com:8443/"},
+		{Name: "app", URL: "https://app.example.com"},
+		{Name: "app-again", URL: "https://app.example.com/"},
+		{Name: "blank", URL: "  "},
+	}
+	got := artifactSourceURLs(services, "sha256:ABCDEF")
+	want := []string{
+		"https://cdn.example.com:8443/v1/blobs/abcdef",
+		"https://app.example.com/v1/blobs/abcdef",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("artifactSourceURLs = %v, want %v", got, want)
+	}
+	if got := artifactSourceURLs(services, " "); got != nil {
+		t.Fatalf("a digest-less artifact must not get sources, got %v", got)
 	}
 }
 
