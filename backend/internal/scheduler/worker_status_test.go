@@ -47,6 +47,84 @@ func TestWorkerStatusQuestionWithoutWorker(t *testing.T) {
 	}
 }
 
+func TestWorkerStatusQuestionAnswersFixedIssue(t *testing.T) {
+	h := newHarness(t, Config{})
+	_, _ = h.repo.CreateWorker(context.Background(), &Worker{
+		ProjectID: "prj-1", Issue: 365, State: StateClosed, ChatID: "group-1", PRNumber: 12,
+	})
+	h.tracker.setState(365, "closed")
+	h.runner.chatReply = `{"action":"answer","reply":"不应该调用模型"}`
+
+	if err := h.s.HandleMessage(context.Background(), msg("m-issue-state",
+		"https://github.com/acme/core/issues/365 这个问题修复了没有")); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if h.runner.count("chat") != 0 {
+		t.Fatalf("status question should not call chat worker, got %d", h.runner.count("chat"))
+	}
+	sent := strings.Join(h.notifier.all(), "\n")
+	if !strings.Contains(sent, "已经关闭") || !strings.Contains(sent, "PR #12") {
+		t.Fatalf("status reply = %q", sent)
+	}
+}
+
+func TestObservedWorkerStatusDoesNotCallModel(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.project.Policy = ChatPolicy{Mode: "smart"}
+	_, _ = h.repo.CreateWorker(context.Background(), &Worker{
+		ProjectID: "prj-1", Issue: 365, State: StateVerifying, ChatID: "group-1",
+	})
+	h.runner.triageReply = `{"action":"silent","reason":"不应该调用模型","confidence":0.2}`
+
+	if err := h.s.HandleMessage(context.Background(), nonAtMsg("m-observed-status", "#365 这个问题修复了没有")); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if h.runner.count("chat") != 0 {
+		t.Fatalf("observed status question should not call model, got %d", h.runner.count("chat"))
+	}
+	sent := strings.Join(h.notifier.all(), "\n")
+	if !strings.Contains(sent, "正在验证") || !strings.Contains(sent, "仍是 open") {
+		t.Fatalf("status reply = %q", sent)
+	}
+}
+
+func TestWorkerControlRecheckQueuesWorker(t *testing.T) {
+	h := newHarness(t, Config{})
+	if err := h.s.HandleMessage(context.Background(), msg("m-recheck", "让 worker 复核 #365，没有修复就修一下")); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	w, _ := h.repo.ActiveWorker(context.Background(), "prj-1", 365)
+	if w == nil || w.State != StateQueued {
+		t.Fatalf("recheck should queue worker: %+v", w)
+	}
+	if !strings.Contains(strings.Join(h.notifier.all(), "\n"), "已为 Issue #365 重新排队") {
+		t.Fatalf("reply = %#v", h.notifier.all())
+	}
+}
+
+func TestObservedWorkerRecheckQueuesWorker(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.project.Policy = ChatPolicy{Mode: "smart"}
+	_ = h.repo.AppendChat(context.Background(), ChatMessage{
+		ChatID: "group-1", ProjectID: "prj-1", Role: "assistant", Body: "已补充到 Issue #365",
+	})
+	h.runner.triageReply = `{"action":"silent","reason":"不应该调用模型","confidence":0.2}`
+
+	if err := h.s.HandleMessage(context.Background(), nonAtMsg("m-observed-fix", "让worker复核，没有修复就修一下")); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	w, _ := h.repo.ActiveWorker(context.Background(), "prj-1", 365)
+	if w == nil || w.State != StateQueued {
+		t.Fatalf("observed recheck should queue worker: %+v", w)
+	}
+	if h.runner.count("chat") != 0 {
+		t.Fatalf("observed recheck should not call model, got %d", h.runner.count("chat"))
+	}
+	if !strings.Contains(strings.Join(h.notifier.all(), "\n"), "已为 Issue #365 重新排队") {
+		t.Fatalf("reply = %#v", h.notifier.all())
+	}
+}
+
 func TestChatPromptIncludesWorkerState(t *testing.T) {
 	h := newHarness(t, Config{})
 	_, _ = h.repo.CreateWorker(context.Background(), &Worker{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 )
 
@@ -28,10 +29,10 @@ func isWorkerStatusQuestion(text string) bool {
 	fixStatus := []string{"开始修", "在修", "修完", "修复了吗", "修复了没", "修复了没有",
 		"有修复吗", "有修复没", "修好了吗", "修好了没", "修好了没有", "修没修", "修复没",
 		"解决了吗", "解决没有", "改好了吗", "处理好了吗"}
-	status := append([]string{"状态", "进度", "有没有", "是否", "到哪", "完成了吗"}, fixStatus...)
+	status := has(append([]string{"状态", "进度", "有没有", "是否", "到哪", "完成了吗"}, fixStatus...)...)
 	return (has("worker") && (status || has("派发"))) ||
 		(has("派发") && (status || has("修复") || has("worker"))) ||
-		(has("修复") && has(status...)) ||
+		(has("修复") && status) ||
 		(has("pr") && status) ||
 		(has("进度") && (has("#") || has("issue")))
 }
@@ -154,17 +155,40 @@ func workerStateLabel(s State) string {
 	}
 }
 
-// workerStatusReply 用数据库里的真实 worker 状态回答群里的进度问题。
-func workerStatusReply(issue int, w *Worker) string {
+// workerStatusReply 用数据库里的真实 worker 状态和 GitHub Issue 状态回答进度问题。
+func workerStatusReply(issue int, w *Worker, issueState string) string {
+	closedIssue := strings.EqualFold(strings.TrimSpace(issueState), "closed")
+	openIssue := strings.EqualFold(strings.TrimSpace(issueState), "open")
 	if w == nil {
-		return fmt.Sprintf("目前没有。Issue #%d 没有进行中的 worker。需要修复的话，请在群里补充 #%d 和修复要求，或在 Issue 评论里发送 `/fix`。", issue, issue)
+		if closedIssue {
+			return fmt.Sprintf("目前没有进行中的 worker。Issue #%d 在 GitHub 上已经关闭；如需复核，发送 `/fix #%d`。", issue, issue)
+		}
+		text := fmt.Sprintf("目前没有。Issue #%d 没有进行中的 worker。", issue)
+		if openIssue {
+			text += "GitHub 上仍是 open。"
+		}
+		return text + fmt.Sprintf("需要修复的话，请在群里补充 #%d 和修复要求，或在 Issue 评论里发送 `/fix`。", issue)
 	}
 	if w.State == StateClosed {
+		pr := "没有 PR"
+		if w.PRNumber > 0 {
+			pr = fmt.Sprintf("PR #%d", w.PRNumber)
+		}
+		switch {
+		case closedIssue:
+			return fmt.Sprintf("Issue #%d 在 GitHub 上已经关闭，worker 已结束（%s）。如需重新复核，发送 `/fix #%d`。", issue, pr, issue)
+		case openIssue:
+			return fmt.Sprintf("Issue #%d 仍是 open，worker 已结束（%s）。如需复核或继续修复，发送 `/fix #%d`。", issue, pr, issue)
+		}
 		return fmt.Sprintf("Issue #%d 的 worker 已结束。如需重新修复，发送 `/fix #%d`。", issue, issue)
 	}
 	if w.State == StateFailed {
-		return fmt.Sprintf("Issue #%d 的 worker 执行失败：%s。发送 `/retry #%d` 重试，或 `/fix #%d` 重新排队。",
+		text := fmt.Sprintf("Issue #%d 的 worker 执行失败：%s。发送 `/retry #%d` 重试，或 `/fix #%d` 重新排队。",
 			issue, clamp(firstNonEmpty(w.LastError, "未知错误"), 200), issue, issue)
+		if openIssue {
+			text += " GitHub 上仍是 open。"
+		}
+		return text
 	}
 	parts := []string{fmt.Sprintf("有。Issue #%d 的 worker 当前状态：%s", issue, workerStateLabel(w.State))}
 	if w.Branch != "" {
@@ -182,6 +206,11 @@ func workerStatusReply(issue int, w *Worker) string {
 	if w.State == StateFailed && w.LastError != "" {
 		parts = append(parts, "错误："+clamp(w.LastError, 200))
 	}
+	if closedIssue {
+		parts = append(parts, "GitHub Issue 已关闭")
+	} else if openIssue {
+		parts = append(parts, "GitHub Issue 仍是 open")
+	}
 	return strings.Join(parts, "；")
 }
 
@@ -198,7 +227,7 @@ func workerActionText(issue int, action string, w *Worker) string {
 	case "fix":
 		return fmt.Sprintf("已为 Issue #%d 重新排队 worker。", issue)
 	default:
-		return workerStatusReply(issue, w)
+		return workerStatusReply(issue, w, "")
 	}
 }
 
@@ -231,11 +260,45 @@ func (s *Scheduler) answerWorkerStatus(ctx context.Context, p *Project, msg Inbo
 	if issue <= 0 {
 		return true, s.replyWorker(ctx, p, msg, 0, "请在消息里带上 Issue 编号（例如 #210），我才能查看 worker 状态。")
 	}
+	return true, s.replyWorkerStatus(ctx, p, msg, issue)
+}
+
+// answerObservedWorkerStatus 处理 smart/all 模式里没有 @ 机器人的进度问句：
+// 这类问题只读，能定位到 Issue 时直接答，不必交给不了解调度状态的聊天模型。
+func (s *Scheduler) answerObservedWorkerStatus(ctx context.Context, p *Project, msg Inbound, history []ChatMessage) (bool, error) {
+	if !isWorkerStatusQuestion(msg.Text) {
+		return false, nil
+	}
+	issue := referencedIssue(msg.Text)
+	if issue <= 0 {
+		issue = recentIssueFromHistory(history)
+	}
+	if issue <= 0 {
+		return false, nil
+	}
+	return true, s.replyWorkerStatus(ctx, p, msg, issue)
+}
+
+func (s *Scheduler) replyWorkerStatus(ctx context.Context, p *Project, msg Inbound, issue int) error {
 	w, err := s.workerForIssue(ctx, p.ID, issue)
 	if err != nil {
-		return true, s.replyWorker(ctx, p, msg, issue, "暂时查不到 worker 状态，请稍后再试。")
+		return s.replyWorker(ctx, p, msg, issue, "暂时查不到 worker 状态，请稍后再试。")
 	}
-	return true, s.replyWorker(ctx, p, msg, issue, workerStatusReply(issue, w))
+	return s.replyWorker(ctx, p, msg, issue, workerStatusReply(issue, w, s.issueState(ctx, p, issue)))
+}
+
+// issueState 读取 GitHub Issue 的真实状态，用于回答“修复了没有”。
+// 查询失败不影响 worker 状态回复，只是不展示 Issue 状态。
+func (s *Scheduler) issueState(ctx context.Context, p *Project, issue int) string {
+	if s.tracker == nil || issue <= 0 {
+		return ""
+	}
+	it, err := s.tracker.GetIssue(ctx, p.ID, issue)
+	if err != nil {
+		log.Printf("[scheduler] get issue %d state: %v", issue, err)
+		return ""
+	}
+	return it.State
 }
 
 // answerWorkerControl 处理群内的 worker 控制动作：暂停、恢复、重试、停止、重新排队。
@@ -248,6 +311,11 @@ func (s *Scheduler) answerWorkerControl(ctx context.Context, p *Project, msg Inb
 		_ = s.repo.MarkMessage(ctx, msg.PlatformMessageID, "control_blocked", "副作用命令必须 @ 机器人或使用明确命令", 0, "")
 		return false, nil
 	}
+	return s.applyWorkerControl(ctx, p, msg, history, action, explicit)
+}
+
+// applyWorkerControl 执行已经通过权限判断的 worker 控制动作。
+func (s *Scheduler) applyWorkerControl(ctx context.Context, p *Project, msg Inbound, history []ChatMessage, action string, explicit bool) (bool, error) {
 	issue := referencedIssue(msg.Text)
 	if issue <= 0 {
 		issue = recentIssueFromHistory(history)

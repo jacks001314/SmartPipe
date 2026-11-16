@@ -91,6 +91,13 @@ func isNaturalControlCommand(text string) bool {
 	return false
 }
 
+// explicitlyNamesWorker 识别明显在指挥 worker 的措辞。smart 模式下只有这类
+// 消息才允许自动触发 /fix；暂停、停止、重试仍然必须 @ 机器人或写明确命令。
+func explicitlyNamesWorker(text string) bool {
+	t := strings.ToLower(text)
+	return strings.Contains(t, "worker") || strings.Contains(t, "机器人")
+}
+
 // shouldObserve 只过滤确定没有信息量的消息（单字、纯表情、纯符号）。
 // 其余消息一律交给观察模型判断要不要回应、建单还是沉默——判断权在模型，
 // 关键词只做记录，不用来提前丢弃消息。
@@ -166,8 +173,23 @@ func (s *Scheduler) runTriage(ctx context.Context, p *Project, history []ChatMes
 func (s *Scheduler) handleObserved(ctx context.Context, p *Project, msg Inbound, history []ChatMessage, force bool) error {
 	policy := normalizeChatPolicy(p.Policy)
 	if isNaturalControlCommand(msg.Text) {
+		action, _ := parseWorkerControl(msg.Text)
+		issue := referencedIssue(msg.Text)
+		if issue <= 0 {
+			issue = recentIssueFromHistory(history)
+		}
+		if !policy.Shadow && action == "fix" && issue > 0 && explicitlyNamesWorker(msg.Text) {
+			if handled, err := s.applyWorkerControl(ctx, p, msg, history, action, false); handled {
+				return err
+			}
+		}
 		_ = s.repo.MarkMessage(ctx, msg.PlatformMessageID, "control_blocked", "副作用命令必须 @ 机器人或使用明确命令", 0, "")
 		return nil
+	}
+	if !policy.Shadow {
+		if handled, err := s.answerObservedWorkerStatus(ctx, p, msg, history); handled {
+			return err
+		}
 	}
 	if !force && !shouldObserve(msg.Text) {
 		status := "ignored"
