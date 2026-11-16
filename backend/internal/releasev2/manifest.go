@@ -78,7 +78,10 @@ func DefaultDestinations(kind string, explicit []string) []string {
 	case "manifest":
 		return []string{"update:manifest"}
 	default:
-		return []string{"github"}
+		// 其余二进制/内容默认只进升级服务：它们由 update-bundle 引用，不是给用户直接
+		// 下载的。GitHub Release 只放 installer（完整安装包），避免附件列表爆炸。
+		// 需要额外投递 GitHub 的项目在制品规则里显式写 destinations。
+		return []string{"update:full"}
 	}
 }
 
