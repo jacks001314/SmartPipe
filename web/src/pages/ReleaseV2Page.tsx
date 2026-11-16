@@ -30,7 +30,9 @@ function statusChip(status: string) {
 
 const ALL_SCOPES = ["release.read", "executor.read", "artifact.read", "build.read", "release.write", "artifact.write", "update.read", "update.write", "update.publish", "github.write", "release.publish"];
 
-export function ReleaseV2Page({ notify }: { notify: Notify }) {
+export type ReleaseV2View = "create" | "runs" | "executors";
+
+export function ReleaseV2Page({ notify, view = "runs" }: { notify: Notify; view?: ReleaseV2View }) {
   const [runs, setRuns] = useState<ReleaseV2Run[]>([]);
   const [executors, setExecutors] = useState<ReleaseV2Executor[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -333,7 +335,7 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
 
   return (
     <div className="stack">
-      <div className="card">
+      <div className="card release-create" style={{ display: view === "create" ? undefined : "none" }}>
         <div className="card-head">
           <div>
             <div className="card-title">新建发布</div>
@@ -415,7 +417,7 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
         </div>
       </div>
 
-      <div className="card">
+      <div className="card" style={{ display: view === "executors" ? undefined : "none" }}>
         <div className="card-head">
           <div><div className="card-title">构建执行器</div><div className="card-sub">填 SSH 连接信息直接部署：服务端上传 release-executor、写入令牌并在构建机上后台启动；也可以生成命令手动安装。</div></div>
           <button className="btn" onClick={() => setBootOpen((v) => !v)}>{bootOpen ? "收起" : "＋ 添加构建机"}</button>
@@ -510,7 +512,7 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
         </div>
       </div>
 
-      <div className="card">
+      <div className="card" style={{ display: view === "runs" ? undefined : "none" }}>
         <div className="card-head">
           <div><div className="card-title">发版运行</div><div className="card-sub">{error || "每次构建、校验、暂存与渠道推进都在这里留痕。"}</div></div>
         </div>
@@ -535,7 +537,7 @@ export function ReleaseV2Page({ notify }: { notify: Notify }) {
         </div>
       </div>
 
-      {detail && (
+      {detail && view === "runs" && (
         <div className="card">
           <div className="card-head">
             <div>

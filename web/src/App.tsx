@@ -244,7 +244,7 @@ export function App() {
           {(page === "releaseCenter" || page === "release" || page === "releaseV2" || page === "releaseSettings") && (
             <ReleaseCenterPage
               notify={notify}
-              initialTab={page === "releaseSettings" ? "settings" : "runs"}
+              initialTab={page === "releaseSettings" ? "settings" : page === "releaseCenter" ? "create" : "runs"}
             />
           )}
           {page === "crash" && <CrashPage notify={notify} />}

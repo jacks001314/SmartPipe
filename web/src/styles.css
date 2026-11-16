@@ -1298,3 +1298,9 @@ input, select, textarea { font-family: inherit; color: var(--ink); }
 .release-tab small { color: var(--muted); font-size: 11px; }
 .release-tab:hover { border-color: var(--brand); }
 .release-tab.active { border-color: var(--brand); background: var(--brand-soft); }
+
+/* 发版中心按页签分屏：新建发布只放表单，运行记录只放列表，构建机独立成页。 */
+.release-create .form-grid,
+.release-create .notice,
+.release-create .card-body > .btn-row { max-width: 980px; }
+.release-create .form-grid .field.wide { grid-column: 1 / -1; }
