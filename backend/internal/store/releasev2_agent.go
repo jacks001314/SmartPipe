@@ -241,3 +241,26 @@ RETURNING run_id`)
 	}
 	return ids, rows.Err()
 }
+
+// ParkReleaseV2Run 把运行显式停在 needs_attention，并写入终止性错误码。
+// 与 MarkReleaseV2RunNeedsAttention 不同，重复调用是幂等的：状态和错误码
+// 都没变时不再写事件。带错误码的运行也不会被 release-service 按"目标都
+// ready"的事实收口回 artifacts_ready，从而避免和 attention worker 的停靠
+// 形成每轮一次的无限往返（生产事故：事件面板每 40 秒刷一次）。
+func (s *Store) ParkReleaseV2Run(ctx context.Context, runID, code, reason string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE release_v2_runs SET status='needs_attention', error_code=$2, error_message=$3, updated_at=now()
+ WHERE id=$1 AND (status<>'needs_attention' OR error_code<>$2)`, runID, code, reason)
+	if err != nil {
+		return false, fmt.Errorf("store: park release v2 run: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 1 {
+		_ = appendReleaseV2EventTx(ctx, s.db, releasev2.Event{
+			RunID: runID, Actor: "system:attention", Kind: "run.needs_attention",
+			Summary: reason,
+			Detail:  map[string]any{"code": code},
+		})
+	}
+	return n == 1, nil
+}

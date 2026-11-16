@@ -66,14 +66,12 @@ func (a *API) resumeAttentionRuns(ctx context.Context, maxAttempts int, cooldown
 			continue
 		}
 		if maxAttempts > 0 && run.RecoveryAttempts >= maxAttempts {
-			// 重试预算用尽还停在中间态时必须显式落到 needs_attention：
-			// 否则 runner 会把运行收回 artifacts_ready，表面看像正常，
-			// 实际再也没有任何东西会继续灌库和推渠道。
-			if run.Status != releasev2.RunNeedsAttention {
-				if moved, err := a.store.MarkReleaseV2RunNeedsAttention(ctx, run.ID,
-					fmt.Sprintf("自动接管次数已用尽（%d/%d）", run.RecoveryAttempts, maxAttempts)); err == nil && moved {
-					log.Printf("发布运行 %s 自动接管次数用尽，已标记 needs_attention", run.ID)
-				}
+			// 预算用尽必须显式停靠到 needs_attention，并带终止性错误码：
+			// 否则 runner 会把运行收回 artifacts_ready，下一轮又停靠回来，
+			// 事件面板每轮刷一次（生产事故：每 40 秒刷屏）。
+			reason := fmt.Sprintf("自动接管次数已用尽（%d/%d）", run.RecoveryAttempts, maxAttempts)
+			if parked, err := a.store.ParkReleaseV2Run(ctx, run.ID, releasev2.ErrorRecoveryExhausted, reason); err == nil && parked {
+				log.Printf("发布运行 %s 自动接管次数用尽，已停靠 needs_attention", run.ID)
 			}
 			continue
 		}

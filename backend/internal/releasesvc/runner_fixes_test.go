@@ -75,6 +75,25 @@ func TestRunnerKeepsNeedsAttentionRunWithFailedTarget(t *testing.T) {
 	}
 }
 
+// 预算用尽被停靠的运行不能再被"目标都 ready"收回 artifacts_ready，
+// 否则它会和 attention worker 的停靠形成每轮一次的无限往返。
+func TestRunnerKeepsParkedNeedsAttentionRun(t *testing.T) {
+	f := &fakeStore{
+		runs: []releasev2.Run{{
+			ID: "run_1", Status: releasev2.RunNeedsAttention, Mode: releasev2.ModePublish,
+			ManifestStorageKey: "manifests/run_1/run.json",
+			ErrorCode:          releasev2.ErrorRecoveryExhausted,
+		}},
+		targets: []releasev2.Target{{TargetID: "windows-amd64", Required: true, Status: releasev2.TargetReady}},
+	}
+	if err := (&Runner{Store: f}).Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if f.runs[0].Status != releasev2.RunNeedsAttention {
+		t.Fatalf("status = %s, want needs_attention", f.runs[0].Status)
+	}
+}
+
 func TestRunnerWaitsForRunManifestBeforeArtifactsReady(t *testing.T) {
 	f := &fakeStore{
 		runs:    []releasev2.Run{{ID: "run_1", Status: releasev2.RunBuilding, Mode: releasev2.ModePublish}},

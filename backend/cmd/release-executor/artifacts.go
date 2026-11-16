@@ -123,8 +123,11 @@ func uploadArtifactFile(ctx context.Context, client *http.Client, cfg config, en
 	kind := firstNonEmpty(rule.Kind, rule.Role)
 	destinations := releasev2.DefaultDestinations(rule.Kind, rule.Destinations)
 	// 制品平台：规则里显式声明优先（交叉构建），否则用 target 平台。
-	artifactOS := firstNonEmpty(rule.OS, env.Target.OS)
-	artifactArch := firstNonEmpty(rule.Arch, env.Target.Arch)
+	// 产物平台优先取规则声明，其次看文件名里的平台标记（一台构建机会交叉
+	// 构建其它平台的工具包），最后才回落到 target 平台。
+	nameOS, nameArch := releasev2.PlatformFromArtifactName(filepath.Base(file))
+	artifactOS := firstNonEmpty(rule.OS, nameOS, env.Target.OS)
+	artifactArch := firstNonEmpty(rule.Arch, nameArch, env.Target.Arch)
 	begin := map[string]any{
 		"run_id": env.Run.ID, "target_id": env.Target.TargetID, "attempt": env.Target.Attempt,
 		"role": rule.Role, "name": filepath.Base(file), "size": info.Size(),
@@ -299,11 +302,12 @@ func firstNonEmpty(values ...string) string {
 // confirmArtifactUpload tells release-service that a pre-signed PUT finished so
 // it can re-hash the object and register the artifact row.
 func confirmArtifactUpload(ctx context.Context, client *http.Client, cfg config, env *targetEnvelope, rule releasev2.ArtifactRule, name, relPath string, size int64, contentType, digest string) (*releasev2.Artifact, error) {
+	nameOS, nameArch := releasev2.PlatformFromArtifactName(name)
 	body := map[string]any{
 		"run_id": env.Run.ID, "target_id": env.Target.TargetID, "attempt": env.Target.Attempt,
 		"role": rule.Role, "name": name, "size": size, "content_type": contentType, "sha256": digest,
 		"kind": firstNonEmpty(rule.Kind, rule.Role), "path": relPath,
-		"os": firstNonEmpty(rule.OS, env.Target.OS), "arch": firstNonEmpty(rule.Arch, env.Target.Arch),
+		"os": firstNonEmpty(rule.OS, nameOS, env.Target.OS), "arch": firstNonEmpty(rule.Arch, nameArch, env.Target.Arch),
 		"destinations": releasev2.DefaultDestinations(rule.Kind, rule.Destinations),
 	}
 	raw, _ := json.Marshal(body)

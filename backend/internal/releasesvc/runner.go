@@ -171,6 +171,12 @@ func (r *Runner) advance(ctx context.Context, run *releasev2.Run) error {
 	case releasev2.RunRecovering:
 		return r.move(ctx, run, releasev2.RunPreparing, "release-service", "agent requested recovery")
 	case releasev2.RunNeedsAttention:
+		// 显式停靠的运行（例如自动接管预算用尽）不能被“目标都 ready”的
+		// 事实收回 artifacts_ready：attention worker 下一轮又会把它停靠
+		// 回来，两边来回搬状态会让事件面板无限刷屏。
+		if run.ErrorCode == releasev2.ErrorRecoveryExhausted {
+			return nil
+		}
 		// Agent 会话结束时运行会被交回 needs_attention，但重试可能已经成功：
 		// 所有必需目标 ready、run 清单已合并时没有可重试的失败目标，继续等
 		// Agent 会让运行永远停住。这里按事实状态收口，不覆盖仍然失败的目标。

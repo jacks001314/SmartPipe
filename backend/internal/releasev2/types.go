@@ -65,6 +65,12 @@ const (
 	RunCancelled          RunStatus = "cancelled"
 )
 
+// ErrorRecoveryExhausted 标记运行已经用尽自动接管预算，需要人工介入。
+// 带该错误码的 needs_attention 运行不会再被 release-service 按"目标都
+// ready"的事实收口回 artifacts_ready，否则会和 attention worker 的停靠
+// 形成每轮一次的无限往返，控制台事件面板会一直刷屏。
+const ErrorRecoveryExhausted = "recovery_exhausted"
+
 type TargetStatus string
 
 const (

@@ -300,6 +300,51 @@ func artifactPlatform(a Artifact, t Target) (string, string) {
 	if archName == "" {
 		archName = t.Arch
 	}
+	// 产物名里的平台标记比 target 平台更可信：一台构建机会交叉构建其它
+	// 平台的工具包（codex、mbot、node-runtime 等），上传端容易把它们全都
+	// 记成 target 的平台，导致同一个 slot 单元格被多份制品争用。
+	if nameOS, nameArch := PlatformFromArtifactName(a.Name); nameOS != "" || nameArch != "" {
+		if nameOS != "" {
+			osName = nameOS
+		}
+		if nameArch != "" {
+			archName = nameArch
+		}
+	}
+	return osName, archName
+}
+
+// PlatformFromArtifactName 从产物文件名里读平台标记，读不到的部分返回空串。
+// 只认完整的词元（按非字母数字切分），避免包名或版本号里的子串误判。
+func PlatformFromArtifactName(name string) (string, string) {
+	osName := ""
+	archName := ""
+	for _, token := range strings.FieldsFunc(strings.ToLower(name), func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_')
+	}) {
+		switch token {
+		case "darwin", "macos", "osx":
+			if osName == "" {
+				osName = "darwin"
+			}
+		case "windows", "win32", "win64":
+			if osName == "" {
+				osName = "windows"
+			}
+		case "linux":
+			if osName == "" {
+				osName = "linux"
+			}
+		case "amd64", "x86_64", "x64":
+			if archName == "" {
+				archName = "amd64"
+			}
+		case "arm64", "aarch64":
+			if archName == "" {
+				archName = "arm64"
+			}
+		}
+	}
 	return osName, archName
 }
 

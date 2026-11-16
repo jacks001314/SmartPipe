@@ -30,6 +30,71 @@ func bundleFixture() (*Run, []Target, []Artifact, BundleLayout) {
 	return run, targets, artifacts, layout
 }
 
+// 一台构建机交叉构建其它平台的工具包时，上传端可能把 os/arch 全写成
+// target 平台；bundle 必须按产物名把它们分到不同单元格，否则同一 slot
+// 会被多份制品争用（生产事故：codex-darwin-amd64.tgz 占住了
+// codex/darwin/arm64）。
+func TestBuildUpgradeBundleSeparatesCrossPlatformToolBundles(t *testing.T) {
+	run, _, _, layout := bundleFixture()
+	now := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
+	targets := []Target{{TargetID: "darwin-arm64", OS: "darwin", Arch: "arm64", Required: true, Status: TargetReady}}
+	digest := "sha256:" + strings.Repeat("c", 64)
+	names := []string{"codex-darwin-amd64.tgz", "codex-darwin-arm64.tgz", "codex-linux-amd64.tgz", "codex-windows-amd64.tgz"}
+	artifacts := make([]Artifact, 0, len(names))
+	for i, name := range names {
+		artifacts = append(artifacts, Artifact{
+			ID: int64(i + 1), RunID: run.ID, TargetID: "darwin-arm64", Role: "codex",
+			Name: name, OS: "darwin", Arch: "arm64", Size: 16, SHA256: digest,
+		})
+	}
+	layout.Slots = map[string]string{"codex": "codex"}
+	bundle, _, _, err := BuildUpgradeBundle(run, targets, artifacts, layout, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slots := bundle.Components["product"].Slots
+	if len(slots) != len(names) {
+		t.Fatalf("slots = %+v", slots)
+	}
+	cells := map[string]string{}
+	for _, slot := range slots {
+		cells[slot.OS+"/"+slot.Arch] = slot.Name
+	}
+	want := map[string]string{
+		"darwin/amd64":  "codex-darwin-amd64.tgz",
+		"darwin/arm64":  "codex-darwin-arm64.tgz",
+		"linux/amd64":   "codex-linux-amd64.tgz",
+		"windows/amd64": "codex-windows-amd64.tgz",
+	}
+	for cell, name := range want {
+		if cells[cell] != name {
+			t.Fatalf("cell %s = %q, want %q (all cells %+v)", cell, cells[cell], name, cells)
+		}
+	}
+}
+
+func TestPlatformFromArtifactName(t *testing.T) {
+	cases := []struct {
+		name     string
+		wantOS   string
+		wantArch string
+	}{
+		{name: "codex-windows-amd64.tgz", wantOS: "windows", wantArch: "amd64"},
+		{name: "mbot-linux-arm64", wantOS: "linux", wantArch: "arm64"},
+		{name: "node-runtime-x86_64", wantArch: "amd64"},
+		{name: "Syntropy-arm64-0.5.18.2026-11-15.dmg", wantArch: "arm64"},
+		{name: "SyntropySetup-0.5.18.2026-11-15.exe"},
+		{name: "update-bundle.json"},
+		{name: "syntropy-app-server"},
+	}
+	for _, tc := range cases {
+		osName, archName := PlatformFromArtifactName(tc.name)
+		if osName != tc.wantOS || archName != tc.wantArch {
+			t.Fatalf("%s = %q/%q, want %q/%q", tc.name, osName, archName, tc.wantOS, tc.wantArch)
+		}
+	}
+}
+
 func TestBuildUpgradeBundleIsCanonical(t *testing.T) {
 	run, targets, artifacts, layout := bundleFixture()
 	now := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
