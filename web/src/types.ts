@@ -718,6 +718,7 @@ export type ReleaseV2Preview = {
   repo: string;
   branch: string;
   version: string;
+  version_pending?: boolean;
   tag: string;
   commit: string;
   commit_date?: string;

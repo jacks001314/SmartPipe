@@ -222,6 +222,51 @@ func (c *Client) ReadFile(ctx context.Context, repo, ref, path string) (string, 
 	return content, true, nil
 }
 
+// ReadFileWithSHA 读取文件内容与 blob SHA，供提交时做乐观并发校验。
+func (c *Client) ReadFileWithSHA(ctx context.Context, repo, ref, path string) (string, string, bool, error) {
+	owner, name, err := SplitRepo(repo)
+	if err != nil {
+		return "", "", false, err
+	}
+	file, _, resp, err := c.gh.Repositories.GetContents(ctx, owner, name, path, &gh.RepositoryContentGetOptions{Ref: ref})
+	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			return "", "", false, nil
+		}
+		return "", "", false, wrapErr(err)
+	}
+	if file == nil || file.Content == nil {
+		return "", "", false, nil
+	}
+	content, err := file.GetContent()
+	if err != nil {
+		return "", "", false, wrapErr(err)
+	}
+	return content, file.GetSHA(), true, nil
+}
+
+// CommitFile 在分支上更新一个已存在的文本文件，返回新提交的 SHA。
+// blobSHA 来自 ReadFileWithSHA：并发修改时 GitHub 会返回 409，避免覆盖别人的提交。
+func (c *Client) CommitFile(ctx context.Context, repo, branch, path, message, content, blobSHA string) (string, error) {
+	owner, name, err := SplitRepo(repo)
+	if err != nil {
+		return "", err
+	}
+	opts := &gh.RepositoryContentFileOptions{
+		Message: gh.String(message),
+		Content: []byte(content),
+		Branch:  gh.String(branch),
+	}
+	if blobSHA != "" {
+		opts.SHA = gh.String(blobSHA)
+	}
+	resp, _, err := c.gh.Repositories.UpdateFile(ctx, owner, name, path, opts)
+	if err != nil {
+		return "", wrapErr(err)
+	}
+	return resp.Commit.GetSHA(), nil
+}
+
 // TagSHA 读取已存在 tag 指向的提交；tag 不存在时返回空串与 nil。
 func (c *Client) TagSHA(ctx context.Context, repo, tag string) (string, error) {
 	owner, name, err := SplitRepo(repo)

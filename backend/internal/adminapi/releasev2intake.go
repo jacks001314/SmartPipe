@@ -41,20 +41,22 @@ type releaseV2PreviewUpdateServer struct {
 }
 
 type releaseV2Preview struct {
-	ProjectID     string                         `json:"project_id"`
-	Repo          string                         `json:"repo"`
-	Branch        string                         `json:"branch"`
-	Version       string                         `json:"version"`
-	Tag           string                         `json:"tag"`
-	Commit        string                         `json:"commit"`
-	CommitDate    string                         `json:"commit_date,omitempty"`
-	BuildVersion  string                         `json:"build_version"`
-	Notes         string                         `json:"notes,omitempty"`
-	NotesPath     string                         `json:"notes_path,omitempty"`
-	Builds        []releaseV2PreviewBuild        `json:"builds"`
-	UpdateServers []releaseV2PreviewUpdateServer `json:"update_servers"`
-	Blockers      []releasev2.Blocker            `json:"blockers"`
-	Warnings      []releaseVersionWarning        `json:"warnings,omitempty"`
+	ProjectID string `json:"project_id"`
+	Repo      string `json:"repo"`
+	Branch    string `json:"branch"`
+	Version   string `json:"version"`
+	// VersionPending 表示用户指定了版本，创建发布会先写版本文件、提交主干并打 tag。
+	VersionPending bool                           `json:"version_pending,omitempty"`
+	Tag            string                         `json:"tag"`
+	Commit         string                         `json:"commit"`
+	CommitDate     string                         `json:"commit_date,omitempty"`
+	BuildVersion   string                         `json:"build_version"`
+	Notes          string                         `json:"notes,omitempty"`
+	NotesPath      string                         `json:"notes_path,omitempty"`
+	Builds         []releaseV2PreviewBuild        `json:"builds"`
+	UpdateServers  []releaseV2PreviewUpdateServer `json:"update_servers"`
+	Blockers       []releasev2.Blocker            `json:"blockers"`
+	Warnings       []releaseVersionWarning        `json:"warnings,omitempty"`
 }
 
 func (a *API) getReleaseV2ProjectPreview(c iris.Context) {
@@ -64,7 +66,7 @@ func (a *API) getReleaseV2ProjectPreview(c iris.Context) {
 		a.fail(c, err)
 		return
 	}
-	preview, err := a.resolveReleasePreview(c.Request().Context(), project)
+	preview, err := a.resolveReleasePreview(c.Request().Context(), project, releasePreviewOptions{Version: c.URLParam("version")})
 	if err != nil {
 		c.StatusCode(http.StatusUnprocessableEntity)
 		_ = c.JSON(envelope{Err: &apiError{Code: "release_preview_failed", Message: err.Error()}})
@@ -119,7 +121,12 @@ func (a *API) createReleaseV2RunFromIntake(c iris.Context, in releaseV2RunReques
 		a.fail(c, err)
 		return
 	}
-	preview, err := a.resolveReleasePreview(ctx, project)
+	cfg, err := a.store.GetProjectReleaseConfig(ctx, project.ID)
+	if err != nil {
+		a.fail(c, err)
+		return
+	}
+	preview, err := a.resolveReleasePreview(ctx, project, releasePreviewOptions{Version: in.Version})
 	if err != nil {
 		c.StatusCode(http.StatusUnprocessableEntity)
 		_ = c.JSON(envelope{Err: &apiError{Code: "release_preview_failed", Message: err.Error()}})
@@ -132,10 +139,22 @@ func (a *API) createReleaseV2RunFromIntake(c iris.Context, in releaseV2RunReques
 		_ = c.JSON(envelope{Err: &apiError{Code: "release_blocked", Message: blockersMessage(preview.Blockers)}})
 		return
 	}
-	cfg, err := a.store.GetProjectReleaseConfig(ctx, project.ID)
-	if err != nil {
-		a.fail(c, err)
-		return
+	// 拦截项都通过后才动仓库：界面上指定了版本时，先把版本写进版本文件、提交主干并打 tag，
+	// 后续构建固定在这个提交上，保证产物版本号和仓库一致。
+	var prep *releaseVersionPrep
+	if strings.TrimSpace(in.Version) != "" {
+		prep, err = a.prepareReleaseVersion(ctx, project, cfg, in.Version)
+		if err != nil {
+			c.StatusCode(http.StatusUnprocessableEntity)
+			_ = c.JSON(envelope{Err: &apiError{Code: "version_prepare_failed", Message: err.Error()}})
+			return
+		}
+		preview, err = a.resolveReleasePreview(ctx, project, releasePreviewOptions{Version: in.Version, Commit: prep.Commit})
+		if err != nil {
+			c.StatusCode(http.StatusUnprocessableEntity)
+			_ = c.JSON(envelope{Err: &apiError{Code: "release_preview_failed", Message: err.Error()}})
+			return
+		}
 	}
 	channels := cfg.ChannelOrder
 	if len(channels) == 0 {
@@ -175,6 +194,20 @@ func (a *API) createReleaseV2RunFromIntake(c iris.Context, in releaseV2RunReques
 	if err != nil {
 		a.releaseV2Error(c, err)
 		return
+	}
+	if prep != nil {
+		branch := firstNonEmpty(project.GitHubDefaultBranch, "main")
+		_ = a.store.AppendEvent(ctx, releasev2.Event{
+			RunID: run.ID, Actor: a.actor(c), Kind: "release.version_bumped",
+			Summary: fmt.Sprintf("%s 已写入 %s 并打 tag %s", prep.Version, branch, prep.Tag),
+			Detail: map[string]any{
+				"version": prep.Version, "tag": prep.Tag, "commit": prep.Commit,
+				"files": prep.Files, "commits": prep.Commits, "branch": branch,
+			},
+		})
+		a.audit(ctx, c, "release.v2.version_bump", "release_run_v2", run.ID, &project.ID, "ok", map[string]any{
+			"version": prep.Version, "tag": prep.Tag, "commit": prep.Commit, "files": prep.Files,
+		})
 	}
 	executorIDs := make([]string, 0, len(executorMap))
 	seenExecutors := map[string]bool{}
@@ -317,7 +350,15 @@ func blockersMessage(blockers []releasev2.Blocker) string {
 	return strings.Join(parts, "；")
 }
 
-func (a *API) resolveReleasePreview(ctx context.Context, project *store.Project) (*releaseV2Preview, error) {
+// releasePreviewOptions 描述界面传进来的版本意图。
+type releasePreviewOptions struct {
+	// Version 是用户指定的发布版本；非空时预览只展示计划，创建发布时才会写仓库。
+	Version string
+	// Commit 是版本已提交后要固定的提交，避免预览和建单之间又有人推代码。
+	Commit string
+}
+
+func (a *API) resolveReleasePreview(ctx context.Context, project *store.Project, opts releasePreviewOptions) (*releaseV2Preview, error) {
 	cfg, err := a.store.GetProjectReleaseConfig(ctx, project.ID)
 	if err != nil {
 		return nil, err
@@ -342,18 +383,23 @@ func (a *API) resolveReleasePreview(ctx context.Context, project *store.Project)
 			tags = items
 		}
 	}
-	version := ""
-	if cfg.VersionFile != "" {
-		version = a.readVersionFile(ctx, client, project, cfg, branch)
-	}
-	if version == "" && len(tags) > 0 {
-		version = strings.TrimPrefix(strings.TrimPrefix(tags[0].Name, "v"), "V")
-	}
+	requested := strings.TrimSpace(opts.Version)
+	version := requested
+	fromTag := false
 	if version == "" {
-		version = a.readVersionFile(ctx, client, project, cfg, branch)
-	}
-	if version == "" {
-		return nil, fmt.Errorf("无法确定产品版本：请在项目发布配置里填写 version_file，或在仓库里打 tag")
+		if cfg.VersionFile != "" {
+			version = a.readVersionFile(ctx, client, project, cfg, branch)
+		}
+		if version == "" && len(tags) > 0 {
+			version = strings.TrimPrefix(strings.TrimPrefix(tags[0].Name, "v"), "V")
+			fromTag = true
+		}
+		if version == "" {
+			version = a.readVersionFile(ctx, client, project, cfg, branch)
+		}
+		if version == "" {
+			return nil, fmt.Errorf("无法确定产品版本：请在项目发布配置里填写 version_file，或在仓库里打 tag")
+		}
 	}
 	version, err = releasev2.NormalizeVersion(version)
 	if err != nil {
@@ -361,12 +407,20 @@ func (a *API) resolveReleasePreview(ctx context.Context, project *store.Project)
 	}
 	preview.Version = version
 	preview.Tag = "v" + version
+	preview.VersionPending = requested != ""
 	for _, tag := range tags {
 		if strings.TrimPrefix(strings.TrimPrefix(tag.Name, "v"), "V") == version {
 			preview.Tag = tag.Name
-			preview.Commit = tag.SHA
+			// 只有版本本身来自 tag（没配版本文件）时才把提交钉在 tag 上；
+			// 版本来自版本文件时必须用分支最新提交，否则会构建到旧代码。
+			if opts.Commit == "" && fromTag {
+				preview.Commit = tag.SHA
+			}
 			break
 		}
+	}
+	if opts.Commit != "" {
+		preview.Commit = opts.Commit
 	}
 	if preview.Commit == "" && client != nil && clientErr == nil {
 		if sha, serr := client.BranchSHA(ctx, repo, branch); serr == nil {

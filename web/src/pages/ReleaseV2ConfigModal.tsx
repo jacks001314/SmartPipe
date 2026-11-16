@@ -270,7 +270,7 @@ export function ReleaseV2ConfigModal({
             <>
               <div className="form-grid">
                 <label className="field"><span>清单路径 manifest_path</span><input value={manifestPath} onChange={(event) => setManifestPath(event.target.value)} placeholder="desktop_app/dist/update-bundle/update-bundle.json" /></label>
-                <label className="field"><span>版本文件</span><input value={versionFile} onChange={(event) => setVersionFile(event.target.value)} placeholder="package.json" /></label>
+                <label className="field"><span>版本文件（多个用逗号分隔）</span><input value={versionFile} onChange={(event) => setVersionFile(event.target.value)} placeholder="package.json" /></label>
                 <label className="field"><span>版本 JSON 路径</span><input value={versionJSONPath} onChange={(event) => setVersionJSONPath(event.target.value)} placeholder="version" /></label>
                 <label className="field"><span>构建版本模板</span><input value={buildVersionTemplate} onChange={(event) => setBuildVersionTemplate(event.target.value)} placeholder="{version}.{date}" /></label>
                 <label className="field"><span>发布说明路径</span><input value={notesPath} onChange={(event) => setNotesPath(event.target.value)} placeholder="docs/releases/{tag}.md" /></label>

@@ -278,13 +278,13 @@ export const api = {
   getReleaseV2Agent: (id: string) => request<ReleaseV2AgentView>("/releases/v2/runs/" + encodeURIComponent(id) + "/agent"),
   startReleaseV2Agent: (id: string, body: { scopes?: string[]; model?: string; effort?: string }) =>
     request<ReleaseV2AgentSession>("/releases/v2/runs/" + encodeURIComponent(id) + "/agent", { method: "POST", body }),
-  releaseV2ProjectPreview: (id: string) =>
-    request<ReleaseV2Preview>("/releases/v2/projects/" + encodeURIComponent(id) + "/release-preview"),
+  releaseV2ProjectPreview: (id: string, version?: string) =>
+    request<ReleaseV2Preview>("/releases/v2/projects/" + encodeURIComponent(id) + "/release-preview" + (version ? "?version=" + encodeURIComponent(version) : "")),
   getReleaseV2ProjectConfig: (id: string) =>
     request<ReleaseV2ProjectReleaseConfig>("/releases/v2/projects/" + encodeURIComponent(id) + "/release-config"),
   saveReleaseV2ProjectConfig: (id: string, body: ReleaseV2ProjectReleaseConfig) =>
     request<ReleaseV2ProjectReleaseConfig>("/releases/v2/projects/" + encodeURIComponent(id) + "/release-config", { method: "PUT", body }),
-  createReleaseV2Run: (body: { project_id: string; executor_ids?: string[]; update_server_ids?: string[]; idempotency_key?: string }) =>
+  createReleaseV2Run: (body: { project_id: string; executor_ids?: string[]; update_server_ids?: string[]; idempotency_key?: string; version?: string }) =>
     request<ReleaseV2Run>("/releases/v2/runs", { method: "POST", body }),
   cancelReleaseV2Run: (id: string, reason?: string) =>
     request<ReleaseV2Run>("/releases/v2/runs/" + encodeURIComponent(id) + "/cancel", { method: "POST", body: { reason } }),

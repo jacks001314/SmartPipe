@@ -283,6 +283,7 @@ export function ReleaseV2Page({ notify, view = "runs", runId, onBack, onOpenRun 
   const [bootResult, setBootResult] = useState<ReleaseV2ExecutorDeployResult | null>(null);
   const [removing, setRemoving] = useState("");
   const [form, setForm] = useState({ project_id: "" });
+  const [versionInput, setVersionInput] = useState("");
   const [configOpen, setConfigOpen] = useState(false);
 
   const generateBootstrap = async () => {
@@ -476,17 +477,23 @@ export function ReleaseV2Page({ notify, view = "runs", runId, onBack, onOpenRun 
     }
   }
 
-  const loadPreview = useCallback(async (projectId: string) => {
+  const previewProjectRef = useRef("");
+  const loadPreview = useCallback(async (projectId: string, version: string) => {
     if (!projectId) {
       setPreview(null);
+      previewProjectRef.current = "";
       return;
     }
     setPreviewError("");
     try {
-      const next = await api.releaseV2ProjectPreview(projectId);
+      const next = await api.releaseV2ProjectPreview(projectId, version || undefined);
       setPreview(next);
-      setSelectedServers(next.update_servers.filter((s) => s.enabled).map((s) => s.id));
-      setSelectedExecutors(next.builds.map((b) => b.executor_id).filter((v): v is string => Boolean(v)));
+      // 换项目时才重置勾选，改版本不该把已选的升级服务器/构建机清掉。
+      if (previewProjectRef.current !== projectId) {
+        previewProjectRef.current = projectId;
+        setSelectedServers(next.update_servers.filter((s) => s.enabled).map((s) => s.id));
+        setSelectedExecutors(next.builds.map((b) => b.executor_id).filter((v): v is string => Boolean(v)));
+      }
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "读取发布预览失败";
       setPreview(null);
@@ -495,8 +502,9 @@ export function ReleaseV2Page({ notify, view = "runs", runId, onBack, onOpenRun 
   }, []);
 
   useEffect(() => {
-    void loadPreview(form.project_id);
-  }, [form.project_id, loadPreview]);
+    const timer = window.setTimeout(() => void loadPreview(form.project_id, versionInput.trim()), 400);
+    return () => window.clearTimeout(timer);
+  }, [form.project_id, versionInput, loadPreview]);
 
   async function createRun() {
     if (!form.project_id) return;
@@ -504,6 +512,7 @@ export function ReleaseV2Page({ notify, view = "runs", runId, onBack, onOpenRun 
     try {
       const run = await api.createReleaseV2Run({
         project_id: form.project_id,
+        version: versionInput.trim() || undefined,
         update_server_ids: selectedServers,
         executor_ids: selectedExecutors,
       });
@@ -570,7 +579,7 @@ export function ReleaseV2Page({ notify, view = "runs", runId, onBack, onOpenRun 
         <div className="card-head">
           <div>
             <div className="card-title">新建发布</div>
-            <div className="card-sub">选择项目、升级服务器和构建机；版本、源码包、构建、灌库和发布都由 Agent 自动完成。</div>
+            <div className="card-sub">选择项目、填写发布版本、升级服务器和构建机；填写版本后会先把版本提交到 main 并打 tag，再由 Agent 完成构建、灌库和发布。</div>
             <div className="tiny">构建命令与制品规则改「项目发版配置」；服务地址、令牌、GitHub 与对象存储改「全局设置」。</div>
           </div>
           <div className="btn-row">
@@ -582,10 +591,17 @@ export function ReleaseV2Page({ notify, view = "runs", runId, onBack, onOpenRun 
           <div className="form-grid">
             <label className="field">
               <span>项目</span>
-              <select value={form.project_id} onChange={(e) => setForm({ project_id: e.target.value })}>
+              <select value={form.project_id} onChange={(e) => { setForm({ project_id: e.target.value }); setVersionInput(""); }}>
                 {projects.filter((p) => p.enabled !== false).map((p) => <option key={p.id} value={p.id}>{p.name || p.id}</option>)}
               </select>
             </label>
+            <label className="field">
+              <span>发布版本</span>
+              <input value={versionInput} onChange={(e) => setVersionInput(e.target.value)} placeholder="如 0.5.19；留空沿用仓库版本" />
+            </label>
+            <div className="tiny muted" style={{ gridColumn: "1 / -1", marginTop: -4 }}>
+              填写版本后：拉取 main 最新代码 → 修改版本文件 → 提交 main → 打 tag v{"{版本}"} → 再进入构建与发布。
+            </div>
             <label className="field wide">
               <span>升级服务器</span>
               <div className="btn-row" style={{ flexWrap: "wrap", gap: 8 }}>
@@ -624,6 +640,7 @@ export function ReleaseV2Page({ notify, view = "runs", runId, onBack, onOpenRun 
           {preview && (
             <div className="notice" style={{ marginTop: 12 }}>
               <div><b>{preview.version}</b> · {preview.tag} · 提交 <span className="mono">{shortHash(preview.commit)}</span> · {preview.commit_date || "—"}</div>
+              {preview.version_pending && <div className="tiny">创建发布时会先把版本写入仓库、提交 main 并打 tag {preview.tag}</div>}
               <div className="tiny">构建版本 {preview.build_version} · 仓库 {preview.repo || "—"} · 分支 {preview.branch}</div>
               <div className="tiny">平台：{preview.builds.map((build) => build.target_id + (build.host_os ? " ← " + build.host_os + "/" + build.host_arch : "") + (selectedExecutorFor(build) ? "@" + selectedExecutorFor(build) : "")).join("，") || "—"}</div>
               {(preview.warnings ?? []).length > 0 && (
@@ -893,7 +910,7 @@ export function ReleaseV2Page({ notify, view = "runs", runId, onBack, onOpenRun 
         <ReleaseV2ConfigModal
           project={projects.find((project) => project.id === form.project_id) ?? null}
           onClose={() => setConfigOpen(false)}
-          onSaved={() => { void loadPreview(form.project_id); }}
+          onSaved={() => { void loadPreview(form.project_id, versionInput.trim()); }}
           notify={notify}
         />
       )}

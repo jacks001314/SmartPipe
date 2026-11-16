@@ -47,7 +47,9 @@ type releaseV2RunRequest struct {
 	ExecutorIDs     []string `json:"executor_ids"`
 	UpdateServerIDs []string `json:"update_server_ids"`
 	// Mode 只用于构建演练（build_only）：默认 publish，由 Agent 一路发到渠道。
-	Mode string `json:"mode,omitempty"`
+	// Version 是界面上指定的发布版本；填写后建单会先把版本写进仓库、提交主干并打 tag。
+	Version string `json:"version,omitempty"`
+	Mode    string `json:"mode,omitempty"`
 }
 
 // createReleaseV2Run 只有一个入口：项目 + 升级服务器 + 构建机。版本、tag、
