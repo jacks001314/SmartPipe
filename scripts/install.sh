@@ -90,6 +90,31 @@ random_key() {
   openssl rand -base64 32 | tr -d '\n'
 }
 
+# 部署包不带 .git，安装脚本只能用包根目录的 COMMIT 标记记录当前跑的是哪份
+# 代码。没有这个标记，「线上到底部署了没有」就只能靠猜。
+detect_commit() {
+  local from
+  if [[ -s "$SOURCE_DIR/COMMIT" ]]; then
+    from="$(tr -d '[:space:]' < "$SOURCE_DIR/COMMIT")"
+    if [[ -n "$from" ]]; then
+      echo "$from"
+      return 0
+    fi
+  fi
+  git -C "$SOURCE_DIR" rev-parse --short=12 HEAD 2>/dev/null || echo unknown
+}
+
+stamp_commit() {
+  local env_path="$1" commit
+  commit="$(detect_commit)"
+  [[ -n "$commit" ]] || return 0
+  if grep -q '^SMARTPIPE_COMMIT=' "$env_path"; then
+    sed -i "s|^SMARTPIPE_COMMIT=.*|SMARTPIPE_COMMIT=$(quote_env "$commit")|" "$env_path"
+  else
+    printf 'SMARTPIPE_COMMIT=%s\n' "$(quote_env "$commit")" >> "$env_path"
+  fi
+}
+
 generate_env() {
   local output="$1"
   if [[ -z "$DSN" || -z "$LANXIN_APP_ID" || -z "$LANXIN_APP_SECRET" ]]; then
@@ -110,7 +135,7 @@ EOF
   crash_token="$(random_hex)"
   hook_secret="$(random_hex)"
   master_key="$(random_key)"
-  commit="$(git -C "$SOURCE_DIR" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+  commit="$(detect_commit)"
 
   umask 077
   cat > "$output" <<EOF
@@ -275,6 +300,7 @@ install_docker_mode() {
     fi
   fi
   chmod 600 "$env_path"
+  stamp_commit "$env_path"
   (cd "$INSTALL_DIR/deploy" && docker compose config -q)
 
   if [[ "$DO_BUILD" -eq 1 ]]; then

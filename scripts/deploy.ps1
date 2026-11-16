@@ -65,6 +65,8 @@ try {
     "--exclude=deploy/data", "--exclude=deploy/.env", "--exclude=__pycache__", "--exclude=*.pyc"
   )
   $tarArgs += @("-C", $Root)
+  $commitFile = Join-Path $Stage "COMMIT"
+  $commit = (& git -C $Root rev-parse --short=12 HEAD 2>$null)
   $sourceItems = @(
     "Dockerfile", ".dockerignore", "smartpipe.yaml", "README.md",
     "backend", "sdks", "web", "configs", "deploy", "scripts", "docs"
@@ -79,6 +81,12 @@ try {
     $envFull = (Resolve-Path -LiteralPath $EnvFile).Path
     Copy-Item -LiteralPath $envFull -Destination (Join-Path $Stage ".deploy.env") -Force
     $tarArgs += @("-C", $Stage, ".deploy.env")
+  }
+  # 部署包里带上 commit，安装脚本据此写 SMARTPIPE_COMMIT；没有它就只能
+  # 靠猜「线上跑的是哪份代码」。放在最后加，避免 -C 影响前面的相对路径。
+  if ($LASTEXITCODE -eq 0 -and $commit) {
+    Set-Content -LiteralPath $commitFile -Value $commit.Trim() -NoNewline
+    $tarArgs += @("-C", $Stage, "COMMIT")
   }
   & tar.exe @tarArgs
   if ($LASTEXITCODE -ne 0) { throw "tar failed with exit code $LASTEXITCODE" }
