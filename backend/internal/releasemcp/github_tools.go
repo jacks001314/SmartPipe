@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"smartpipe/backend/internal/releasepublish"
 	"smartpipe/backend/internal/releasev2"
@@ -227,11 +228,18 @@ func (s *Server) githubDispatch(ctx context.Context, p *principal, name string, 
 			return nil, true, err
 		}
 		defer reader.Close()
+		file := uploadFile{Name: artifact.Name, Component: "github", Size: artifact.Size}
+		progress := newUploadProgress(s.Store, p.Run.ID, "agent:"+p.Token.ID, "github_asset", "github", "", 1)
+		progress.begin(ctx)
+		started := time.Now()
 		asset, err := s.githubClient(ctx).UploadAsset(ctx, s.githubCredential(ctx, args), owner, repo, releaseID,
-			artifact.Name, artifact.ContentType, reader, artifact.Size)
+			artifact.Name, artifact.ContentType, progress.startFile(ctx, file, reader), artifact.Size)
 		if err != nil {
+			progress.failed(ctx, err)
 			return nil, true, err
 		}
+		progress.finishFile(ctx, file, time.Since(started))
+		progress.finished(ctx)
 		if asset.Digest != "" && !sameDigest(asset.Digest, artifact.SHA256) {
 			return blockedResult("digest_mismatch", fmt.Sprintf("github digest %s != local %s", asset.Digest, artifact.SHA256)), true, nil
 		}

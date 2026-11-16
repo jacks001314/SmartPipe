@@ -22,6 +22,161 @@ function bytes(size: number) {
   return size + " B";
 }
 
+function sizeLabel(size: number) {
+  return size > 0 ? bytes(size) : "0 B";
+}
+
+function agoLabel(now: number, at: number) {
+  if (!at) return "—";
+  const seconds = Math.max(0, Math.round((now - at) / 1000));
+  if (seconds < 60) return seconds + " 秒前";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return minutes + " 分钟前";
+  return Math.floor(minutes / 60) + " 小时前";
+}
+
+function isProgressEvent(kind: string) {
+  return kind.endsWith(".progress") || kind.endsWith(".service_started") || kind.endsWith(".service_done") || kind.endsWith(".service_failed");
+}
+
+type LongTaskRow = {
+  service: string;
+  url?: string;
+  phase: "running" | "done" | "failed";
+  name?: string;
+  component?: string;
+  fileIndex: number;
+  fileCount: number;
+  bytesDone: number;
+  bytesTotal: number;
+  rate: number;
+  uploaded: number;
+  skipped: number;
+  error?: string;
+  updatedAt: number;
+};
+
+// collectLongTasks 把 update_import / github_asset 的进度事件折叠成每个服务一行，
+// 详情页用它展示长任务（灌制品、传 Release 资产）的实时进度。
+function collectLongTasks(events: ReleaseV2Event[]): LongTaskRow[] {
+  const rows = new Map<string, LongTaskRow>();
+  for (const event of events) {
+    if (!isProgressEvent(event.kind)) continue;
+    if (!event.kind.startsWith("update_import.") && !event.kind.startsWith("github_asset.")) continue;
+    const detail = (event.detail ?? {}) as Record<string, unknown>;
+    const text = (value: unknown) => (typeof value === "string" && value ? value : undefined);
+    const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
+    const service = text(detail.service) || event.target_id || "import";
+    const row = rows.get(service) ?? {
+      service, phase: "running" as const, fileIndex: 0, fileCount: 0, bytesDone: 0, bytesTotal: 0,
+      rate: 0, uploaded: 0, skipped: 0, updatedAt: 0,
+    };
+    rows.set(service, row);
+    row.url = text(detail.url) ?? row.url;
+    row.updatedAt = Date.parse(event.created_at) || row.updatedAt;
+    const fileIndex = number(detail.file_index);
+    const fileCount = number(detail.file_count);
+    const bytesTotal = number(detail.bytes_total);
+    const bytesDone = number(detail.bytes_done);
+    const rate = number(detail.bytes_per_second);
+    const uploaded = number(detail.uploaded);
+    const skipped = number(detail.skipped);
+    if (fileIndex !== undefined) row.fileIndex = fileIndex;
+    if (fileCount !== undefined) row.fileCount = fileCount;
+    if (bytesTotal !== undefined) row.bytesTotal = bytesTotal;
+    if (uploaded !== undefined) row.uploaded = uploaded;
+    if (skipped !== undefined) row.skipped = skipped;
+    if (event.kind.endsWith(".service_started")) {
+      row.phase = "running";
+      row.name = undefined;
+      row.error = undefined;
+      row.bytesDone = 0;
+      row.bytesTotal = 0;
+      row.rate = 0;
+    } else if (event.kind.endsWith(".service_done")) {
+      row.phase = "done";
+      row.rate = 0;
+      if (bytesDone !== undefined) row.bytesDone = bytesDone;
+    } else if (event.kind.endsWith(".service_failed")) {
+      row.phase = "failed";
+      row.rate = 0;
+      row.error = text(detail.error);
+    } else {
+      const phase = text(detail.phase);
+      const name = text(detail.name);
+      if (name) row.name = name;
+      if (phase === "started") {
+        row.bytesDone = 0;
+        row.rate = 0;
+      } else if (phase === "skipped") {
+        row.bytesDone = bytesTotal ?? 0;
+        row.rate = 0;
+      } else if (bytesDone !== undefined) {
+        row.bytesDone = bytesDone;
+      }
+      if (rate !== undefined) row.rate = rate;
+    }
+  }
+  return Array.from(rows.values()).sort((a, b) => {
+    const rank = (row: LongTaskRow) => (row.phase === "running" ? 0 : row.phase === "failed" ? 1 : 2);
+    return rank(a) - rank(b) || b.updatedAt - a.updatedAt;
+  });
+}
+
+function LongTaskProgress({ events }: { events: ReleaseV2Event[] }) {
+  const rows = collectLongTasks(events);
+  const active = rows.some((row) => row.phase === "running");
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [active]);
+  if (rows.length === 0) return null;
+  return (
+    <>
+      <h4>长任务进度</h4>
+      <div className="long-task-grid">
+        {rows.map((row) => {
+          const quiet = row.updatedAt ? now - row.updatedAt : 0;
+          const stale = row.phase === "running" && quiet > 90_000;
+          const percent = row.bytesTotal > 0
+            ? Math.min(100, Math.max(0, Math.round((row.bytesDone / row.bytesTotal) * 100)))
+            : row.phase === "done" ? 100 : 0;
+          const label = row.phase === "done" ? "已完成" : row.phase === "failed" ? "失败" : stale ? "无新事件" : "进行中";
+          const tone = row.phase === "failed" ? "bad" : row.phase === "done" ? "ok" : "warn";
+          return (
+            <div key={row.service} className={"long-task-card " + tone}>
+              <div className="long-task-head">
+                <b>{row.service}</b>
+                <span className={"chip " + tone}>{label}</span>
+              </div>
+              <div className="mono tiny long-task-file">
+                {row.name || "等待下一个文件"}
+                {row.component && row.component !== row.service ? " · " + row.component : ""}
+              </div>
+              <div className="clone-progress"><span style={{ width: percent + "%" }} /></div>
+              <div className="tiny muted long-task-meta">
+                <span>{percent}%</span>
+                <span>{sizeLabel(row.bytesDone)} / {sizeLabel(row.bytesTotal)}</span>
+                {row.rate > 0 && <span>{bytes(row.rate)}/s</span>}
+                <span>文件 {row.fileIndex}/{row.fileCount || "?"}</span>
+                <span>已上传 {row.uploaded}</span>
+                <span>跳过 {row.skipped}</span>
+              </div>
+              <div className="tiny muted long-task-meta">
+                <span>{row.phase === "done" ? "完成于" : "最后事件"} {agoLabel(now, row.updatedAt)}</span>
+                {row.url && <a href={row.url} target="_blank" rel="noreferrer">{row.url}</a>}
+                {row.error && <span>{row.error}</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 function statusChip(status: string) {
   const ok = ["published", "built", "ready", "online", "finished"].includes(status);
   const warn = ["staged", "publishing", "verifying", "artifacts_ready", "building", "preparing", "queued", "leased", "uploaded", "partially_published"].includes(status);
@@ -650,11 +805,12 @@ export function ReleaseV2Page({ notify, view = "runs", runId, onBack, onOpenRun 
                 ))}
               </tbody>
             </table>
+            <LongTaskProgress events={detail.events} />
             <h4>事件</h4>
             <table className="table">
               <thead><tr><th>时间</th><th>执行者</th><th>类型</th><th>摘要</th></tr></thead>
               <tbody>
-                {detail.events.slice(-40).reverse().map((e) => (
+                {detail.events.filter((e) => !isProgressEvent(e.kind)).slice(-40).reverse().map((e) => (
                   <tr key={e.id}>
                     <td className="tiny">{when(e.created_at)}</td>
                     <td className="tiny">{e.actor}</td>
@@ -683,5 +839,6 @@ function mergeEvents(events: ReleaseV2Event[], next: ReleaseV2Event): ReleaseV2E
   if (events.some((ev) => ev.id === next.id)) return events;
   const out = [...events, next];
   out.sort((a, b) => a.id - b.id);
-  return out.slice(-800);
+  // 进度事件会持续追加，保留更多历史以免把 run.status 等关键事件挤掉。
+  return out.slice(-4000);
 }

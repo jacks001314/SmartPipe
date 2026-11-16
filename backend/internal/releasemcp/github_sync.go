@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"smartpipe/backend/internal/releasepublish"
 	"smartpipe/backend/internal/releasev2"
@@ -169,6 +170,14 @@ func (s *Server) githubSync(ctx context.Context, p *principal, args map[string]a
 	}
 	uploaded := make([]map[string]any, 0, len(artifacts))
 	skipped := make([]string, 0, len(artifacts))
+	githubFiles := 0
+	for _, artifact := range artifacts {
+		if deliversTo(artifact, "github") {
+			githubFiles++
+		}
+	}
+	progress := newUploadProgress(s.Store, run.ID, "agent:"+p.Token.ID, "github_asset", "github", release.HTMLURL, githubFiles)
+	progress.begin(ctx)
 	for _, artifact := range artifacts {
 		// GitHub 只收 destinations 里写明 github 的制品。两个平台的
 		// update-bundle.json 同名，硬传上去会互相覆盖/撞名；它本来也只服务于
@@ -178,6 +187,7 @@ func (s *Server) githubSync(ctx context.Context, p *principal, args map[string]a
 		}
 		if asset, ok := existing[artifact.Name]; ok && asset.Size == artifact.Size && (asset.Digest == "" || sameDigest(asset.Digest, artifact.SHA256)) {
 			skipped = append(skipped, artifact.Name)
+			progress.skipFile(ctx, uploadFile{Name: artifact.Name, Component: "github", Size: artifact.Size})
 			continue
 		}
 		// 同名但摘要不同的旧资产必须先删：GitHub 已发布的 Release 不能覆盖同名附件。
@@ -193,8 +203,10 @@ func (s *Server) githubSync(ctx context.Context, p *principal, args map[string]a
 		if err != nil {
 			return nil, err
 		}
+		file := uploadFile{Name: artifact.Name, Component: "github", Size: artifact.Size}
+		started := time.Now()
 		asset, uploadErr := client.UploadAsset(ctx, credential, owner, repo, releaseID,
-			artifact.Name, artifact.ContentType, reader, artifact.Size)
+			artifact.Name, artifact.ContentType, progress.startFile(ctx, file, reader), artifact.Size)
 		closeErr := reader.Close()
 		if uploadErr != nil {
 			return nil, uploadErr
@@ -202,6 +214,7 @@ func (s *Server) githubSync(ctx context.Context, p *principal, args map[string]a
 		if closeErr != nil {
 			return nil, closeErr
 		}
+		progress.finishFile(ctx, file, time.Since(started))
 		if asset.Digest != "" && !sameDigest(asset.Digest, artifact.SHA256) {
 			return blockedResult("digest_mismatch", fmt.Sprintf("%s: github digest %s != local %s", artifact.Name, asset.Digest, artifact.SHA256)), nil
 		}
@@ -209,6 +222,7 @@ func (s *Server) githubSync(ctx context.Context, p *principal, args map[string]a
 		_ = s.Store.AppendEvent(ctx, releasev2.Event{RunID: run.ID, Actor: "agent:" + p.Token.ID, Kind: "github.asset_uploaded",
 			Summary: artifact.Name, Detail: map[string]any{"asset_id": asset.ID, "size": asset.Size, "digest": asset.Digest}})
 	}
+	progress.finished(ctx)
 
 	after, err := client.GetRelease(ctx, credential, owner, repo, releaseID)
 	if err != nil {

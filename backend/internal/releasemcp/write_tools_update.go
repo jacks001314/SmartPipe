@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"smartpipe/backend/internal/releasepublish"
 	"smartpipe/backend/internal/releasev2"
@@ -158,6 +159,10 @@ func (s *Server) stageImport(ctx context.Context, p *principal, args map[string]
 	for _, a := range artifacts {
 		byID[a.ID] = a
 	}
+	fileCount := 0
+	for _, component := range bundle.Components {
+		fileCount += len(component.Slots) + len(component.Artifacts)
+	}
 	outcomes := make([]serviceStageOutcome, len(services))
 	var wg sync.WaitGroup
 	for i, service := range services {
@@ -169,7 +174,14 @@ func (s *Server) stageImport(ctx context.Context, p *principal, args map[string]
 		wg.Add(1)
 		go func(i int, service updateTarget, credential string) {
 			defer wg.Done()
-			staged, err := s.stageToService(ctx, service, credential, run, channel, bundle, layout, byID, replaceExisting)
+			progress := newUploadProgress(s.Store, run.ID, "agent:"+p.Token.ID, "update_import", service.Name, service.URL, fileCount)
+			progress.begin(ctx)
+			staged, err := s.stageToService(ctx, service, credential, run, channel, bundle, layout, byID, replaceExisting, progress)
+			if err != nil {
+				progress.failed(ctx, err)
+			} else {
+				progress.finished(ctx)
+			}
 			outcomes[i] = serviceStageOutcome{Service: service, Stage: staged, Err: err}
 		}(i, service, credential)
 	}
@@ -400,7 +412,7 @@ func (s *Server) checkVersionConflicts(ctx context.Context, service updateTarget
 
 // stageToService does the per-service work: ensure components, find or create
 // the release, then upload every artifact cell that is missing or different.
-func (s *Server) stageToService(ctx context.Context, service updateTarget, credential string, run *releasev2.Run, channel string, bundle releasev2.UpgradeBundle, layout releasev2.BundleLayout, byID map[int64]releasev2.Artifact, replaceExisting bool) (*serviceStage, error) {
+func (s *Server) stageToService(ctx context.Context, service updateTarget, credential string, run *releasev2.Run, channel string, bundle releasev2.UpgradeBundle, layout releasev2.BundleLayout, byID map[int64]releasev2.Artifact, replaceExisting bool, progress *uploadProgress) (*serviceStage, error) {
 	if !replaceExisting {
 		conflict, err := s.checkVersionConflicts(ctx, service, credential, bundle, layout)
 		if err != nil {
@@ -460,20 +472,23 @@ func (s *Server) stageToService(ctx context.Context, service updateTarget, crede
 			if strings.TrimSpace(source.StorageKey) == "" {
 				return fmt.Errorf("制品 %s 没有存储键", source.Name)
 			}
+			if size <= 0 {
+				size = source.Size
+			}
+			file := uploadFile{Name: filename, Component: name, Slot: slot, OS: platformOS, Arch: arch, Size: size}
 			digest = normalizeDigest(digest)
 			cell := artifactCell(slot, platformOS, arch)
 			if digest != "" && existing[cell] == digest {
 				out.skipped++
+				progress.skipFile(ctx, file)
 				return nil
 			}
 			reader, err := s.Objects.Open(ctx, source.StorageKey)
 			if err != nil {
 				return fmt.Errorf("读取制品 %s: %w", source.Name, err)
 			}
-			if size <= 0 {
-				size = source.Size
-			}
-			_, uploadErr := service.Client.UploadArtifact(ctx, credential, rel.ID, slot, platformOS, arch, filename, digest, size, reader)
+			started := time.Now()
+			_, uploadErr := service.Client.UploadArtifact(ctx, credential, rel.ID, slot, platformOS, arch, filename, digest, size, progress.startFile(ctx, file, reader))
 			closeErr := reader.Close()
 			if uploadErr != nil {
 				return fmt.Errorf("上传 %s %s: %w", name, cell, uploadErr)
@@ -483,6 +498,7 @@ func (s *Server) stageToService(ctx context.Context, service updateTarget, crede
 			}
 			existing[cell] = digest
 			out.uploaded++
+			progress.finishFile(ctx, file, time.Since(started))
 			return nil
 		}
 		for _, slot := range component.Slots {
