@@ -285,14 +285,14 @@ func newReleaseAgentLauncher(ctx context.Context, st *store.Store) *releaseagent
 		Effort:        strings.TrimSpace(os.Getenv("SMARTPIPE_RELEASE_AGENT_EFFORT")),
 		Sandbox:       envOr("SMARTPIPE_RELEASE_AGENT_SANDBOX", "read-only"),
 		Compatibility: envOr("SMARTPIPE_RELEASE_AGENT_COMPAT", "warn"),
-		// 一次真实发布要构建多平台产物、把 GB 级制品灌进多个升级服务，
-		// 45 分钟会在 release_import 中途被杀掉（生产事故：0.5.18 stable
-		// 导入 45 分钟时 context deadline exceeded）。默认放宽到 3 小时。
-		Timeout:       time.Duration(envInt("SMARTPIPE_RELEASE_AGENT_TIMEOUT_MINUTES", 180)) * time.Minute,
+		// 默认不限制会话时长：一次真实发布要构建多平台产物、把 GB 级制品灌进
+		// 多个升级服务，任何固定时长都会在慢链路上砍断可用的上传。需要上限
+		// 时再用环境变量显式设置。
+		Timeout:       time.Duration(envInt("SMARTPIPE_RELEASE_AGENT_TIMEOUT_MINUTES", 0)) * time.Minute,
 		// release_import 要真实上传全部制品：Syntropy 0.5.18 是 4 GB 级别，
 		// 两个升级服务并行也要 20 分钟以上。20 分钟的默认值会在真发版时把
 		// 客户端连接掐断，而服务端其实已经灌完，Agent 只能重来一遍。
-		ToolTimeout: time.Duration(envInt("SMARTPIPE_RELEASE_AGENT_TOOL_TIMEOUT_SEC", 3600)) * time.Second,
+		ToolTimeout: time.Duration(envInt("SMARTPIPE_RELEASE_AGENT_TOOL_TIMEOUT_SEC", 0)) * time.Second,
 		MaxSessions: envInt("SMARTPIPE_RELEASE_AGENT_MAX_SESSIONS", 0),
 		ModelEnv:    modelEnv,
 	})

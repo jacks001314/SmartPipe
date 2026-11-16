@@ -86,14 +86,13 @@ func (c Config) withDefaults() Config {
 	if strings.TrimSpace(c.Sandbox) == "" {
 		c.Sandbox = "read-only"
 	}
-	if c.Timeout <= 0 {
-		c.Timeout = 45 * time.Minute
-	}
-	if c.ToolTimeout <= 0 {
-		c.ToolTimeout = 20 * time.Minute
-	}
 	if c.TokenTTL <= 0 {
-		c.TokenTTL = c.Timeout + 30*time.Minute
+		// 0 表示不限制会话时长；令牌仍然需要一个期限，给足一天。
+		if c.Timeout <= 0 {
+			c.TokenTTL = 24 * time.Hour
+		} else {
+			c.TokenTTL = c.Timeout + 30*time.Minute
+		}
 	}
 	return c
 }
@@ -195,7 +194,11 @@ func (l *Launcher) Launch(ctx context.Context, bundle *releasev2.RunBundle, opts
 		return nil, err
 	}
 
-	runCtx, cancel := context.WithTimeout(context.Background(), l.cfg.Timeout)
+	runCtx := context.Background()
+	var cancel context.CancelFunc = func() {}
+	if l.cfg.Timeout > 0 {
+		runCtx, cancel = context.WithTimeout(context.Background(), l.cfg.Timeout)
+	}
 	l.mu.Lock()
 	l.running[run.ID] = cancel
 	l.mu.Unlock()
@@ -418,18 +421,23 @@ func (l *Launcher) agentEnv(ctx context.Context, projectID, rawToken string) []s
 
 func (l *Launcher) mcpOverrides() []string {
 	server := l.cfg.ServerName
-	return []string{
+	overrides := []string{
 		fmt.Sprintf("mcp_servers.%s.url=%q", server, strings.TrimSpace(l.cfg.MCPURL)),
 		fmt.Sprintf("mcp_servers.%s.bearer_token_env_var=%q", server, l.cfg.TokenEnvVar),
-		// 构建机长命令由工具自己返回 command_id，Agent 用 executor_command_get
-		// 轮询；这里的上限主要给 release_import / github_release_sync 这类
-		// 真要传完整制品的调用留出带宽余量。
-		fmt.Sprintf("mcp_servers.%s.tool_timeout_sec=%d", server, int(l.cfg.ToolTimeout/time.Second)),
 		fmt.Sprintf("mcp_servers.%s.startup_timeout_sec=60", server),
 		// Codex 对没有 readOnlyHint 注解的 MCP 工具默认要求审批；本链路固定
 		// approval_policy=never，不显式设成 approve 会在客户端直接拒绝调用。
 		fmt.Sprintf("mcp_servers.%s.default_tools_approval_mode=%q", server, "approve"),
 	}
+	// Codex 对 MCP 工具自带一个很短的默认超时；release_import 要把整包制品灌进
+	// 多个升级服务，任何小固定值都会在慢链路上砍断可用的上传。ToolTimeout<=0
+	// 表示不限制，这里给一个足够大的值（7 天）而不是省略配置。
+	toolTimeout := l.cfg.ToolTimeout
+	if toolTimeout <= 0 {
+		toolTimeout = 7 * 24 * time.Hour
+	}
+	overrides = append(overrides, fmt.Sprintf("mcp_servers.%s.tool_timeout_sec=%d", server, int(toolTimeout/time.Second)))
+	return overrides
 }
 
 func (l *Launcher) appendEvent(ctx context.Context, ev releasev2.Event) error {

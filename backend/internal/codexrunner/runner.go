@@ -175,10 +175,14 @@ func Run(ctx context.Context, spec Spec) (*Result, error) {
 	// 会直接拒绝这些请求；worker 统一用独立配置目录。
 	spec.Env = isolateCodexHome(spec.Env)
 	timeout := spec.Timeout
-	if timeout <= 0 {
-		timeout = defaultTimeout
+	// 默认不设总时长：发布链路要传 GB 级制品，按时长砍会话只会把已经跑了
+	// 几十分钟的任务白扔掉。需要上限时由调用方显式给 Timeout；取消依然可以
+	// 通过 ctx 或 Cancel 立即生效。
+	runCtx := ctx
+	var cancel context.CancelFunc = func() {}
+	if timeout > 0 {
+		runCtx, cancel = context.WithTimeout(ctx, timeout)
 	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	logs := spec.LogWriter

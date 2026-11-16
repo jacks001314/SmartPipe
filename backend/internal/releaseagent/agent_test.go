@@ -138,9 +138,8 @@ func TestLaunchRunsCodexWithScopedMCP(t *testing.T) {
 	if !strings.Contains(joined, `mcp_servers.smartpipe_release.default_tools_approval_mode="approve"`) {
 		t.Fatalf("mcp tools must be auto-approved under approval_policy=never: %s", joined)
 	}
-	// release_import / github_release_sync 一次要传完整制品（约 2.4 GB），
-	// 4 分钟的默认上限会把真实发布打断，默认至少 20 分钟且可由调用方覆盖。
-	if !strings.Contains(joined, "mcp_servers.smartpipe_release.tool_timeout_sec=1200") {
+	// 默认不限制单次工具调用时长；给 Codex 的是一周，避免慢链路灌库被砍断。
+	if !strings.Contains(joined, "mcp_servers.smartpipe_release.tool_timeout_sec=604800") {
 		t.Fatalf("mcp tool timeout must leave room for full artifact uploads: %s", joined)
 	}
 	tokenEnv := ""
