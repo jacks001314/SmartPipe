@@ -1,7 +1,6 @@
 package scheduler
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -79,7 +78,7 @@ func ParseTriageDecision(raw string) (*TriageDecision, error) {
 		return nil, fmt.Errorf("scheduler: no json object in triage decision")
 	}
 	var d TriageDecision
-	if err := json.Unmarshal([]byte(text[start:end+1]), &d); err != nil {
+	if err := unmarshalModelJSONObject(text[start:end+1], &d); err != nil {
 		return nil, fmt.Errorf("scheduler: parse triage decision: %w", err)
 	}
 	d.Action = strings.ToLower(strings.TrimSpace(d.Action))
@@ -157,7 +156,7 @@ func ParseChatDecision(raw string) (*ChatDecision, error) {
 		return nil, fmt.Errorf("scheduler: no json object in chat decision")
 	}
 	var d ChatDecision
-	if err := json.Unmarshal([]byte(text[start:end+1]), &d); err != nil {
+	if err := unmarshalModelJSONObject(text[start:end+1], &d); err != nil {
 		return nil, fmt.Errorf("scheduler: parse chat decision: %w", err)
 	}
 	switch d.Action {
