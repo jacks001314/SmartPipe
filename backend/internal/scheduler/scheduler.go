@@ -477,7 +477,15 @@ func decisionSummary(d *ChatDecision, outcome messageOutcome) string {
 }
 
 func (s *Scheduler) runChat(ctx context.Context, p *Project, history []ChatMessage, msg Inbound, referenced int, activeWorker *Worker) (*ChatDecision, error) {
-	prompt := buildChatPrompt(p, history, msg, referenced, activeWorker)
+	var refIssue *Issue
+	if referenced > 0 {
+		if it, err := s.tracker.GetIssue(ctx, p.ID, referenced); err == nil {
+			refIssue = &it
+		} else {
+			log.Printf("[scheduler] load referenced issue #%d failed: %v", referenced, err)
+		}
+	}
+	prompt := buildChatPrompt(p, history, msg, referenced, activeWorker, refIssue)
 	images, listing, cleanup, err := saveChatAttachments(msg)
 	if err != nil {
 		return nil, err

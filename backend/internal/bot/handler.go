@@ -27,6 +27,9 @@ type Handler struct {
 	seenMu sync.Mutex
 	seen   map[string]time.Time // msgId -> first seen，幂等键
 
+	mediaMu    sync.Mutex
+	pendingImg map[string]pendingImages // chatID|senderID -> 最近的图片
+
 	dirMu       sync.Mutex
 	memberCache map[string]memberNameCache
 	groupCache  map[string]groupNameCache
@@ -35,6 +38,7 @@ type Handler struct {
 func NewHandler(cfg Config, snd Sender, disp Dispatcher) *Handler {
 	return &Handler{
 		cfg: cfg, snd: snd, disp: disp, seen: map[string]time.Time{},
+		pendingImg:  map[string]pendingImages{},
 		memberCache: map[string]memberNameCache{}, groupCache: map[string]groupNameCache{},
 	}
 }
@@ -333,7 +337,7 @@ func (h *Handler) handleMessage(ctx context.Context, m *lanxin.InboundMessage) e
 			h.reportInbox(ctx, m, "命令已在本地处理")
 			return h.reply(ctx, m, "已开启新会话：此前的上下文记忆已重置。")
 		}
-		return h.dispatch(ctx, m, text, false, nil)
+		return h.dispatch(ctx, m, text, false, h.recentImages(m, explicitCommand))
 	case "group":
 		if nonDirect && !observeAll {
 			h.reportInbox(ctx, m, "群消息未 @ 机器人")
@@ -343,7 +347,7 @@ func (h *Handler) handleMessage(ctx context.Context, m *lanxin.InboundMessage) e
 			h.reportInbox(ctx, m, "命令已在本地处理")
 			return h.reply(ctx, m, "已开启新会话：此前的上下文记忆已重置。")
 		}
-		return h.dispatch(ctx, m, text, true, nil)
+		return h.dispatch(ctx, m, text, true, h.recentImages(m, explicitCommand))
 	default:
 		h.reportInbox(ctx, m, "未知会话类型")
 		log.Printf("[bot] unknown chatType=%q msgId=%s groupId=%s", m.ChatType, m.MsgID, m.GroupID)
@@ -435,6 +439,17 @@ func (h *Handler) dispatchMedia(ctx context.Context, m *lanxin.InboundMessage, t
 	}
 	if note != "" {
 		text = strings.TrimSpace(strings.TrimSpace(text) + "\n" + note)
+	}
+	// 只有“没 @ 机器人”的图片消息才进入待接管缓存；@ 的图片消息本身就会
+	// 带着附件走完建单/补充流程，再缓存会让后续消息重复挂同一批截图。
+	directToBot := (m.Reminder != nil && m.Reminder.IsAtMe) ||
+		(m.ReferenceMsg != nil && m.ReferenceMsg.FromType == 1)
+	if !directToBot {
+		chatID := strings.TrimSpace(m.GroupID)
+		if chatID == "" {
+			chatID = m.From
+		}
+		h.rememberRecentImages(chatID, m.From, atts)
 	}
 	isGroup := m.ChatType == "group"
 	return h.dispatch(ctx, m, text, isGroup, atts)
