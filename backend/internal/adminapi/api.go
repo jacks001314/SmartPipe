@@ -179,6 +179,7 @@ func (a *API) Register(app *iris.Application) {
 	a.registerVerification(party)
 	a.registerTestLab(party)
 	a.registerTestMachines(party, app)
+	a.registerTestSessions(party, app)
 	a.registerMerges(party)
 	a.registerReleaseV2(party.Party("/releases"))
 	a.registerCrashes(party)

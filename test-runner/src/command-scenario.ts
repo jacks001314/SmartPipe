@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { isAbsolute, join } from 'node:path';
 import { DesktopLease, Evidence } from './session.js';
@@ -8,6 +8,9 @@ import type { Assignment, Report, Scenario } from './worker.js';
 
 export interface CommandStep {
  id:string; executable:string; args:string[]; timeoutMs:number;
+ // Optional proof produced by this step. A relative path resolves under
+ // SMARTPIPE_TEST_OUTPUT; the bytes become this check's uploaded evidence.
+ evidenceFile?:string; evidenceMime?:string;
 }
 export interface CommandScenarioConfig {
  name:string; version:string; stateRoot:string; artifactPath:string; workingDirectory:string;
@@ -15,7 +18,8 @@ export interface CommandScenarioConfig {
  scripts:Array<{path:string;sha256:string}>;
  setup?:CommandStep[]; checks:CommandStep[]; cleanup:CommandStep[];
 }
-type Outcome={id:string;exitCode:number|null;stdout:string;stderr:string;truncated:boolean};
+type Outcome={id:string;exitCode:number|null;stdout:string;stderr:string;truncated:boolean;note?:string;
+ evidence?:{path:string;sha256:string;mimeType:string}};
 const validID=/^[a-zA-Z0-9_-]{1,80}$/;
 export function validateCommandConfig(c:CommandScenarioConfig):void{
  if(!c.name||!c.version||![c.stateRoot,c.artifactPath,c.workingDirectory].every(isAbsolute))throw new Error('Invalid command scenario paths');
@@ -24,9 +28,28 @@ export function validateCommandConfig(c:CommandScenarioConfig):void{
  for(const step of [...c.setup??[],...c.checks,...c.cleanup]){
   if(!validID.test(step.id)||ids.has(step.id)||!isAbsolute(step.executable)||!Array.isArray(step.args)||
    !step.args.every(a=>typeof a==='string')||!Number.isSafeInteger(step.timeoutMs)||step.timeoutMs<100||step.timeoutMs>600_000)throw new Error('Invalid or duplicate step');
+  if(step.evidenceFile!==undefined&&(typeof step.evidenceFile!=='string'||!step.evidenceFile.trim()))throw new Error('Invalid evidence file');
+  if(step.evidenceMime!==undefined&&!/^(image|application|text)\/[a-z0-9.+-]+$/i.test(step.evidenceMime))throw new Error('Invalid evidence MIME');
   ids.add(step.id);
  }
  for(const script of c.scripts)if(!isAbsolute(script.path)||!/^[a-f0-9]{64}$/.test(script.sha256))throw new Error('Invalid script pin');
+}
+function guessMime(path:string):string{
+ if(/\.png$/i.test(path))return 'image/png';
+ if(/\.jpe?g$/i.test(path))return 'image/jpeg';
+ if(/\.webp$/i.test(path))return 'image/webp';
+ if(/\.json$/i.test(path))return 'application/json';
+ if(/\.(log|txt)$/i.test(path))return 'text/plain';
+ return 'application/octet-stream';
+}
+// Evidence must be an existing, non-empty file no larger than the upload limit.
+async function collectEvidence(step:CommandStep,outputDir:string):Promise<Outcome['evidence']>{
+ if(!step.evidenceFile)return undefined;
+ const path=isAbsolute(step.evidenceFile)?step.evidenceFile:join(outputDir,step.evidenceFile);
+ const info=await stat(path);
+ if(!info.isFile()||info.size===0||info.size>8*1024*1024)throw new Error('evidence file must be 1 byte..8 MiB: '+path);
+ const bytes=await readFile(path);
+ return {path,sha256:createHash('sha256').update(bytes).digest('hex'),mimeType:step.evidenceMime??guessMime(path)};
 }
 export async function executeStep(step:CommandStep,cwd:string,extra:Record<string,string>,signal:AbortSignal):Promise<Outcome>{
  signal.throwIfAborted();
@@ -95,6 +118,10 @@ export class CommandScenario implements Scenario{
   for(const step of c.checks){
    if(!setupOK){checks.push({id:step.id,status:'BLOCKED',evidence:''});continue;}
    this.lease.assertActive();const result=await executeStep(step,c.workingDirectory,this.context,signal);this.outcomes.push(result);
+   if(result.exitCode===0&&step.evidenceFile){
+    try{result.evidence=await collectEvidence(step,this.evidence.directory);}
+    catch(error){result.exitCode=null;result.note='evidence: '+(error instanceof Error?error.message:'unavailable');}
+   }
    checks.push({id:step.id,status:result.exitCode===0?'PASS':'FAIL',evidence:''});
   }
   this.report={source_sha:s.source_sha,artifact_sha256:s.artifact_sha256,scenario_version:s.scenario_version,platform:s.platform,checks};
@@ -116,7 +143,13 @@ export class CommandScenario implements Scenario{
  async uploadEvidence(upload:(mime:string,bytes:Buffer)=>Promise<string>):Promise<void>{
   if(!this.report)return;
   if(this.lease)throw new Error('Cleanup must succeed before uploading a report');
-  const reference=await upload('application/json',Buffer.from(JSON.stringify(this.outcomes)));
-  for(const check of this.report.checks)check.evidence=reference;
+  const byId=new Map(this.outcomes.map(o=>[o.id,o]));
+  let shared:string|undefined;
+  for(const check of this.report.checks){
+   const evidence=byId.get(check.id)?.evidence;
+   if(evidence){check.evidence=await upload(evidence.mimeType,await readFile(evidence.path));continue;}
+   shared??=await upload('application/json',Buffer.from(JSON.stringify(this.outcomes)));
+   check.evidence=shared;
+  }
  }
 }

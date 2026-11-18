@@ -59,3 +59,29 @@ func TestDesktopTestRunLifecycle(t *testing.T) {
 		t.Fatalf("late report: %v", err)
 	}
 }
+
+func TestDesktopTestRunStartRejectedForRunnerPlatform(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	p, err := s.CreateProject(ctx, &Project{Name: "desktop-runner-start-" + newID("p")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	machine := newID("machine")
+	if err = s.RegisterDesktopMachine(ctx, machine, "windows-amd64", testlab.TokenDigest(strings.Repeat("c", 64))); err != nil {
+		t.Fatal(err)
+	}
+	id := newID("test")
+	t.Cleanup(func() {
+		_, _ = s.db.Exec("DELETE FROM desktop_test_runs WHERE project_id=$1", p.ID)
+		_, _ = s.db.Exec("DELETE FROM desktop_test_machines WHERE id=$1", machine)
+	})
+	spec := testlab.Spec{ProjectID: p.ID, SourceSHA: strings.Repeat("a", 40), ArtifactSHA256: strings.Repeat("b", 64), Scenario: "desktop", ScenarioVersion: "1", Platform: "windows-amd64", RequiredChecks: []string{"ui"}}
+	if _, err = s.CreateDesktopTestRun(ctx, id, spec); err != nil {
+		t.Fatal(err)
+	}
+	err = s.StartDesktopTestRun(ctx, id)
+	if !errors.Is(err, testlab.ErrState) || !strings.Contains(err.Error(), "queued") {
+		t.Fatalf("start with online runner: %v", err)
+	}
+}

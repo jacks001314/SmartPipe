@@ -48,7 +48,7 @@ func (s *Store) AuthenticateDesktopMachine(ctx context.Context, id, token string
 	return nil
 }
 func (s *Store) ListDesktopMachines(ctx context.Context) ([]testlab.Machine, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,platform,enabled,generation,run_id,lease_until,last_seen FROM desktop_test_machines ORDER BY id LIMIT 500`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,platform,enabled,generation,run_id,session_id,lease_until,last_seen FROM desktop_test_machines ORDER BY id LIMIT 500`)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func (s *Store) ListDesktopMachines(ctx context.Context) ([]testlab.Machine, err
 	out := []testlab.Machine{}
 	for rows.Next() {
 		var m testlab.Machine
-		if err = rows.Scan(&m.ID, &m.Platform, &m.Enabled, &m.Generation, &m.RunID, &m.LeaseUntil, &m.LastSeen); err != nil {
+		if err = rows.Scan(&m.ID, &m.Platform, &m.Enabled, &m.Generation, &m.RunID, &m.SessionID, &m.LeaseUntil, &m.LastSeen); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -75,19 +75,27 @@ func (s *Store) ClaimDesktopRun(ctx context.Context, machineID string, scenarios
 		return nil, err
 	}
 	defer tx.Rollback()
-	var platform, busy string
+	var platform, busy, sessionID string
 	var generation int64
-	err = tx.QueryRowContext(ctx, `SELECT platform,run_id,generation FROM desktop_test_machines WHERE id=$1 AND enabled=TRUE FOR UPDATE`, machineID).Scan(&platform, &busy, &generation)
+	err = tx.QueryRowContext(ctx, `SELECT platform,run_id,session_id,generation FROM desktop_test_machines WHERE id=$1 AND enabled=TRUE FOR UPDATE`, machineID).Scan(&platform, &busy, &sessionID, &generation)
 	if err != nil {
 		return nil, err
 	}
-	if busy != "" {
+	if busy != "" || sessionID != "" {
 		return nil, testlab.ErrState
 	}
 	var run testlab.Run
 	var spec []byte
 	err = tx.QueryRowContext(ctx, `SELECT id,spec,created_at FROM desktop_test_runs WHERE status='QUEUED' AND spec->>'platform'=$1 AND (spec->>'scenario')||'@'||(spec->>'scenario_version')=ANY($2) ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1`, platform, scenarios).Scan(&run.ID, &spec, &run.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
+		// An empty claim is the resident runner's liveness signal. Record it so
+		// the console can distinguish an offline machine from a connected idle one.
+		if _, uerr := tx.ExecContext(ctx, `UPDATE desktop_test_machines SET last_seen=now() WHERE id=$1`, machineID); uerr != nil {
+			return nil, uerr
+		}
+		if cerr := tx.Commit(); cerr != nil {
+			return nil, cerr
+		}
 		return nil, ErrNotFound
 	}
 	if err != nil {

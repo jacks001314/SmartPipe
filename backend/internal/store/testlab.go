@@ -63,6 +63,24 @@ func (s *Store) GetDesktopTestRun(ctx context.Context, id string) (*testlab.Run,
 	return &r, nil
 }
 func (s *Store) StartDesktopTestRun(ctx context.Context, id string) error {
+	// A run for a platform with an enabled runner must stay QUEUED: ClaimDesktopRun
+	// transitions it to RUNNING and assigns the machine lease atomically. Letting an
+	// admin flip it to RUNNING here makes it unclaimable and loses the lease identity.
+	var platform string
+	err := s.db.QueryRowContext(ctx, `SELECT spec->>'platform' FROM desktop_test_runs WHERE id=$1 AND status='QUEUED'`, id).Scan(&platform)
+	if errors.Is(err, sql.ErrNoRows) {
+		return testlab.ErrState
+	}
+	if err != nil {
+		return err
+	}
+	var machines int
+	if err = s.db.QueryRowContext(ctx, `SELECT count(*) FROM desktop_test_machines WHERE platform=$1 AND enabled=TRUE`, platform).Scan(&machines); err != nil {
+		return err
+	}
+	if machines > 0 {
+		return fmt.Errorf("%w: platform %s is served by an online test machine; leave the run queued for the runner to claim", testlab.ErrState, platform)
+	}
 	res, err := s.db.ExecContext(ctx, `UPDATE desktop_test_runs SET status='RUNNING' WHERE id=$1 AND status='QUEUED'`, id)
 	if err != nil {
 		return err

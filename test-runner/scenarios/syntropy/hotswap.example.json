@@ -1,0 +1,9 @@
+{
+  "version": "0.5.21.2026-11-17",
+  "components": [
+    { "slot": "nbot", "path": "dist/nbot-windows-amd64.exe",
+      "target": "resources/node/artifacts/nbot-windows-amd64.exe", "mode": 493 },
+    { "slot": "release-manifest", "path": "dist/release-manifest.json",
+      "target": "resources/release-manifest.json" }
+  ]
+}

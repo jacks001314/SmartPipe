@@ -24,6 +24,7 @@ backend/bin/
 
 # 构建/部署临时文件
 *.tar.gz
+*.tgz
 *.zip
 .deploy.env
 __pycache__/

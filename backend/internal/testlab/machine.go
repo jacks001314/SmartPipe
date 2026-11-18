@@ -12,6 +12,7 @@ type Machine struct {
 	Enabled    bool       `json:"enabled"`
 	Generation int64      `json:"generation"`
 	RunID      string     `json:"run_id"`
+	SessionID  string     `json:"session_id,omitempty"`
 	LeaseUntil *time.Time `json:"lease_until,omitempty"`
 	LastSeen   *time.Time `json:"last_seen,omitempty"`
 }

@@ -6,6 +6,7 @@ import (
 	"smartpipe/backend/internal/testlab"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDesktopMachineFencing(t *testing.T) {
@@ -31,6 +32,16 @@ func TestDesktopMachineFencing(t *testing.T) {
 		t.Fatal("wrong token accepted")
 	}
 	spec := testlab.Spec{ProjectID: p.ID, SourceSHA: strings.Repeat("a", 40), ArtifactSHA256: strings.Repeat("b", 64), Scenario: "desktop-observe", ScenarioVersion: "1", Platform: "windows-amd64", RequiredChecks: []string{"desktop_observed"}}
+	if _, err = s.ClaimDesktopRun(ctx, machine); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("idle claim: %v", err)
+	}
+	var seen *time.Time
+	if err = s.db.QueryRowContext(ctx, `SELECT last_seen FROM desktop_test_machines WHERE id=$1`, machine).Scan(&seen); err != nil {
+		t.Fatal(err)
+	}
+	if seen == nil || time.Since(*seen) > time.Minute {
+		t.Fatalf("idle claim did not refresh last_seen: %v", seen)
+	}
 	id := newID("r")
 	if _, err = s.CreateDesktopTestRun(ctx, id, spec); err != nil {
 		t.Fatal(err)
