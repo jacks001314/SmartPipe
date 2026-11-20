@@ -75,14 +75,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS desktop_test_machine_session_unique ON desktop
 }
 
 func (s *Store) CreateTestSession(ctx context.Context, id string, spec testlab.SessionSpec, tokenDigest string) (*testlab.Session, error) {
+	spec = spec.Normalize()
 	if err := spec.Validate(); err != nil {
 		return nil, err
-	}
-	if spec.TimeoutSeconds == 0 {
-		spec.TimeoutSeconds = 30 * 60
-	}
-	if spec.Kind == "" {
-		spec.Kind = "story"
 	}
 	if id == "" || len(tokenDigest) != 64 {
 		return nil, testlab.ErrInvalid
@@ -119,6 +114,11 @@ func (s *Store) GetTestSession(ctx context.Context, id string) (*testlab.Session
 		return nil, err
 	}
 	out.Checks = checks
+	findings, err := s.ListTestSessionFindings(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	out.Findings = findings
 	return &out, nil
 }
 
@@ -184,6 +184,12 @@ func (s *Store) CancelTestSession(ctx context.Context, id string) error {
  WHERE session_id=$1 AND status='PENDING'`, id); err != nil {
 		return err
 	}
+	// Cancellation is final: the runner may be gone, so the machine must not
+	// stay pinned to this session until the lease expires.
+	if _, err = tx.ExecContext(ctx, `UPDATE desktop_test_machines SET session_id='',session_generation=0,lease_until=NULL,last_seen=now()
+ WHERE session_id=$1`, id); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -224,17 +230,26 @@ func (s *Store) ClaimTestSession(ctx context.Context, machineID string, environm
 	}
 	if sessionID != "" {
 		// A session that finished while the runner was offline must not pin the
-		// machine forever. Only an expired lease on a terminal session is
-		// reclaimed automatically; a live runner keeps its lease.
-		var reclaimable bool
-		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM test_sessions
- WHERE id=$1 AND status IN ('PASS','FAIL','BLOCKED','CANCELLED'))
- AND COALESCE((SELECT lease_until FROM desktop_test_machines WHERE id=$2), to_timestamp(0)) < now()`,
-			sessionID, machineID).Scan(&reclaimable); err != nil {
+		// machine forever. Only an expired machine lease is reclaimed; a live
+		// runner keeps its lease. A RUNNING session with an expired lease means
+		// the runner died mid-job, so it becomes BLOCKED instead of looking live.
+		var status string
+		var leaseExpired bool
+		if err = tx.QueryRowContext(ctx, `SELECT t.status,
+ COALESCE((SELECT m.lease_until FROM desktop_test_machines m WHERE m.id=$2) < now(), TRUE)
+ FROM test_sessions t WHERE t.id=$1`, sessionID, machineID).Scan(&status, &leaseExpired); err != nil {
 			return nil, err
 		}
-		if !reclaimable {
+		terminal := status == "PASS" || status == "FAIL" || status == "BLOCKED" || status == "CANCELLED"
+		if !leaseExpired || (!terminal && status != "RUNNING") {
 			return nil, testlab.ErrState
+		}
+		if status == "RUNNING" {
+			if _, err = tx.ExecContext(ctx, `UPDATE test_sessions
+ SET status='BLOCKED',verdict='BLOCKED',summary='runner lease expired; machine reclaimed for a new job',finished_at=now()
+ WHERE id=$1 AND status='RUNNING'`, sessionID); err != nil {
+				return nil, err
+			}
 		}
 		if _, err = tx.ExecContext(ctx, `UPDATE desktop_test_machines SET session_id='',session_generation=0,lease_until=NULL WHERE id=$1`, machineID); err != nil {
 			return nil, err
@@ -502,6 +517,14 @@ func (s *Store) RequestTestSessionFinish(ctx context.Context, sessionID, verdict
 }
 
 func (s *Store) FinishTestSession(ctx context.Context, machineID, sessionID string, generation int64, requested, summary string) (*testlab.Session, error) {
+	return s.FinishTestSessionReport(ctx, machineID, sessionID, generation, requested, summary, nil, nil)
+}
+
+// FinishTestSessionReport accepts the engine supervisor's final evidence: the
+// complete check list, the findings list and the requested verdict. Slices are
+// replaced atomically when non-nil; nil keeps what the agent recorded earlier.
+func (s *Store) FinishTestSessionReport(ctx context.Context, machineID, sessionID string, generation int64,
+	requested, summary string, checks []testlab.SessionCheck, findings []testlab.Finding) (*testlab.Session, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -534,11 +557,21 @@ func (s *Store) FinishTestSession(ctx context.Context, machineID, sessionID stri
 	if requested == "" {
 		requested = storedVerdict
 	}
-	checks, err := s.ListTestSessionChecks(ctx, sessionID)
+	if err = recordSessionChecks(ctx, tx, sessionID, checks); err != nil {
+		return nil, err
+	}
+	if err = recordSessionFindings(ctx, tx, sessionID, findings); err != nil {
+		return nil, err
+	}
+	checks, err = listSessionChecksTx(ctx, tx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	verdict, err := testlab.EvaluateSession(spec, requested, checks)
+	findings, err = listSessionFindingsTx(ctx, tx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	verdict, err := testlab.EvaluateSessionWithFindings(spec, requested, checks, findings)
 	if err != nil {
 		return nil, err
 	}
@@ -553,6 +586,18 @@ func (s *Store) FinishTestSession(ctx context.Context, machineID, sessionID stri
 		}
 		if !exists {
 			return nil, fmt.Errorf("%w: check %s references unknown evidence", testlab.ErrInvalid, c.ID)
+		}
+	}
+	for _, f := range findings {
+		for _, ref := range f.Evidence {
+			var exists bool
+			if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM test_session_evidence WHERE session_id=$1 AND ('sha256:'||sha256)=$2)`,
+				sessionID, ref).Scan(&exists); err != nil {
+				return nil, err
+			}
+			if !exists {
+				return nil, fmt.Errorf("%w: finding %s references unknown evidence", testlab.ErrInvalid, f.ID)
+			}
 		}
 	}
 	if len(summary) > 4000 {

@@ -206,14 +206,16 @@ func (f *fakeTracker) uploadCount() int {
 }
 
 type fakeNotifier struct {
-	mu   sync.Mutex
-	sent []string
+	mu       sync.Mutex
+	sent     []string
+	mentions [][]Mention
 }
 
-func (f *fakeNotifier) SendGroup(ctx context.Context, botID, chatID, replyTo, text string) error {
+func (f *fakeNotifier) SendGroup(ctx context.Context, botID, chatID, replyTo, text string, mentions []Mention) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sent = append(f.sent, text)
+	f.mentions = append(f.mentions, append([]Mention(nil), mentions...))
 	return nil
 }
 
@@ -221,6 +223,16 @@ func (f *fakeNotifier) all() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.sent...)
+}
+
+func (f *fakeNotifier) allMentions() [][]Mention {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([][]Mention, len(f.mentions))
+	for i := range f.mentions {
+		out[i] = append([]Mention(nil), f.mentions[i]...)
+	}
+	return out
 }
 
 type fakeWorkspace struct {

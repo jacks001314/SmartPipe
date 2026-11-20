@@ -6,13 +6,20 @@ import (
 	"smartpipe/sdks/lanxin"
 )
 
+// Mention 是群聊回复时要 @ 的同事。
+type Mention struct {
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
+}
+
 // ReplyRequest 编排层经 bot 内网接口发蓝信消息的请求体。
 type ReplyRequest struct {
-	BotID    string `json:"botId,omitempty"`
-	ChatType string `json:"chatType"` // "p2p" | "group"
-	TargetID string `json:"targetId"` // staffId 或 groupId
-	RefMsgID string `json:"refMsgId,omitempty"`
-	Text     string `json:"text"`
+	BotID    string    `json:"botId,omitempty"`
+	ChatType string    `json:"chatType"` // "p2p" | "group"
+	TargetID string    `json:"targetId"` // staffId 或 groupId
+	RefMsgID string    `json:"refMsgId,omitempty"`
+	Text     string    `json:"text"`
+	Mentions []Mention `json:"mentions,omitempty"`
 }
 
 // NewServer 管理面 HTTP 服务：/healthz + /internal/reply（编排层回复入口）。
@@ -37,7 +44,7 @@ func NewServer(cfg Config, h *Handler) *iris.Application {
 		if req.ChatType == "" {
 			req.ChatType = "p2p"
 		}
-		if err := h.SendText(ctx, req.ChatType, req.TargetID, req.RefMsgID, req.Text); err != nil {
+		if err := h.SendTextWithMentions(ctx, req.ChatType, req.TargetID, req.RefMsgID, req.Text, req.Mentions); err != nil {
 			ctx.StatusCode(500)
 			ctx.JSON(map[string]string{"error": err.Error()})
 			return

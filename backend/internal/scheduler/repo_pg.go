@@ -86,8 +86,8 @@ func (r *PgRepo) GetLink(ctx context.Context, msgID string) (*Link, error) {
 }
 
 func (r *PgRepo) AppendChat(ctx context.Context, m ChatMessage) error {
-	_, err := r.db.ExecContext(ctx, `INSERT INTO scheduler_chat (chat_id, project_id, role, body) VALUES ($1,$2,$3,$4)`,
-		m.ChatID, m.ProjectID, m.Role, m.Body)
+	_, err := r.db.ExecContext(ctx, `INSERT INTO scheduler_chat (chat_id, project_id, role, body, sender_name) VALUES ($1,$2,$3,$4,$5)`,
+		m.ChatID, m.ProjectID, m.Role, m.Body, m.SenderName)
 	if err != nil {
 		return fmt.Errorf("scheduler: append chat: %w", err)
 	}
@@ -98,7 +98,7 @@ func (r *PgRepo) RecentChat(ctx context.Context, chatID string, limit int) ([]Ch
 	if limit <= 0 {
 		limit = 10
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT id, chat_id, project_id, role, body, created_at
+	rows, err := r.db.QueryContext(ctx, `SELECT id, chat_id, project_id, role, body, sender_name, created_at
  FROM scheduler_chat WHERE chat_id = $1 ORDER BY id DESC LIMIT $2`, chatID, limit)
 	if err != nil {
 		return nil, err
@@ -107,7 +107,7 @@ func (r *PgRepo) RecentChat(ctx context.Context, chatID string, limit int) ([]Ch
 	var out []ChatMessage
 	for rows.Next() {
 		var m ChatMessage
-		if err := rows.Scan(&m.ID, &m.ChatID, &m.ProjectID, &m.Role, &m.Body, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.ChatID, &m.ProjectID, &m.Role, &m.Body, &m.SenderName, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -115,6 +115,36 @@ func (r *PgRepo) RecentChat(ctx context.Context, chatID string, limit int) ([]Ch
 	// reverse to chronological
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
+	}
+	return out, rows.Err()
+}
+
+// ChatParticipants 取每个同事最近一次发言时的姓名，按最近活跃排序。
+func (r *PgRepo) ChatParticipants(ctx context.Context, chatID string, limit int) ([]Participant, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := r.db.QueryContext(ctx, `
+SELECT user_id, sender_name FROM (
+  SELECT DISTINCT ON (user_id) user_id, sender_name, created_at
+  FROM lanxin_messages
+  WHERE chat_id = $1 AND user_id <> ''
+  ORDER BY user_id, created_at DESC
+) t ORDER BY created_at DESC LIMIT $2`, chatID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]Participant, 0, limit)
+	for rows.Next() {
+		var p Participant
+		if err := rows.Scan(&p.ID, &p.Name); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(p.ID) == "" {
+			continue
+		}
+		out = append(out, p)
 	}
 	return out, rows.Err()
 }

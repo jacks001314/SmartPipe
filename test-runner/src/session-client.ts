@@ -20,6 +20,10 @@ export interface SessionLease {
   expires_at: string; deadline: string; session: SessionInfo;
 }
 
+export interface SessionInputInfo {
+  name: string; kind: string; sha256: string; mime_type: string; bytes: number;
+}
+
 function endpoint(base: string): URL {
   const url = new URL(base);
   if (url.username || url.password || url.search || url.hash) throw new Error('Invalid API URL');
@@ -147,6 +151,43 @@ export class SessionMachineClient {
   async report(sessionID: string, generation: number, verdict: string, summary: string, signal?: AbortSignal): Promise<void> {
     await call<unknown>(this.base, '/test-runner/session/report', {method:'POST',headers:this.headers(),
       body:JSON.stringify({session_id:sessionID,generation,verdict,summary})}, signal);
+  }
+  async reportWithFindings(sessionID: string, generation: number, report: {
+    verdict: string; summary: string;
+    checks?: Array<{id:string;status:string;evidence?:string;note?:string}>;
+    findings?: Array<Record<string,unknown>>;
+  }, signal?: AbortSignal): Promise<void> {
+    await call<unknown>(this.base, '/test-runner/session/report', {method:'POST',headers:this.headers(),
+      body:JSON.stringify({session_id:sessionID,generation,...report})}, signal);
+  }
+  async check(sessionID: string, generation: number, check: {id:string;status:string;evidence?:string;note?:string}, signal?: AbortSignal): Promise<void> {
+    await call<unknown>(this.base, '/test-runner/session/check', {method:'POST',headers:this.headers(),
+      body:JSON.stringify({session_id:sessionID,generation,check})}, signal);
+  }
+  async finding(sessionID: string, generation: number, finding: Record<string,unknown>, signal?: AbortSignal): Promise<void> {
+    await call<unknown>(this.base, '/test-runner/session/finding', {method:'POST',headers:this.headers(),
+      body:JSON.stringify({session_id:sessionID,generation,finding})}, signal);
+  }
+  async events(sessionID: string, generation: number,
+    events: Array<{seq:number;kind:string;message:string;at:string}>, signal?: AbortSignal): Promise<void> {
+    await call<unknown>(this.base, '/test-runner/session/events', {method:'POST',headers:this.headers(),
+      body:JSON.stringify({session_id:sessionID,generation,events})}, signal);
+  }
+  async listInputs(sessionID: string, generation: number, signal?: AbortSignal): Promise<SessionInputInfo[]> {
+    const data = await call<SessionInputInfo[]>(this.base,
+      '/test-runner/session/inputs/' + encodeURIComponent(sessionID) + '?generation=' + generation,
+      {method:'GET',headers:this.headers()}, signal);
+    return data ?? [];
+  }
+  async input(sessionID: string, generation: number, name: string, signal?: AbortSignal): Promise<Buffer> {
+    const response = await fetch(new URL('/test-runner/session/inputs/' + encodeURIComponent(sessionID) + '/' +
+      encodeURIComponent(name) + '?generation=' + generation, this.base), {
+      method: 'GET', headers: {'Authorization': 'Bearer ' + this.token, 'X-Test-Machine-ID': this.machineID},
+      redirect: 'error',
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(180_000)]) : AbortSignal.timeout(180_000),
+    });
+    if (!response.ok) throw new Error('input download ' + name + ' returned ' + response.status);
+    return Buffer.from(await response.arrayBuffer());
   }
   async release(sessionID: string, generation: number, signal?: AbortSignal): Promise<void> {
     await call<unknown>(this.base, '/test-runner/session/release', {method:'POST',headers:this.headers(),

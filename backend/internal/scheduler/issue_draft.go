@@ -93,7 +93,7 @@ func parseIssueDraftCommand(text string) (action, draftID string, ok bool) {
 }
 
 func (s *Scheduler) replyIssueDraft(ctx context.Context, p *Project, msg Inbound, status, text string, issue int, issueURL string) error {
-	if err := s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, text); err != nil {
+	if err := s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, text, senderMentions(msg)...); err != nil {
 		_ = s.repo.MarkMessage(ctx, msg.PlatformMessageID, "failed", err.Error(), issue, issueURL)
 		return err
 	}

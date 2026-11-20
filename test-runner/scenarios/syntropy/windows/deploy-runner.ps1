@@ -31,7 +31,14 @@ param(
   # Agent session host: shares the desktop mutex and local lease with the worker.
   [switch]$InstallSessionHost,
   [string[]]$SessionEnvironments = @('syntropy'),
-  [string[]]$SessionRoots = @()
+  [string[]]$SessionRoots = @(),
+  # Screenshot evidence: title matching works for native windows, and the
+  # DevTools port is the only reliable path for Electron when RDP is detached.
+  [string]$ScreenshotTitle = 'Syntropy',
+  [int]$DesktopDebugPort = 0,
+  [switch]$UseEngine,
+  [int]$EnginePort = 8790,
+  [string]$CodexCommand = ''
 )
 $ErrorActionPreference = 'Stop'
 function Fail([string]$message) { [Console]::Error.WriteLine($message); exit 1 }
@@ -61,6 +68,7 @@ Copy-Item -Force -Path (Join-Path $PSScriptRoot 'syntropy-ctl.ps1') -Destination
 Copy-Item -Force -Path (Join-Path $PSScriptRoot 'run-worker.ps1') -Destination (Join-Path $Base 'run-worker.ps1')
 Copy-Item -Force -Path (Join-Path $PSScriptRoot 'run-session-host.ps1') -Destination (Join-Path $Base 'run-session-host.ps1')
 Copy-Item -Force -Path (Join-Path $PSScriptRoot '..\..\windows\capture-window.ps1') -Destination (Join-Path $scripts 'capture-window.ps1')
+Copy-Item -Force -Path (Join-Path $PSScriptRoot '..\..\windows\cdp-shot.mjs') -Destination (Join-Path $scripts 'cdp-shot.mjs')
 
 $tokenFile = Join-Path $Base 'machine.token'
 [System.IO.File]::WriteAllText($tokenFile, $Token, (New-Object System.Text.UTF8Encoding($false)))
@@ -92,16 +100,24 @@ $config = [ordered]@{
     installRoot = $InstallRoot
     scripts = @(@{ path = $ctl; sha256 = $ctlHash })
     stop = @(New-Step 'stop_app' 'stop' 120000)
-    start = @(New-Step 'start_app' 'start' 180000)
+    start = @(New-Step 'start_app' 'start' 180000 @{} $(if ($DesktopDebugPort -gt 0) { @('-CdpPort', [string]$DesktopDebugPort) } else { @() }))
     checks = @(
       (New-Step 'app_swapped' 'verify-swap' 120000),
       (New-Step 'app_running' 'status'),
       (New-Step 'app_window' 'wait' 180000 @{} @('-SettleSec','25')),
       (New-Step 'app_version' 'expect-version' 60000),
       (New-Step 'nbot_smoke' 'nbot-smoke' 60000),
-      (New-Step 'app_screenshot' 'screenshot' 60000 @{ evidenceFile = 'syntropy-main.png'; evidenceMime = 'image/png' })
+      (New-Step 'app_screenshot' 'screenshot' 60000 @{ evidenceFile = 'syntropy-main.png'; evidenceMime = 'image/png' } $(if ($DesktopDebugPort -gt 0) { @('-CdpPort', [string]$DesktopDebugPort) } else { @() }))
     )
     cleanup = @(New-Step 'expect_stopped' 'expect-stopped' 60000)
+  }
+}
+if ($DesktopDebugPort -gt 0) {
+  $config.desktopApp = [ordered]@{
+    executable = (Join-Path $InstallRoot 'Syntropy.exe')
+    processName = 'Syntropy'
+    args = @("--remote-debugging-port=$DesktopDebugPort", '--remote-allow-origins=*')
+    waitSec = 20
   }
 }
 $configPath = Join-Path $Base 'worker.json'
@@ -126,7 +142,17 @@ $sessionConfig = [ordered]@{
     $InstallRoot
   )
   screenshotScript = (Join-Path $scripts 'capture-window.ps1')
+  screenshotTitle = $ScreenshotTitle
   maxCommandMs = 600000
+}
+if ($DesktopDebugPort -gt 0) {
+  $sessionConfig.screenshotCDPPort = $DesktopDebugPort
+  $sessionConfig.screenshotCDPURLMatch = 'app://'
+}
+if ($UseEngine) {
+  $sessionConfig.useEngine = $true
+  $sessionConfig.enginePort = $EnginePort
+  if ($CodexCommand) { $sessionConfig.codexCommand = $CodexCommand }
 }
 $sessionConfigPath = Join-Path $Base 'session.json'
 [System.IO.File]::WriteAllText($sessionConfigPath, ($sessionConfig | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($false)))

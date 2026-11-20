@@ -27,8 +27,8 @@ func NewHTTPNotifier(baseURL, token string) *HTTPNotifier {
 	}
 }
 
-// SendGroup 发送群消息。
-func (n *HTTPNotifier) SendGroup(ctx context.Context, botID, chatID, replyTo, text string) error {
+// SendGroup 发送群消息；mentions 交给 bot 用蓝信 reminder.userIds 原生 @。
+func (n *HTTPNotifier) SendGroup(ctx context.Context, botID, chatID, replyTo, text string, mentions []Mention) error {
 	payload := map[string]any{
 		"botId":    botID,
 		"chatType": "group",
@@ -37,6 +37,9 @@ func (n *HTTPNotifier) SendGroup(ctx context.Context, botID, chatID, replyTo, te
 	}
 	if replyTo != "" {
 		payload["refMsgId"] = replyTo
+	}
+	if len(mentions) > 0 {
+		payload["mentions"] = mentions
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {

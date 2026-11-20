@@ -82,6 +82,23 @@ func TestSmartLiveAnswerHonorsHourlyLimit(t *testing.T) {
 	}
 }
 
+func TestSmartLiveAnswerWithoutReplyLimits(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.project.Policy = ChatPolicy{Mode: "smart", HourlyReplyLimit: 0, ReplyCooldown: 0, AnswerConfidence: 0.5}
+	h.runner.triageReply = `{"action":"answer","reply":"建议先看日志","confidence":0.9,"reason":"项目问题"}`
+	for _, id := range []string{"m-unlimited-1", "m-unlimited-2"} {
+		if err := h.s.HandleMessage(context.Background(), nonAtMsg(id, "导出报错了怎么办？")); err != nil {
+			t.Fatalf("handle %s: %v", id, err)
+		}
+	}
+	if len(h.notifier.all()) != 2 {
+		t.Fatalf("zero limits must not skip replies: %#v", h.notifier.all())
+	}
+	if got := messageStatusByID(t, h, "m-unlimited-2"); got.Status != "answered" {
+		t.Fatalf("status = %+v", got)
+	}
+}
+
 func TestNonAtNaturalLanguageControlIsBlocked(t *testing.T) {
 	h := newHarness(t, Config{})
 	h.project.Policy = ChatPolicy{Mode: "smart", Shadow: false, AnswerConfidence: 0.1}

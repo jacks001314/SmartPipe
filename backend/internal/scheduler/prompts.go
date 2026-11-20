@@ -25,9 +25,10 @@ const ChatSystemPrompt = `你是 SmartPipe 的蓝信助手（chat worker），�
 - 不要臆测代码行为，结论要基于实际读到的代码；不确定就说明不确定；
 - 不要新建重复 Issue：系统会按标题和错误特征查重；
 - 群回复只给结论：2 行以内、不超过 80 字；复现步骤、日志、代码细节写进 Issue 正文，不要发到群里。
+- 群聊回答默认会 @ 当前发言人；如果要回复群里另一个具体的人，在 JSON 顶层加 "mention":"对方姓名"。mention 只能从上下文“群成员”列表里选，不能编造。
 
 输出必须是**一个 JSON 对象**，不要加 markdown 代码块，不要输出多余文字：
-{"action":"answer","reply":"给群里的回复"}
+{"action":"answer","reply":"给群里的回复","mention":"李四"}
 {"action":"issue","title":"不超过 60 字","body":"现象/复现/影响/期望","severity":"low|medium|high|critical"}
 {"action":"need_info","reply":"需要补充什么信息"}
 {"action":"issue_update","issue":123,"reply":"要追加到该 Issue 的评论"}`
@@ -52,10 +53,11 @@ const ObserveSystemPrompt = `你是 SmartPipe 蓝信群的观察者，负责判�
 - 即使回答，也要短（3 行以内）；
 - triage 只用于确实值得进入建单/补 Issue 流程的内容，并给出 0 到 1 的 confidence；
 - confidence 必须反映真实把握，不要一律写 1。
+- 回答或 triage 需要 @ 某个具体同事时，在 JSON 顶层加 "mention":"对方姓名"；只能从上下文“群成员”列表里选，不确定就留空（默认 @ 当前发言人）。
 
 只输出一个 JSON 对象，不要 markdown，不要多余文字：
 {"action":"silent","reason":"为什么沉默","confidence":0.2}
-{"action":"answer","reply":"给群里的回复","reason":"为什么回答","confidence":0.7}
+{"action":"answer","reply":"给群里的回复","mention":"李四","reason":"为什么回答","confidence":0.7}
 {"action":"triage","issue":123,"reply":"追加到 Issue 的补充","reason":"为什么建单","confidence":0.9}
 {"action":"triage","title":"不超过 60 字","body":"现象/复现/影响/期望","severity":"low|medium|high|critical","reason":"为什么建单","confidence":0.9}`
 
@@ -69,6 +71,10 @@ type TriageDecision struct {
 	Issue      int     `json:"issue"`
 	Reason     string  `json:"reason"`
 	Confidence float64 `json:"confidence"`
+	// Mention 是模型选择的 @ 对象（姓名或 staffId）；MentionID/MentionName 是服务端校验后的结果。
+	Mention     string `json:"mention,omitempty"`
+	MentionID   string `json:"-"`
+	MentionName string `json:"-"`
 }
 
 func ParseTriageDecision(raw string) (*TriageDecision, error) {
@@ -137,12 +143,15 @@ const FixSystemPrompt = `你是 SmartPipe 的修复工程师（fix worker），�
 
 // ChatDecision 是 chat worker 的结构化输出。
 type ChatDecision struct {
-	Action   string `json:"action"`
-	Reply    string `json:"reply"`
-	Title    string `json:"title"`
-	Body     string `json:"body"`
-	Severity string `json:"severity"`
-	Issue    int    `json:"issue"`
+	Action      string `json:"action"`
+	Reply       string `json:"reply"`
+	Title       string `json:"title"`
+	Body        string `json:"body"`
+	Severity    string `json:"severity"`
+	Issue       int    `json:"issue"`
+	Mention     string `json:"mention,omitempty"`
+	MentionID   string `json:"-"`
+	MentionName string `json:"-"`
 }
 
 // ParseChatDecision 从模型输出里提取 JSON；允许前后有解释文字或代码块围栏。
@@ -183,12 +192,13 @@ func ParseChatDecision(raw string) (*ChatDecision, error) {
 	return &d, nil
 }
 
-func buildChatPrompt(p *Project, history []ChatMessage, msg Inbound, referenced int, activeWorker *Worker, refIssue *Issue) string {
+func buildChatPrompt(p *Project, history []ChatMessage, participants []Participant, msg Inbound, referenced int, activeWorker *Worker, refIssue *Issue) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "项目：%s（仓库 %s，默认分支 %s）\n", p.Name, p.Repo, p.DefaultBase)
 	if p.LocalPath != "" {
 		fmt.Fprintf(&b, "本地代码目录：%s（只读）\n", p.LocalPath)
 	}
+	writeParticipants(&b, msg, participants)
 	if referenced > 0 {
 		fmt.Fprintf(&b, "这条消息引用了 Issue #%d，请优先按 issue_update 处理。\n", referenced)
 		fmt.Fprintf(&b, "调度器状态：%s\n", workerPromptStatus(referenced, activeWorker))
@@ -205,7 +215,7 @@ func buildChatPrompt(p *Project, history []ChatMessage, msg Inbound, referenced 
 	if len(history) > 0 {
 		b.WriteString("\n最近会话：\n")
 		for _, h := range history {
-			role := "同事"
+			role := firstNonEmpty(h.SenderName, "同事")
 			switch h.Role {
 			case "assistant":
 				role = "你"
@@ -219,18 +229,19 @@ func buildChatPrompt(p *Project, history []ChatMessage, msg Inbound, referenced 
 	if strings.TrimSpace(text) == "" {
 		text = "（这条消息只带了附件，没有文字说明，请按附件内容理解意图）"
 	}
-	fmt.Fprintf(&b, "\n群：%s\n发言人：%s\n消息：%s\n\n请按系统提示词输出一个 JSON 对象。",
+	fmt.Fprintf(&b, "\n群：%s\n发言人：%s\n消息：%s\n\n请按系统提示词输出一个 JSON 对象；需要 @ 别人时带上 mention。",
 		firstNonEmpty(msg.GroupName, "未知群"), firstNonEmpty(msg.SenderName, "同事"), text)
 	return b.String()
 }
 
-func buildObservePrompt(p *Project, history []ChatMessage, msg Inbound) string {
+func buildObservePrompt(p *Project, history []ChatMessage, participants []Participant, msg Inbound) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "项目：%s（仓库 %s）\n", p.Name, p.Repo)
+	writeParticipants(&b, msg, participants)
 	if len(history) > 0 {
 		b.WriteString("\n最近群聊：\n")
 		for _, h := range history {
-			role := "同事"
+			role := firstNonEmpty(h.SenderName, "同事")
 			switch h.Role {
 			case "assistant":
 				role = "机器人"
@@ -244,9 +255,23 @@ func buildObservePrompt(p *Project, history []ChatMessage, msg Inbound) string {
 	if strings.TrimSpace(text) == "" {
 		text = "（只有附件，没有文字）"
 	}
-	fmt.Fprintf(&b, "\n群：%s\n发言人：%s\n未 @ 机器人的消息：%s\n\n请判断是否应该 silent、answer 或 triage，并输出 JSON。",
+	fmt.Fprintf(&b, "\n群：%s\n发言人：%s\n未 @ 机器人的消息：%s\n\n请判断是否应该 silent、answer 或 triage，并输出 JSON；需要 @ 别人时带上 mention。",
 		firstNonEmpty(msg.GroupName, "未知群"), firstNonEmpty(msg.SenderName, "同事"), text)
 	return b.String()
+}
+
+// writeParticipants 把最近发言的群成员交给模型，mention 只能从这里选。
+func writeParticipants(b *strings.Builder, msg Inbound, participants []Participant) {
+	if msg.ChatType != "group" || len(participants) == 0 {
+		return
+	}
+	b.WriteString("\n群成员（按最近发言排序，mention 只能从这里选）：\n")
+	for _, person := range participants {
+		if strings.TrimSpace(person.ID) == "" {
+			continue
+		}
+		fmt.Fprintf(b, "- %s (id=%s)\n", firstNonEmpty(person.Name, "未知成员"), person.ID)
+	}
 }
 
 // workerPromptStatus 把调度器已知的 worker 状态交给聊天模型，避免模型凭感觉回答“没有派发”。

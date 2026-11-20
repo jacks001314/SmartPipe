@@ -395,17 +395,44 @@ func (h *Handler) reply(ctx context.Context, m *lanxin.InboundMessage, text stri
 	if m.ChatType == "p2p" {
 		target = m.From
 	}
-	return h.SendText(ctx, m.ChatType, target, m.MsgID, text)
+	var mentions []Mention
+	if m.ChatType == "group" && strings.TrimSpace(m.From) != "" {
+		mentions = []Mention{{ID: m.From, Name: m.SenderName}}
+	}
+	return h.SendTextWithMentions(ctx, m.ChatType, target, m.MsgID, text, mentions)
 }
 
 // SendText 发送文本回复：Markdown 失败回退纯文本（官方 11.9 建议）；群聊可引用原消息。
 // 供消息处理与 /internal/reply 管理接口复用。
 func (h *Handler) SendText(ctx context.Context, chatType, targetID, refMsgID, text string) error {
+	return h.SendTextWithMentions(ctx, chatType, targetID, refMsgID, text, nil)
+}
+
+// SendTextWithMentions 在群聊里用蓝信原生 reminder 字段 @ 指定成员。
+// 注意：formatText 不支持 reminder，因此带 @ 的回复必须走 text 消息。
+func (h *Handler) SendTextWithMentions(ctx context.Context, chatType, targetID, refMsgID, text string, mentions []Mention) error {
 	if chatType == "p2p" {
 		if _, err := h.snd.SendP2PMessage(ctx, targetID, lanxin.FormatTextMessage(text)); err == nil {
 			return nil
 		}
 		_, err := h.snd.SendP2PMessage(ctx, targetID, lanxin.TextMessage(text))
+		return err
+	}
+	ids, prefix := mentionPayload(mentions)
+	if len(ids) > 0 {
+		g := lanxin.GroupTextMessage(text, lanxin.ReminderUsers(ids...))
+		if refMsgID != "" {
+			g.Quote(refMsgID)
+		}
+		if _, err := h.snd.SendGroupMessage(ctx, targetID, g); err == nil {
+			return nil
+		}
+		// reminder 不兼容时至少保留可见的 @ 前缀。
+		t := lanxin.TextMessage(prefix + text)
+		if refMsgID != "" {
+			t.Quote(refMsgID)
+		}
+		_, err := h.snd.SendGroupMessage(ctx, targetID, t)
 		return err
 	}
 	g := lanxin.FormatTextMessage(text)
@@ -421,6 +448,28 @@ func (h *Handler) SendText(ctx context.Context, chatType, targetID, refMsgID, te
 	}
 	_, err := h.snd.SendGroupMessage(ctx, targetID, t)
 	return err
+}
+
+// mentionPayload 去重并生成 reminder userIds 与正文里的 @姓名 前缀。
+func mentionPayload(mentions []Mention) ([]string, string) {
+	seen := map[string]bool{}
+	ids := make([]string, 0, len(mentions))
+	names := make([]string, 0, len(mentions))
+	for _, m := range mentions {
+		id := strings.TrimSpace(m.ID)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+		if name := strings.TrimSpace(m.Name); name != "" {
+			names = append(names, "@"+name)
+		}
+	}
+	if len(names) == 0 {
+		return ids, ""
+	}
+	return ids, strings.Join(names, " ") + " "
 }
 
 const (

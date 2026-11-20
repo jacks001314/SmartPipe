@@ -12,6 +12,8 @@ type Repo interface {
 
 	AppendChat(ctx context.Context, m ChatMessage) error
 	RecentChat(ctx context.Context, chatID string, limit int) ([]ChatMessage, error)
+	// ChatParticipants 返回该会话最近发言的同事，供群聊 @ 对象选择与校验。
+	ChatParticipants(ctx context.Context, chatID string, limit int) ([]Participant, error)
 
 	ClaimMessage(ctx context.Context, messageID, botID string, now time.Time, ttl time.Duration) (bool, error)
 	RecordChatReply(ctx context.Context, chatID, botID string, at time.Time) error

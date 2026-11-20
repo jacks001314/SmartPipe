@@ -3,9 +3,9 @@
   Control an installed Syntropy desktop instance for hot-swap acceptance runs.
 
 Every action either exits 0 after verifying the fact or exits non-zero with a
-reason on stderr. The screenshot action uses window-level PrintWindow first, so
-it still works when the interactive desktop is locked; it falls back to a
-screen grab when PrintWindow is unavailable.
+reason on stderr. For Electron builds the screenshot action prefers the app's
+DevTools endpoint (-CdpPort), because Chromium paints nothing into a detached
+RDP desktop; otherwise it uses PrintWindow and finally a screen grab.
 #>
 param(
   [Parameter(Mandatory=$true)]
@@ -15,6 +15,8 @@ param(
   [string]$OutPath = $(if ($env:SMARTPIPE_TEST_OUTPUT) { Join-Path $env:SMARTPIPE_TEST_OUTPUT 'syntropy-main.png' } else { '' }),
   [int]$TimeoutSec = 90,
   [int]$SettleSec = 8,
+  [int]$CdpPort = 0,
+  [string]$CdpProcess = 'Syntropy',
   [string]$WindowTitle = 'Syntropy',
   [string]$Expect = $env:SMARTPIPE_EXPECT_VERSION
 )
@@ -160,7 +162,11 @@ switch ($Action) {
   'start' {
     if (-not (Test-Path -LiteralPath $exe)) { Fail 4 ("Syntropy.exe not found: " + $exe) }
     Stop-Targets
-    Start-Process -FilePath $exe -WorkingDirectory $Root | Out-Null
+    if ($CdpPort -gt 0) {
+      Start-Process -FilePath $exe -WorkingDirectory $Root -ArgumentList @("--remote-debugging-port=$CdpPort", '--remote-allow-origins=*') | Out-Null
+    } else {
+      Start-Process -FilePath $exe -WorkingDirectory $Root | Out-Null
+    }
     $window = Wait-RestoredWindow
     if (-not $window) { Fail 5 'Syntropy window did not appear before the timeout' }
     exit 0
@@ -222,6 +228,25 @@ switch ($Action) {
     $handle = $window.Handle
     [void][SyntropyWin]::SetForegroundWindow($handle)
     Start-Sleep -Milliseconds 500
+    if ($CdpPort -gt 0) {
+      $cdpScript = Join-Path $PSScriptRoot 'cdp-shot.mjs'
+      $node = 'C:\Program Files\nodejs\node.exe'
+      if ((Test-Path -LiteralPath $cdpScript) -and (Test-Path -LiteralPath $node)) {
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & $node $cdpScript $OutPath $CdpPort 'app://' $CdpProcess 2>$null | Out-Null
+        $ErrorActionPreference = $previousPreference
+        if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $OutPath -PathType Leaf)) {
+          $blank = $false
+          try {
+            $probe = [System.Drawing.Bitmap]::FromFile($OutPath)
+            $blank = Test-BlankBitmap $probe
+            $probe.Dispose()
+          } catch { $blank = $true }
+          if (-not $blank) { exit 0 }
+        }
+      }
+    }
     $rect = New-Object SyntropyWin+RECT
     if (-not [SyntropyWin]::GetWindowRect($handle, [ref]$rect)) { Fail 15 'GetWindowRect failed' }
     $width = $rect.Right - $rect.Left
@@ -246,8 +271,10 @@ switch ($Action) {
       $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
       $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
       $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
-      $bitmap.Save($OutPath, [System.Drawing.Imaging.ImageFormat]::Png)
+      $blank = Test-BlankBitmap $bitmap
+      if (-not $blank) { $bitmap.Save($OutPath, [System.Drawing.Imaging.ImageFormat]::Png) }
       $graphics.Dispose(); $bitmap.Dispose()
+      if ($blank) { Fail 16 ('screen capture produced a blank frame (PrintWindow=' + $printed + '); start Syntropy with --remote-debugging-port and pass -CdpPort') }
       exit 0
     } catch {
       Fail 16 ('screen capture failed (PrintWindow=' + $printed + '): ' + $_.Exception.Message)

@@ -23,7 +23,11 @@ func (a *API) registerTestSessions(admin iris.Party, app *iris.Application) {
 	admin.Post("/test-sessions/batch", a.createTestSessionBatch)
 	admin.Get("/test-sessions/{id}", a.getTestSession)
 	admin.Get("/test-sessions/{id}/commands", a.listTestSessionCommands)
+	admin.Get("/test-sessions/{id}/evidence", a.listTestSessionEvidence)
 	admin.Get("/test-sessions/{id}/evidence/{digest}", a.getTestSessionEvidence)
+	admin.Get("/test-sessions/{id}/inputs", a.listTestSessionInputs)
+	admin.Get("/test-sessions/{id}/events", a.listTestSessionEvents)
+	admin.Put("/test-sessions/{id}/inputs/{name}", a.putTestSessionInput)
 	admin.Post("/test-sessions/{id}/cancel", a.cancelTestSession)
 
 	agent := app.Party("/test-session")
@@ -43,6 +47,11 @@ func (a *API) registerTestSessions(admin iris.Party, app *iris.Application) {
 	machine.Post("/next", a.nextTestSessionCommand)
 	machine.Post("/result", a.completeTestSessionCommand)
 	machine.Post("/evidence", a.uploadTestSessionEvidence)
+	machine.Post("/check", a.uploadTestSessionCheck)
+	machine.Post("/finding", a.uploadTestSessionFinding)
+	machine.Post("/events", a.uploadTestSessionEvents)
+	machine.Get("/inputs/{id}", a.machineListTestSessionInputs)
+	machine.Get("/inputs/{id}/{name}", a.machineGetTestSessionInput)
 	machine.Post("/report", a.reportTestSession)
 	machine.Post("/release", a.releaseTestSession)
 }
@@ -170,6 +179,16 @@ func (a *API) getTestSessionEvidence(c iris.Context) {
 	c.Header("Cache-Control", "no-store")
 	c.Header("Content-Type", item.MIMEType)
 	_, _ = c.Write(item.Payload)
+}
+
+func (a *API) listTestSessionEvidence(c iris.Context) {
+	items, err := a.store.ListTestSessionEvidence(c.Request().Context(), c.Params().Get("id"))
+	if err != nil {
+		a.fail(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	_ = c.JSON(envelope{Data: items})
 }
 
 func (a *API) cancelTestSession(c iris.Context) {
@@ -465,18 +484,21 @@ func (a *API) uploadTestSessionEvidence(c iris.Context) {
 }
 
 func (a *API) reportTestSession(c iris.Context) {
-	c.SetMaxRequestBodySize(64 << 10)
+	c.SetMaxRequestBodySize(512 << 10)
 	var in struct {
-		SessionID  string `json:"session_id"`
-		Generation int64  `json:"generation"`
-		Verdict    string `json:"verdict"`
-		Summary    string `json:"summary"`
+		SessionID  string                 `json:"session_id"`
+		Generation int64                  `json:"generation"`
+		Verdict    string                 `json:"verdict"`
+		Summary    string                 `json:"summary"`
+		Checks     []testlab.SessionCheck `json:"checks"`
+		Findings   []testlab.Finding      `json:"findings"`
 	}
 	if c.ReadJSON(&in) != nil || in.SessionID == "" || in.Generation < 1 {
 		c.StopWithStatus(http.StatusBadRequest)
 		return
 	}
-	session, err := a.store.FinishTestSession(c.Request().Context(), c.Values().GetString("test_machine"), in.SessionID, in.Generation, in.Verdict, in.Summary)
+	session, err := a.store.FinishTestSessionReport(c.Request().Context(), c.Values().GetString("test_machine"),
+		in.SessionID, in.Generation, in.Verdict, in.Summary, in.Checks, in.Findings)
 	if err != nil {
 		a.testLabError(c, err)
 		return

@@ -38,8 +38,8 @@ func toProject(p *store.Project, group *store.LanxinGroup) *scheduler.Project {
 	}
 	if group != nil {
 		seconds := group.ReplyCooldownSeconds
-		if seconds <= 0 {
-			seconds = 30
+		if seconds < 0 {
+			seconds = 0
 		}
 		out.Policy = scheduler.ChatPolicy{
 			Mode: group.ResponseMode, Shadow: group.ShadowMode,

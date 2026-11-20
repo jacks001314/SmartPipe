@@ -12,8 +12,6 @@ import (
 )
 
 const (
-	defaultHourlyReplyLimit = 6
-	defaultReplyCooldown    = 30 * time.Second
 	defaultAutoIssueLimit   = 3
 	defaultAnswerConfidence = 0.55
 	defaultTriageConfidence = 0.85
@@ -29,11 +27,12 @@ func normalizeChatPolicy(p ChatPolicy) ChatPolicy {
 	default:
 		p.Mode = "at_only"
 	}
-	if p.ReplyCooldown <= 0 {
-		p.ReplyCooldown = defaultReplyCooldown
+	// 0 表示不限制；负数只可能来自旧数据，按 0 处理。
+	if p.ReplyCooldown < 0 {
+		p.ReplyCooldown = 0
 	}
-	if p.HourlyReplyLimit <= 0 {
-		p.HourlyReplyLimit = defaultHourlyReplyLimit
+	if p.HourlyReplyLimit < 0 {
+		p.HourlyReplyLimit = 0
 	}
 	if p.DailyAutoIssueLimit <= 0 {
 		p.DailyAutoIssueLimit = defaultAutoIssueLimit
@@ -122,17 +121,18 @@ func (s *Scheduler) allowAutoReply(ctx context.Context, p *Project, chatID strin
 		log.Printf("[scheduler] recent chat replies %s: %v", chatID, err)
 		return true, ""
 	}
-	if count >= policy.HourlyReplyLimit {
+	if policy.HourlyReplyLimit > 0 && count >= policy.HourlyReplyLimit {
 		return false, fmt.Sprintf("本群最近一小时已回复 %d 条，达到上限 %d", count, policy.HourlyReplyLimit)
 	}
-	if !last.IsZero() && now.Sub(last) < policy.ReplyCooldown {
+	if policy.ReplyCooldown > 0 && !last.IsZero() && now.Sub(last) < policy.ReplyCooldown {
 		return false, fmt.Sprintf("距离上次回复不足 %s", policy.ReplyCooldown)
 	}
 	return true, ""
 }
 
 func (s *Scheduler) runTriage(ctx context.Context, p *Project, history []ChatMessage, msg Inbound) (*TriageDecision, error) {
-	prompt := buildObservePrompt(p, history, msg)
+	participants := s.chatParticipants(ctx, msg)
+	prompt := buildObservePrompt(p, history, participants, msg)
 	images, listing, cleanup, err := saveChatAttachments(msg)
 	if err != nil {
 		return nil, err
@@ -165,7 +165,12 @@ func (s *Scheduler) runTriage(ctx context.Context, p *Project, history []ChatMes
 	if res == nil || strings.TrimSpace(res.FinalResponse) == "" {
 		return nil, fmt.Errorf("scheduler: triage worker returned no output")
 	}
-	return ParseTriageDecision(res.FinalResponse)
+	decision, err := ParseTriageDecision(res.FinalResponse)
+	if err != nil {
+		return nil, err
+	}
+	decision.MentionID, decision.MentionName = resolveMention(decision.Mention, participants, msg)
+	return decision, nil
 }
 
 // handleObserved 处理非 @ 群消息：由观察模型逐条判断该回答、建单还是沉默；
@@ -238,7 +243,8 @@ func (s *Scheduler) handleObserved(ctx context.Context, p *Project, msg Inbound,
 			_ = s.repo.MarkMessage(ctx, msg.PlatformMessageID, "rate_limited", reason, 0, "")
 			return nil
 		}
-		if err := s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, decision.Reply); err != nil {
+		if err := s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, decision.Reply,
+			mentionsFromDecision(msg, decision.MentionID, decision.MentionName)...); err != nil {
 			return err
 		}
 		_ = s.repo.MarkMessage(ctx, msg.PlatformMessageID, "answered", clamp(decision.Reply, 500), 0, "")
@@ -282,6 +288,7 @@ func (s *Scheduler) handleObserved(ctx context.Context, p *Project, msg Inbound,
 		chatDecision := &ChatDecision{
 			Action: action, Reply: reply, Title: decision.Title,
 			Body: decision.Body, Severity: decision.Severity, Issue: decision.Issue,
+			MentionID: decision.MentionID, MentionName: decision.MentionName,
 		}
 		msg.Auto = true
 		outcome, err := s.applyChatDecision(ctx, p, msg, chatDecision, decision.Issue)

@@ -3,6 +3,7 @@ package releasesvc
 import (
 	"context"
 	"testing"
+	"time"
 
 	"smartpipe/backend/internal/releasev2"
 )
@@ -41,7 +42,10 @@ func (f *fakeStore) AppendEvent(_ context.Context, e releasev2.Event) error {
 
 func TestRunnerAdvancesBuildOnlyRun(t *testing.T) {
 	f := &fakeStore{
-		runs:      []releasev2.Run{{ID: "r1", Status: releasev2.RunQueued, Mode: releasev2.ModeBuildOnly}},
+		runs: []releasev2.Run{{
+			ID: "r1", Status: releasev2.RunQueued, Mode: releasev2.ModeBuildOnly,
+			SourceStorageKey: "sources/r1.tar.gz", CreatedAt: time.Now(),
+		}},
 		targets:   []releasev2.Target{{RunID: "r1", TargetID: "windows-amd64", ExecutorID: "win-1", Required: true, Status: releasev2.TargetQueued}},
 		executors: []releasev2.Executor{{ID: "win-1", Status: "online"}},
 	}
@@ -67,7 +71,10 @@ func TestRunnerAdvancesBuildOnlyRun(t *testing.T) {
 
 func TestRunnerBlocksOfflineExecutor(t *testing.T) {
 	f := &fakeStore{
-		runs:      []releasev2.Run{{ID: "r1", Status: releasev2.RunPreparing, Mode: releasev2.ModeBuildOnly}},
+		runs: []releasev2.Run{{
+			ID: "r1", Status: releasev2.RunPreparing, Mode: releasev2.ModeBuildOnly,
+			SourceStorageKey: "sources/r1.tar.gz", CreatedAt: time.Now(),
+		}},
 		targets:   []releasev2.Target{{RunID: "r1", TargetID: "darwin-arm64", ExecutorID: "mac-1", Required: true, Status: releasev2.TargetQueued}},
 		executors: []releasev2.Executor{{ID: "mac-1", Status: "offline"}},
 	}
@@ -83,8 +90,8 @@ func TestRunnerBlocksOfflineExecutor(t *testing.T) {
 func TestRunnerRespectsMaxActive(t *testing.T) {
 	f := &fakeStore{
 		runs: []releasev2.Run{
-			{ID: "r1", Status: releasev2.RunQueued, Mode: releasev2.ModeBuildOnly},
-			{ID: "r2", Status: releasev2.RunQueued, Mode: releasev2.ModeBuildOnly},
+			{ID: "r1", Status: releasev2.RunQueued, Mode: releasev2.ModeBuildOnly, SourceStorageKey: "sources/r1.tar.gz", CreatedAt: time.Now()},
+			{ID: "r2", Status: releasev2.RunQueued, Mode: releasev2.ModeBuildOnly, SourceStorageKey: "sources/r2.tar.gz", CreatedAt: time.Now()},
 		},
 		targets:   []releasev2.Target{{RunID: "r1", TargetID: "linux-amd64", ExecutorID: "e1", Required: true, Status: releasev2.TargetQueued}},
 		executors: []releasev2.Executor{{ID: "e1", Status: "online"}},
@@ -124,5 +131,60 @@ func TestRunnerRespectsMaxActive(t *testing.T) {
 	}
 	if f.runs[1].Status != releasev2.RunPreparing {
 		t.Fatalf("r2 status=%s want preparing after slot freed", f.runs[1].Status)
+	}
+}
+
+// 源码归档还没冻结时不能派发目标：执行器会回落到尚未同步的本地镜像。
+func TestRunnerWaitsForFrozenSource(t *testing.T) {
+	f := &fakeStore{
+		runs: []releasev2.Run{{
+			ID: "r1", Status: releasev2.RunPreparing, Mode: releasev2.ModePublish,
+			ResolvedCommit: "1e4328f7c9ad54a18df00a7fdad8e65574323757", CreatedAt: time.Now(),
+		}},
+		targets:   []releasev2.Target{{RunID: "r1", TargetID: "darwin-arm64", ExecutorID: "mac-1", Required: true, Status: releasev2.TargetQueued}},
+		executors: []releasev2.Executor{{ID: "mac-1", Status: "online"}},
+	}
+	r := &Runner{Store: f}
+	ctx := context.Background()
+	for i := 0; i < 2; i++ {
+		if err := r.Tick(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if f.runs[0].Status != releasev2.RunPreparing {
+			t.Fatalf("tick %d status=%s want preparing before source is frozen", i, f.runs[0].Status)
+		}
+	}
+	waits := 0
+	for _, e := range f.events {
+		if e.Kind == "run.waiting" {
+			waits++
+		}
+	}
+	if waits != 1 {
+		t.Fatalf("run.waiting events = %d, want 1", waits)
+	}
+	f.runs[0].SourceStorageKey = "sources/r1.tar.gz"
+	if err := r.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if f.runs[0].Status != releasev2.RunBuilding {
+		t.Fatalf("status=%s want building once source is frozen", f.runs[0].Status)
+	}
+}
+
+func TestRunnerBlocksRunWhoseSourceNeverFreezes(t *testing.T) {
+	f := &fakeStore{
+		runs: []releasev2.Run{{
+			ID: "r1", Status: releasev2.RunPreparing, Mode: releasev2.ModePublish,
+			CreatedAt: time.Now().Add(-sourceWaitTimeout - time.Minute),
+		}},
+		targets:   []releasev2.Target{{RunID: "r1", TargetID: "darwin-arm64", ExecutorID: "mac-1", Required: true, Status: releasev2.TargetQueued}},
+		executors: []releasev2.Executor{{ID: "mac-1", Status: "online"}},
+	}
+	if err := (&Runner{Store: f}).Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if f.runs[0].Status != releasev2.RunBlocked {
+		t.Fatalf("status=%s want blocked", f.runs[0].Status)
 	}
 }

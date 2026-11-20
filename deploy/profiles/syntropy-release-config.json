@@ -50,6 +50,8 @@
       "artifacts": [
         { "role": "installer", "kind": "installer", "glob": "desktop_app/dist/installers/windows-amd64/*.exe", "required": true },
         { "role": "app-server", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/bin/win32-x64/syntropy-app-server.exe", "os": "windows", "arch": "amd64", "required": true, "destinations": ["update:product"] },
+        { "role": "computer-use", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/computer-use-windows-amd64.exe", "os": "windows", "arch": "amd64", "required": true, "destinations": ["update:product"] },
+        { "role": "computer-use-notices", "kind": "binary", "glob": "desktop_app/apps/desktop/resources/node/artifacts/computer-use-windows-NOTICES.txt", "os": "windows", "arch": "amd64", "required": true, "destinations": ["update:product"] },
         { "role": "update-thin", "kind": "thin", "glob": "desktop_app/dist/installers-thin/windows-amd64/*.exe", "required": true },
         { "role": "update-bundle", "kind": "manifest", "glob": "desktop_app/dist/update-bundle/update-bundle.json", "required": true }
       ]
@@ -71,7 +73,9 @@
         "node-repl": { "artifactRole": "node-repl" },
         "codex": { "artifactRole": "codex" },
         "node-runtime": { "artifactRole": "node-runtime" },
-        "app-server": { "artifactRole": "app-server" }
+        "app-server": { "artifactRole": "app-server" },
+        "computer-use": { "artifactRole": "computer-use" },
+        "computer-use-notices": { "artifactRole": "computer-use-notices" }
       },
       "components": {
         "templates": { "artifactRole": "content-templates" },

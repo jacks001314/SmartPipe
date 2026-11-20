@@ -70,6 +70,23 @@ CREATE INDEX IF NOT EXISTS release_executor_commands_pending_idx
 var migrations = []migration{
 
 	{
+		version: 63,
+		name:    "scheduler_chat_sender_name",
+		sql: `
+ALTER TABLE scheduler_chat ADD COLUMN IF NOT EXISTS sender_name TEXT NOT NULL DEFAULT '';
+`,
+	},
+
+	{
+		version: 62,
+		name:    "lanxin_group_reply_limits_default_off",
+		sql: `
+ALTER TABLE lanxin_groups ALTER COLUMN reply_cooldown_seconds SET DEFAULT 0;
+ALTER TABLE lanxin_groups ALTER COLUMN hourly_reply_limit SET DEFAULT 0;
+`,
+	},
+
+	{
 		version: 56,
 		name:    "release_v2_quarantines",
 		sql: `

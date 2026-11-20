@@ -233,7 +233,7 @@ func workerActionText(issue int, action string, w *Worker) string {
 
 // replyWorker 统一记录并发送 worker 相关回复。
 func (s *Scheduler) replyWorker(ctx context.Context, p *Project, msg Inbound, issue int, text string) error {
-	if err := s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, text); err != nil {
+	if err := s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, text, senderMentions(msg)...); err != nil {
 		_ = s.repo.MarkMessage(ctx, msg.PlatformMessageID, "failed", err.Error(), issue, issueURLFor(p, issue))
 		return err
 	}

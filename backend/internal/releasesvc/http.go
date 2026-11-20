@@ -1,6 +1,7 @@
 package releasesvc
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"net/http"
@@ -18,6 +19,9 @@ type HTTPHandler struct {
 	MaxArtifactBytes int64
 	// MaxTargetAttempts 是可重试失败（例如对象存储短暂不可用）允许的最大尝试次数。
 	MaxTargetAttempts int
+	// GitToken 解析能访问项目仓库的 GitHub token；本地镜像拉取私有仓库时
+	// 用它做鉴权。为空时按匿名仓库处理。
+	GitToken func(context.Context, *store.Project, string) (string, error)
 }
 
 // maxTargetAttempts 缺省 3 次：首次失败后还能再试两次。

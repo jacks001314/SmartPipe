@@ -27,7 +27,13 @@ type Runner struct {
 	// MaxActive 限制同时处于 preparing/building 的运行数；0 表示不限制。
 	MaxActive int
 	held      map[string]bool
+	waits     map[string]bool
 }
+
+// sourceWaitTimeout 是 preparing 状态等待源码冻结的上限。源码归档由
+// admin-api 在创建运行后同步冻结，正常只需几秒；超时通常意味着冻结请求
+// 丢失（例如 admin-api 中途重启），继续等待只会让运行卡在 preparing。
+const sourceWaitTimeout = 15 * time.Minute
 
 func (r *Runner) Run(ctx context.Context) {
 	interval := r.Interval
@@ -118,6 +124,12 @@ func (r *Runner) advance(ctx context.Context, run *releasev2.Run) error {
 	case releasev2.RunQueued:
 		return r.move(ctx, run, releasev2.RunPreparing, "release-service", "release run accepted")
 	case releasev2.RunPreparing:
+		// 执行器只认对象存储里的冻结归档，缺失时会回落到控制面的本地镜像。
+		// 刚 bump 的提交还没进镜像，提前派发会让两个目标一起报“镜像里没有提交”。
+		if strings.TrimSpace(run.SourceStorageKey) == "" {
+			return r.waitForSource(ctx, run)
+		}
+		delete(r.waits, run.ID)
 		targets, err := r.Store.ListTargets(ctx, run.ID)
 		if err != nil {
 			return err
@@ -199,6 +211,26 @@ func (r *Runner) advance(ctx context.Context, run *releasev2.Run) error {
 	default:
 		return nil
 	}
+}
+
+// waitForSource 让运行停在 preparing，直到源码归档冻结完成。
+func (r *Runner) waitForSource(ctx context.Context, run *releasev2.Run) error {
+	if !run.CreatedAt.IsZero() && time.Since(run.CreatedAt) > sourceWaitTimeout {
+		return r.block(ctx, run, "source_not_frozen", "release run has no frozen source archive after "+sourceWaitTimeout.String())
+	}
+	if r.waits == nil {
+		r.waits = map[string]bool{}
+	}
+	if r.waits[run.ID] {
+		return nil
+	}
+	r.waits[run.ID] = true
+	_ = r.Store.AppendEvent(ctx, releasev2.Event{
+		RunID: run.ID, Actor: "release-service", Kind: "run.waiting",
+		Summary: "waiting for source archive to be frozen",
+		Detail:  map[string]any{"commit": run.ResolvedCommit},
+	})
+	return nil
 }
 
 func (r *Runner) artifactsReady(ctx context.Context, run *releasev2.Run) error {

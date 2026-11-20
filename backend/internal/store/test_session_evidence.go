@@ -9,6 +9,14 @@ import (
 
 const MaxTestSessionEvidenceTotal = 64 << 20
 
+// TestSessionEvidenceInfo is the listing shape the console uses to offer a
+// preview or download without pulling every blob into the page.
+type TestSessionEvidenceInfo struct {
+	SHA256   string `json:"sha256"`
+	MIMEType string `json:"mime_type"`
+	Bytes    int    `json:"bytes"`
+}
+
 func (s *Store) putTestSessionEvidence(ctx context.Context, sessionID string, e DesktopEvidence) (string, error) {
 	if err := ValidateDesktopEvidence(e); err != nil {
 		return "", err
@@ -70,4 +78,24 @@ func (s *Store) GetTestSessionEvidence(ctx context.Context, sessionID, sha strin
 		return nil, err
 	}
 	return &e, nil
+}
+
+// ListTestSessionEvidence returns metadata only; payloads stay behind the
+// digest endpoint so a session with many screenshots stays cheap to render.
+func (s *Store) ListTestSessionEvidence(ctx context.Context, sessionID string) ([]TestSessionEvidenceInfo, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT sha256,mime_type,octet_length(payload)
+ FROM test_session_evidence WHERE session_id=$1 ORDER BY sha256`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]TestSessionEvidenceInfo, 0, 8)
+	for rows.Next() {
+		var item TestSessionEvidenceInfo
+		if err = rows.Scan(&item.SHA256, &item.MIMEType, &item.Bytes); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }

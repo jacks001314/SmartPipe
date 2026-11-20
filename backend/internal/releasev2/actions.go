@@ -99,6 +99,8 @@ func (s *Service) SaveNotes(ctx context.Context, runID, notes, actor string) (*R
 	if TerminalRunStatus(run.Status) {
 		return nil, fmt.Errorf("%w: run is %s", ErrState, run.Status)
 	}
+	// Agent 重写发布说明时不能把服务端自动生成的更新日志弄丢。
+	notes = MergeChangelog(run.NotesMD, notes)
 	sha := HashText(notes)
 	ok, err := s.repo.UpdateRunNotes(ctx, runID, notes, sha)
 	if err != nil {

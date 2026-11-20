@@ -73,11 +73,15 @@ func (r *BotRuntime) pick(botID string) (*Handler, error) {
 }
 
 func (r *BotRuntime) SendText(ctx context.Context, botID, chatType, targetID, refMsgID, text string) error {
+	return r.SendTextWithMentions(ctx, botID, chatType, targetID, refMsgID, text, nil)
+}
+
+func (r *BotRuntime) SendTextWithMentions(ctx context.Context, botID, chatType, targetID, refMsgID, text string, mentions []Mention) error {
 	h, err := r.pick(botID)
 	if err != nil {
 		return err
 	}
-	return h.SendText(ctx, chatType, targetID, refMsgID, text)
+	return h.SendTextWithMentions(ctx, chatType, targetID, refMsgID, text, mentions)
 }
 
 func (r *BotRuntime) HandleEvent(ctx context.Context, botID string, ev lanxin.Event) error {
@@ -118,7 +122,7 @@ func NewRuntimeServer(cfg Config, rt *BotRuntime) *iris.Application {
 		if req.ChatType == "" {
 			req.ChatType = "p2p"
 		}
-		if err := rt.SendText(ctx, req.BotID, req.ChatType, req.TargetID, req.RefMsgID, req.Text); err != nil {
+		if err := rt.SendTextWithMentions(ctx, req.BotID, req.ChatType, req.TargetID, req.RefMsgID, req.Text, req.Mentions); err != nil {
 			ctx.StatusCode(500)
 			ctx.JSON(map[string]string{"error": err.Error()})
 			return

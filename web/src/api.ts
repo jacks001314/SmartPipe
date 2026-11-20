@@ -73,6 +73,35 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
 export const api = {
   listTestRuns: () => request<import('./testlab-types').DesktopRun[]>("/test-runs"),
+  listTestStories: async (projectId?: string, q?: string) => (await request<import('./testlab-types').TestStory[]>(
+    "/test-stories?project_id=" + encodeURIComponent(projectId ?? "") + "&q=" + encodeURIComponent(q ?? ""))) ?? [],
+  getTestStory: (id: string) => request<import('./testlab-types').TestStory>("/test-stories/" + encodeURIComponent(id)),
+  createTestStory: (body: Partial<import('./testlab-types').TestStory>) =>
+    request<import('./testlab-types').TestStory>("/test-stories", { method: "POST", body }),
+  updateTestStory: (id: string, body: Partial<import('./testlab-types').TestStory>) =>
+    request<import('./testlab-types').TestStory>("/test-stories/" + encodeURIComponent(id), { method: "PUT", body }),
+  deleteTestStory: (id: string) => request<void>("/test-stories/" + encodeURIComponent(id), { method: "DELETE" }),
+  importTestStories: (body: { project_id: string; defaults?: { mode?: string; environment?: string; platform?: string };
+    stories: Array<{ filename: string; content: string }> }) =>
+    request<{ items: Array<{ slug: string; action: string; story?: import('./testlab-types').TestStory; error?: string }> }>(
+      "/test-stories/import", { method: "POST", body }),
+  runTestStory: (id: string, body: { environment?: string; platform?: string; timeout_seconds?: number;
+    engine?: import('./testlab-types').EngineSpec; event_ids?: string[] }) =>
+    request<{ session: import('./testlab-types').TestSession; token: string }>(
+      "/test-stories/" + encodeURIComponent(id) + "/run", { method: "POST", body }),
+  runTestStoriesBatch: (body: { story_ids: string[]; environment?: string; platform?: string; timeout_seconds?: number }) =>
+    request<{ queued: number; items: Array<{ story_id: string; session?: import('./testlab-types').TestSession;
+      token?: string; error?: string }> }>("/test-stories/run-batch", { method: "POST", body }),
+  listTestSessions: async (projectId?: string) => (await request<import('./testlab-types').TestSession[]>(
+    "/test-sessions?project_id=" + encodeURIComponent(projectId ?? ""))) ?? [],
+  getTestSession: (id: string) => request<import('./testlab-types').TestSession>("/test-sessions/" + encodeURIComponent(id)),
+  listTestSessionInputs: async (id: string) => (await request<import('./testlab-types').TestSessionInput[]>(
+    "/test-sessions/" + encodeURIComponent(id) + "/inputs")) ?? [],
+  listTestSessionEvents: async (id: string, afterSeq = 0) => (await request<import('./testlab-types').SessionEvent[]>(
+    "/test-sessions/" + encodeURIComponent(id) + "/events?after_seq=" + afterSeq)) ?? [],
+  listTestSessionEvidence: async (id: string) => (await request<import('./testlab-types').SessionEvidence[]>(
+    "/test-sessions/" + encodeURIComponent(id) + "/evidence")) ?? [],
+  cancelTestSession: (id: string) => request<void>("/test-sessions/" + encodeURIComponent(id) + "/cancel", { method: "POST" }),
   recoverTestMachine: (id:string,generation:number,reason:string) => request<void>("/test-machines/"+encodeURIComponent(id)+"/recover", {method:"POST",body:{generation,reason,cleanup_confirmed:true}}),
   listTestMachines: () => request<import('./testlab-types').DesktopMachine[]>("/test-machines"),
   setTestMachineEnabled: (id:string,enabled:boolean) => request<void>("/test-machines/"+encodeURIComponent(id)+"/enabled", {method:"POST",body:{enabled}}),

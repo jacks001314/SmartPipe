@@ -42,6 +42,22 @@ FATAL:electron\shell\common\asar\asar_util.cc:143] Integrity check failed for as
 桌面 UI 代码的变更需要走完整安装包/升级包，或在专门的测试构建里关闭 asar 完整性
 Fuse；不要把 `app.asar` 放进本场景的候选包。
 
+### 引擎热替换计划与恢复
+
+引擎路径使用显式 `hotswap/plan.json`，步骤支持 `copy`/`remove`/`stop_process`/
+`start_process`/`wait_http`/`exec`/`sleep`/`note`。两点运维约定：
+
+- `stop_process` 支持 `tree: true`，并会等待进程真正退出后再继续（Windows 上镜像
+  句柄未释放时覆盖文件会失败）；
+- 计划应提供 `restore_steps`，在任务结束、备份还原后把产品重新拉起；否则被停掉的
+  应用会保持停止状态。
+
+真机验证（2026-11-19）：`session-c24a3ff2d69cf76845db20d2cae9df90` 在
+`%LOCALAPPDATA%\Programs\Syntropy` 上替换 `resources/plugins/quant/ui/styles.css`，
+重启 Syntropy 并通过 CDP 截图确认主界面；任务结束后 `styles.css` 还原为原始
+sha256 `02665f68…`，Syntropy 由 `restore_steps` 重新拉起，`9334/json/version`
+返回 200。
+
 ## 制作候选包
 
 ```powershell
@@ -120,7 +136,32 @@ schtasks /run /tn SmartPipeTestRunner
 
 `syntropy-ctl.ps1 -Action screenshot` 会先恢复最小化到托盘的窗口，再用
 `PrintWindow` 抓取窗口自身的像素；如果 `PrintWindow` 失败或结果为空白，才回退到
-`CopyFromScreen`。因此 RDP 会话锁屏时仍能拿到主界面截图，而不仅仅是闪屏。
+`CopyFromScreen`。注意：Electron/Chromium 在**断开的 RDP 会话**里不再绘制，
+`PrintWindow` 会成功但只返回纯灰面。这类场景请给 Syntropy 加调试端口，并让引擎
+通过 CDP 截图：
+
+- 启动参数：`Syntropy.exe --remote-debugging-port=0 --remote-allow-origins=*`
+  （固定端口也可以；Electron 42 不写 `DevToolsActivePort`，所以 0 表示随机端口）
+- `session.json`：`"screenshotCDPPort": 9334`（首选）、`"screenshotCDPURLMatch": "app://"`、
+  `"screenshotCDPProcess": "Syntropy"`；首选端口失败时引擎会扫描该进程的监听端口并探测
+  `/json/version`，命中后再 CDP 截图。引擎顺序为 CDP → 标题窗口 → 全屏，事件里会记录 `via cdp`。
+- `worker.json` 可配置 `desktopApp`，让常驻 worker 在登录后自动拉起应用：
+
+```json
+"desktopApp": {
+  "executable": "C:\\Users\\windows\\AppData\\Local\\Programs\\Syntropy\\Syntropy.exe",
+  "processName": "Syntropy",
+  "args": ["--remote-debugging-port=9334", "--remote-allow-origins=*"],
+  "waitSec": 20
+}
+```
+
+`deploy-runner.ps1` 现在支持 `-DesktopDebugPort 9334`、`-ScreenshotTitle Syntropy`、
+`-UseEngine`、`-EnginePort 8790`、`-CodexCommand <codex.exe>`，会把这些字段写进
+`session.json` 并生成 `desktopApp`。
+
+Windows 上被强杀的进程可能残留僵尸监听端口；如果新实例的 CDP 端口连不上，
+换一个端口或重启测试机。
 
 `-Action wait` 会在窗口出现后等待 `-SettleSec` 秒（默认 25 秒），让“正在连接
 工作区”的闪屏过渡到主界面。这只是稳定性等待，不能代替业务断言。

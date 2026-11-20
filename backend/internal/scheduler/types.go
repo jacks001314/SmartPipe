@@ -240,7 +240,15 @@ type ChatMessage struct {
 	ProjectID string
 	Role      string // user | assistant
 	Body      string
-	CreatedAt time.Time
+	// SenderName 记录发言同事的姓名；旧数据可能为空，展示时回退为“同事”。
+	SenderName string
+	CreatedAt  time.Time
+}
+
+// Participant 是群里最近发过言的同事，用于让模型选择 @ 对象并在服务端校验。
+type Participant struct {
+	ID   string
+	Name string
 }
 
 // Link 记录蓝信消息与 Issue 的映射，用于幂等和回链。

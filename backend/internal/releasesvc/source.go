@@ -3,6 +3,7 @@ package releasesvc
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"strings"
 
 	"smartpipe/backend/internal/releasev2"
+	"smartpipe/backend/internal/store"
 )
 
 // maxSourceArchiveBytes 限制单次源码归档大小，避免误传大文件占满对象存储。
@@ -73,7 +75,8 @@ func (h *HTTPHandler) freezeSource(w http.ResponseWriter, r *http.Request, runID
 			http.Error(w, "project has no local repository mirror", http.StatusConflict)
 			return
 		}
-		path, cleanup, err = archiveCommit(r.Context(), dir, strings.TrimSpace(project.GitHubRepoURL), strings.TrimSpace(run.ResolvedCommit))
+		remote := strings.TrimSpace(project.GitHubRepoURL)
+		path, cleanup, err = archiveCommit(r.Context(), dir, remote, strings.TrimSpace(run.ResolvedCommit), h.repoToken(r.Context(), project, remote))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
@@ -216,7 +219,8 @@ func (h *HTTPHandler) serveSource(w http.ResponseWriter, r *http.Request, execut
 		http.Error(w, "local repository mirror is missing", http.StatusConflict)
 		return
 	}
-	path, cleanup, err := archiveCommit(r.Context(), dir, strings.TrimSpace(project.GitHubRepoURL), commit)
+	remote := strings.TrimSpace(project.GitHubRepoURL)
+	path, cleanup, err := archiveCommit(r.Context(), dir, remote, commit, h.repoToken(r.Context(), project, remote))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -243,8 +247,21 @@ func (h *HTTPHandler) serveSource(w http.ResponseWriter, r *http.Request, execut
 	http.ServeContent(w, r, "source.tar.gz", info.ModTime(), f)
 }
 
+// repoToken 取能访问项目仓库的 GitHub token；拿不到时返回空串，让公开仓库
+// 继续走匿名拉取，真正的鉴权失败由 git fetch 的错误信息暴露出来。
+func (h *HTTPHandler) repoToken(ctx context.Context, project *store.Project, remote string) string {
+	if h.GitToken == nil || project == nil {
+		return ""
+	}
+	token, err := h.GitToken(ctx, project, remote)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(token)
+}
+
 // archiveCommit 在临时目录里生成该提交的归档文件；本地镜像里没有这个提交时先 fetch 一次。
-func archiveCommit(parent context.Context, dir, remote, commit string) (string, func(), error) {
+func archiveCommit(parent context.Context, dir, remote, commit, token string) (string, func(), error) {
 	// 大仓库的 git fetch / archive 在慢磁盘或冷缓存上可能跑很久；固定 10 分钟
 	// 会把健康的源码冻结砍断。取消交给调用方 context。
 	ctx, cancel := context.WithCancel(parent)
@@ -254,7 +271,12 @@ func archiveCommit(parent context.Context, dir, remote, commit string) (string, 
 	}
 	if !hasCommit() {
 		if remote != "" {
-			_ = exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--no-prune", remote, "+refs/heads/*:refs/remotes/origin/*").Run()
+			if fetchErr := fetchMirror(ctx, dir, remote, token); fetchErr != nil {
+				if !hasCommit() {
+					cancel()
+					return "", func() {}, fmt.Errorf("本地镜像里没有提交 %s，拉取远端失败：%s", commit, fetchErr)
+				}
+			}
 		}
 		if !hasCommit() {
 			cancel()
@@ -284,4 +306,43 @@ func archiveCommit(parent context.Context, dir, remote, commit string) (string, 
 		return "", func() {}, fmt.Errorf("git archive %s: %s", commit, msg)
 	}
 	return name, cleanup, nil
+}
+
+// fetchMirror 用 token 通过 askpass 拉取远端分支和 tag，token 不出现在命令行里。
+func fetchMirror(ctx context.Context, dir, remote, token string) error {
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "fetch", "--no-prune", remote,
+		"+refs/heads/*:refs/remotes/origin/*", "+refs/tags/*:refs/tags/*")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if token != "" {
+		script, err := writeAskpass()
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(filepath.Dir(script))
+		cmd.Env = append(cmd.Env, "GIT_ASKPASS="+script, "GIT_USERNAME=x-access-token", "SMARTPIPE_GIT_TOKEN="+token)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return errors.New(msg)
+		}
+		return err
+	}
+	return nil
+}
+
+// writeAskpass 生成一次性 askpass 脚本，凭据只从环境变量读取。
+func writeAskpass() (string, error) {
+	dir, err := os.MkdirTemp("", "smartpipe-askpass-")
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "askpass.sh")
+	script := "#!/bin/sh\ncase \"$1\" in\n  *sername*) echo \"$GIT_USERNAME\" ;;\n  *) echo \"$SMARTPIPE_GIT_TOKEN\" ;;\nesac\n"
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", err
+	}
+	return path, nil
 }

@@ -449,6 +449,11 @@ func (a *API) resolveReleasePreview(ctx context.Context, project *store.Project,
 	preview.BuildVersion = renderReleaseTemplate(cfg.BuildVersionTemplate, preview, commitDate)
 	preview.NotesPath = renderReleaseTemplate(firstNonEmpty(cfg.NotesPath, "docs/releases/{tag}.md"), preview, commitDate)
 	preview.Notes = a.readReleaseNotes(ctx, client, project, preview.NotesPath, preview.Commit)
+	// 仓库里没有手写发布说明时，用上一版 tag 到本次提交的改动自动生成更新日志：
+	// 最近几个版本发布出来的 Release 正文为空，就是缺了这一步兜底。
+	if strings.TrimSpace(preview.Notes) == "" && clientErr == nil {
+		preview.Notes = a.generateReleaseChangelog(ctx, client, repo, previousReleaseTag(tags, preview.Tag), preview.Tag, preview.Commit)
+	}
 	for _, targetID := range cfg.TargetIDs() {
 		osName, arch := splitIntakeTarget(targetID)
 		build := releaseV2PreviewBuild{TargetID: targetID, OS: osName, Arch: arch}
@@ -583,6 +588,47 @@ func (a *API) readReleaseNotes(ctx context.Context, client *github.Client, proje
 		return ""
 	}
 	return string(raw)
+}
+
+// previousReleaseTag 返回当前版本之前的最近一个 tag。ListTags 由新到旧，
+// 当前 tag 可能已经存在（同版本重发），所以先跳过它自己。
+func previousReleaseTag(tags []github.TagInfo, currentTag string) string {
+	current := strings.TrimSpace(currentTag)
+	for _, tag := range tags {
+		name := strings.TrimSpace(tag.Name)
+		if name == "" || strings.EqualFold(name, current) {
+			continue
+		}
+		return name
+	}
+	return ""
+}
+
+// generateReleaseChangelog 读取两个 tag 之间的提交并渲染成更新日志。
+// GitHub 不可用或没有历史 tag 时返回空串，不影响发布预览本身。
+func (a *API) generateReleaseChangelog(ctx context.Context, client *github.Client, repo, previousTag, tag, commit string) string {
+	previousTag = strings.TrimSpace(previousTag)
+	commit = strings.TrimSpace(commit)
+	if client == nil || previousTag == "" || commit == "" {
+		return ""
+	}
+	commits, err := client.CommitsBetween(ctx, repo, previousTag, commit, 500)
+	if err != nil || len(commits) == 0 {
+		return ""
+	}
+	entries := make([]releasev2.ChangelogCommit, 0, len(commits))
+	for _, commit := range commits {
+		entries = append(entries, releasev2.ChangelogCommit{SHA: commit.SHA, Message: commit.Message})
+	}
+	return releasev2.RenderChangelog(previousTag, tag, githubCompareURL(repo, previousTag, tag), entries, 25)
+}
+
+func githubCompareURL(repo, base, head string) string {
+	owner, name, err := github.SplitRepo(repo)
+	if err != nil || owner == "" || name == "" || base == "" || head == "" {
+		return ""
+	}
+	return fmt.Sprintf("https://github.com/%s/%s/compare/%s...%s", owner, name, base, head)
 }
 
 func (a *API) localCommitSHA(project *store.Project, ref string) string {

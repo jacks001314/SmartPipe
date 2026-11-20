@@ -9,11 +9,12 @@ import (
 )
 
 type fakeSender struct {
-	p2p    []string
-	group  []string
-	groups []lanxin.Message
-	p2ps   []lanxin.Message
-	failMD bool
+	p2p          []string
+	group        []string
+	groups       []lanxin.Message
+	p2ps         []lanxin.Message
+	failMD       bool
+	failReminder bool
 }
 
 func (f *fakeSender) SendP2PMessage(ctx context.Context, userID string, msg *lanxin.Message) (json.RawMessage, error) {
@@ -30,6 +31,11 @@ func (f *fakeSender) SendGroupMessage(ctx context.Context, groupID string, msg *
 	f.groups = append(f.groups, *msg)
 	if f.failMD && msg.MsgType == lanxin.MsgTypeFormatText {
 		return nil, context.Canceled
+	}
+	if f.failReminder {
+		if tc, ok := msg.MsgData["text"].(lanxin.TextContent); ok && tc.Reminder != nil {
+			return nil, context.Canceled
+		}
 	}
 	return json.RawMessage("{}"), nil
 }
@@ -129,6 +135,63 @@ func TestFormatTextFallback(t *testing.T) {
 	}
 	if fs.p2ps[0].MsgType != lanxin.MsgTypeFormatText || fs.p2ps[1].MsgType != lanxin.MsgTypeText {
 		t.Fatalf("回退顺序错误: %s -> %s", fs.p2ps[0].MsgType, fs.p2ps[1].MsgType)
+	}
+}
+
+func TestGroupReplyUsesNativeReminder(t *testing.T) {
+	fs := &fakeSender{}
+	h := NewHandler(Config{}, fs, AckDispatcher{})
+	if err := h.SendTextWithMentions(context.Background(), "group", "g-1", "m-1", "你好",
+		[]Mention{{ID: "staff-1", Name: "张三"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fs.groups) != 1 {
+		t.Fatalf("sends = %d", len(fs.groups))
+	}
+	msg := fs.groups[0]
+	if msg.MsgType != lanxin.MsgTypeText || msg.RefMsgID != "m-1" {
+		t.Fatalf("msg = %+v", msg)
+	}
+	content, ok := msg.MsgData["text"].(lanxin.TextContent)
+	if !ok {
+		t.Fatalf("unexpected text payload: %#v", msg.MsgData["text"])
+	}
+	if content.Content != "你好" {
+		t.Fatalf("content = %q", content.Content)
+	}
+	if content.Reminder == nil || len(content.Reminder.UserIDs) != 1 || content.Reminder.UserIDs[0] != "staff-1" {
+		t.Fatalf("reminder = %#v", content.Reminder)
+	}
+}
+
+func TestGroupInboundReplyMentionsSender(t *testing.T) {
+	fs := &fakeSender{}
+	h := NewHandler(Config{RequireAtMe: true}, fs, AckDispatcher{})
+	if err := h.HandleEvent(context.Background(), groupEvent("m-mention", "@bot 你好", true)); err != nil {
+		t.Fatal(err)
+	}
+	if len(fs.groups) != 1 {
+		t.Fatalf("sends = %d", len(fs.groups))
+	}
+	content := fs.groups[0].MsgData["text"].(lanxin.TextContent)
+	if content.Reminder == nil || len(content.Reminder.UserIDs) != 1 || content.Reminder.UserIDs[0] != "staff-1" {
+		t.Fatalf("reminder = %#v", content.Reminder)
+	}
+}
+
+func TestGroupMentionFallbackAddsTextPrefix(t *testing.T) {
+	fs := &fakeSender{failReminder: true}
+	h := NewHandler(Config{}, fs, AckDispatcher{})
+	if err := h.SendTextWithMentions(context.Background(), "group", "g-1", "", "你好",
+		[]Mention{{ID: "staff-1", Name: "张三"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fs.groups) != 2 {
+		t.Fatalf("sends = %d", len(fs.groups))
+	}
+	content := fs.groups[1].MsgData["text"].(lanxin.TextContent)
+	if content.Content != "@张三 你好" || content.Reminder != nil {
+		t.Fatalf("fallback content = %+v", content)
 	}
 }
 

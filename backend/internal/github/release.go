@@ -184,7 +184,54 @@ func (c *Client) GetCommitInfo(ctx context.Context, repo, ref string) (*CommitIn
 	if err != nil {
 		return nil, wrapErr(err)
 	}
-	out := &CommitInfo{SHA: item.GetSHA()}
+	out := commitInfoFromRepoCommit(item)
+	return &out, nil
+}
+
+// CommitsBetween 返回 base...head 之间的提交，按 GitHub compare 的顺序。
+// 长周期发布可能有数百个提交，所以按页读取；limit 为 0 时最多取 500 条。
+func (c *Client) CommitsBetween(ctx context.Context, repo, base, head string, limit int) ([]CommitInfo, error) {
+	owner, name, err := SplitRepo(repo)
+	if err != nil {
+		return nil, err
+	}
+	base = strings.TrimSpace(base)
+	head = strings.TrimSpace(head)
+	if base == "" || head == "" {
+		return nil, fmt.Errorf("github: compare base and head are required")
+	}
+	if limit <= 0 {
+		limit = 500
+	}
+	opts := &gh.ListOptions{PerPage: 100}
+	out := make([]CommitInfo, 0, 100)
+	for {
+		comparison, resp, err := c.gh.Repositories.CompareCommits(ctx, owner, name, base, head, opts)
+		if err != nil {
+			return nil, wrapErr(err)
+		}
+		for _, item := range comparison.Commits {
+			if item == nil || item.GetCommit() == nil {
+				continue
+			}
+			out = append(out, commitInfoFromRepoCommit(item))
+			if len(out) >= limit {
+				return out, nil
+			}
+		}
+		if resp == nil || resp.NextPage == 0 || len(comparison.Commits) == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return out, nil
+}
+
+func commitInfoFromRepoCommit(item *gh.RepositoryCommit) CommitInfo {
+	if item == nil {
+		return CommitInfo{}
+	}
+	out := CommitInfo{SHA: item.GetSHA()}
 	if item.GetCommit() != nil {
 		out.Message = item.GetCommit().GetMessage()
 		if committer := item.GetCommit().GetCommitter(); committer != nil {
@@ -196,7 +243,7 @@ func (c *Client) GetCommitInfo(ctx context.Context, repo, ref string) (*CommitIn
 			}
 		}
 	}
-	return out, nil
+	return out
 }
 
 // ReadFile 读取仓库中某个 ref 上的文本文件；文件不存在时返回空串和 false。

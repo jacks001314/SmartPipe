@@ -80,9 +80,15 @@ type RepoSyncer interface {
 	SyncRepo(ctx context.Context, projectID string) error
 }
 
+// Mention 是群里要被 @ 的同事。ID 用于蓝信 reminder，Name 用于正文前缀。
+type Mention struct {
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
+}
+
 // Notifier 把文本发回蓝信群。
 type Notifier interface {
-	SendGroup(ctx context.Context, botID, chatID, replyTo, text string) error
+	SendGroup(ctx context.Context, botID, chatID, replyTo, text string, mentions []Mention) error
 }
 
 // Resolver 由群/项目 ID 找到项目。
@@ -383,7 +389,7 @@ func (s *Scheduler) HandleMessage(ctx context.Context, msg Inbound) error {
 			log.Printf("[scheduler] record unbound message %s: %v", msg.PlatformMessageID, recErr)
 		}
 		if isDirectMessage(msg) {
-			_ = s.notify(ctx, "", msg.ChatID(), "", "这个群还没有绑定项目，请管理员在配置台完成绑定。")
+			_ = s.notify(ctx, "", msg.ChatID(), "", "这个群还没有绑定项目，请管理员在配置台完成绑定。", senderMentions(msg)...)
 		}
 		return ErrUnbound
 	}
@@ -393,7 +399,7 @@ func (s *Scheduler) HandleMessage(ctx context.Context, msg Inbound) error {
 	}
 	history, _ := s.repo.RecentChat(ctx, msg.ChatID(), s.cfg.ChatHistorySize)
 	referenced := referencedIssue(msg.Text)
-	_ = s.repo.AppendChat(ctx, ChatMessage{ChatID: msg.ChatID(), ProjectID: p.ID, Role: "user", Body: msg.Text})
+	_ = s.repo.AppendChat(ctx, ChatMessage{ChatID: msg.ChatID(), ProjectID: p.ID, Role: "user", Body: msg.Text, SenderName: msg.SenderName})
 
 	if msg.ChatType == "group" && !isDirectMessage(msg) {
 		policy := normalizeChatPolicy(p.Policy)
@@ -426,14 +432,14 @@ func (s *Scheduler) HandleMessage(ctx context.Context, msg Inbound) error {
 	if runErr != nil {
 		log.Printf("[scheduler] chat worker failed project=%s chat=%s: %v", p.ID, msg.ChatID(), runErr)
 		_ = s.repo.MarkMessage(ctx, msg.PlatformMessageID, "failed", clamp(runErr.Error(), 1000), 0, "")
-		_ = s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, "抱歉，这次处理失败了，稍后再试或直接把问题贴到 Issue 里。")
+		_ = s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, "抱歉，这次处理失败了，稍后再试或直接把问题贴到 Issue 里。", senderMentions(msg)...)
 		return runErr
 	}
 	outcome, err := s.applyChatDecision(ctx, p, msg, decision, referenced)
 	if err != nil {
 		log.Printf("[scheduler] apply chat decision failed project=%s chat=%s: %v", p.ID, msg.ChatID(), err)
 		_ = s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID,
-			"抱歉，这次没能完成操作："+shortErr(err)+"。稍后再试，或直接把问题贴到 Issue 里。")
+			"抱歉，这次没能完成操作："+shortErr(err)+"。稍后再试，或直接把问题贴到 Issue 里。", senderMentions(msg)...)
 		_ = s.repo.MarkMessage(ctx, msg.PlatformMessageID, "failed", clamp(err.Error(), 1000), outcome.Issue, outcome.IssueURL)
 		return err
 	}
@@ -485,7 +491,8 @@ func (s *Scheduler) runChat(ctx context.Context, p *Project, history []ChatMessa
 			log.Printf("[scheduler] load referenced issue #%d failed: %v", referenced, err)
 		}
 	}
-	prompt := buildChatPrompt(p, history, msg, referenced, activeWorker, refIssue)
+	participants := s.chatParticipants(ctx, msg)
+	prompt := buildChatPrompt(p, history, participants, msg, referenced, activeWorker, refIssue)
 	images, listing, cleanup, err := saveChatAttachments(msg)
 	if err != nil {
 		return nil, err
@@ -518,13 +525,42 @@ func (s *Scheduler) runChat(ctx context.Context, p *Project, history []ChatMessa
 		// 只说“空决策”没法排查，把状态和耗时带出来。
 		return nil, fmt.Errorf("scheduler: chat worker returned no output (status=%s duration=%dms)", res.Status, res.DurationMS)
 	}
-	return ParseChatDecision(res.FinalResponse)
+	decision, err := ParseChatDecision(res.FinalResponse)
+	if err != nil {
+		return nil, err
+	}
+	decision.MentionID, decision.MentionName = resolveMention(decision.Mention, participants, msg)
+	return decision, nil
+}
+
+// chatParticipants 读取最近发言的群成员，并保证当前发言人在列表里。
+func (s *Scheduler) chatParticipants(ctx context.Context, msg Inbound) []Participant {
+	if msg.ChatType != "group" {
+		return nil
+	}
+	items, err := s.repo.ChatParticipants(ctx, msg.ChatID(), 50)
+	if err != nil {
+		log.Printf("[scheduler] chat participants %s: %v", msg.ChatID(), err)
+	}
+	if strings.TrimSpace(msg.SenderID) != "" {
+		found := false
+		for _, p := range items {
+			if p.ID == msg.SenderID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			items = append([]Participant{{ID: msg.SenderID, Name: msg.SenderName}}, items...)
+		}
+	}
+	return items
 }
 
 func (s *Scheduler) applyChatDecision(ctx context.Context, p *Project, msg Inbound, d *ChatDecision, referenced int) (messageOutcome, error) {
 	switch d.Action {
 	case "answer", "need_info":
-		if err := s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, d.Reply); err != nil {
+		if err := s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, d.Reply, mentionsFromDecision(msg, d.MentionID, d.MentionName)...); err != nil {
 			return messageOutcome{Status: "failed", Reason: err.Error()}, err
 		}
 		status := "answered"
@@ -538,7 +574,7 @@ func (s *Scheduler) applyChatDecision(ctx context.Context, p *Project, msg Inbou
 			issue = referenced
 		}
 		if issue <= 0 {
-			_ = s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, "没能确定要更新哪个 Issue，请在消息里带上 #编号。")
+			_ = s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, "没能确定要更新哪个 Issue，请在消息里带上 #编号。", mentionsFromDecision(msg, d.MentionID, d.MentionName)...)
 			return messageOutcome{Status: "need_info", Reason: "没有识别到 Issue 编号"}, nil
 		}
 		attachments := s.uploadIssueImages(ctx, p, msg)
@@ -556,7 +592,7 @@ func (s *Scheduler) applyChatDecision(ctx context.Context, p *Project, msg Inbou
 				s.Wake()
 			}
 		}
-		if err := s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, fmt.Sprintf("已补充到 Issue #%d。", issue)); err != nil {
+		if err := s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID, fmt.Sprintf("已补充到 Issue #%d。", issue), mentionsFromDecision(msg, d.MentionID, d.MentionName)...); err != nil {
 			return messageOutcome{Status: "failed", Issue: issue, IssueURL: issueURLFor(p, issue)}, err
 		}
 		return messageOutcome{Status: "issue_updated", Reason: clamp(d.Reply, 500), Issue: issue, IssueURL: issueURLFor(p, issue)}, nil
@@ -573,7 +609,7 @@ func (s *Scheduler) applyChatDecision(ctx context.Context, p *Project, msg Inbou
 				s.resume(w, msg.Text)
 			}
 			if err := s.notify(ctx, msg.BotID, msg.ChatID(), msg.PlatformMessageID,
-				fmt.Sprintf("这个问题已经有 Issue #%d，已把新反馈补充进去。\n%s", existing.Number, existing.URL)); err != nil {
+				fmt.Sprintf("这个问题已经有 Issue #%d，已把新反馈补充进去。\n%s", existing.Number, existing.URL), mentionsFromDecision(msg, d.MentionID, d.MentionName)...); err != nil {
 				return messageOutcome{Status: "failed", Issue: existing.Number, IssueURL: existing.URL}, err
 			}
 			return messageOutcome{Status: "issue_updated", Reason: "重复问题，已补充到已有 Issue", Issue: existing.Number, IssueURL: existing.URL}, nil
@@ -1347,7 +1383,7 @@ func (s *Scheduler) closeWorker(ctx context.Context, w *Worker, reason string) {
 	}
 }
 
-func (s *Scheduler) notify(ctx context.Context, botID, chatID, replyTo, text string) error {
+func (s *Scheduler) notify(ctx context.Context, botID, chatID, replyTo, text string, mentions ...Mention) error {
 	if strings.TrimSpace(chatID) == "" || strings.TrimSpace(text) == "" {
 		return nil
 	}
@@ -1355,11 +1391,73 @@ func (s *Scheduler) notify(ctx context.Context, botID, chatID, replyTo, text str
 		return nil
 	}
 	text = clamp(strings.TrimSpace(text), groupMessageLimit)
-	if err := s.notifier.SendGroup(ctx, botID, chatID, replyTo, text); err != nil {
+	if err := s.notifier.SendGroup(ctx, botID, chatID, replyTo, text, dedupeMentions(mentions)); err != nil {
 		return err
 	}
 	_ = s.repo.RecordChatReply(ctx, chatID, botID, s.now())
 	return nil
+}
+
+// senderMentions 是群聊回复的兜底 @ 对象：谁提问就 @ 谁。
+func senderMentions(msg Inbound) []Mention {
+	if msg.ChatType != "group" || strings.TrimSpace(msg.SenderID) == "" {
+		return nil
+	}
+	return []Mention{{ID: msg.SenderID, Name: msg.SenderName}}
+}
+
+// mentionsFromDecision 使用模型选定的 @ 对象；没有选定或校验失败时回退到发言人。
+func mentionsFromDecision(msg Inbound, id, name string) []Mention {
+	if msg.ChatType != "group" {
+		return nil
+	}
+	if strings.TrimSpace(id) != "" {
+		return []Mention{{ID: id, Name: name}}
+	}
+	return senderMentions(msg)
+}
+
+// resolveMention 把模型输出的姓名/staffId 映射到真实群成员。只接受上下文里出现过的
+// 参与者，避免模型编造 @ 对象；无法匹配时回退到当前发言人。
+func resolveMention(raw string, participants []Participant, msg Inbound) (string, string) {
+	if msg.ChatType != "group" {
+		return "", ""
+	}
+	raw = strings.TrimSpace(raw)
+	raw = strings.Trim(raw, " \t\r\n@“”\"'‘’")
+	if raw != "" {
+		for _, p := range participants {
+			if strings.TrimSpace(p.ID) == "" {
+				continue
+			}
+			if strings.EqualFold(strings.TrimSpace(p.Name), raw) || strings.EqualFold(strings.TrimSpace(p.ID), raw) {
+				return p.ID, p.Name
+			}
+		}
+		log.Printf("[scheduler] mention %q not in chat participants, fallback to sender", raw)
+	}
+	if strings.TrimSpace(msg.SenderID) == "" {
+		return "", ""
+	}
+	return msg.SenderID, msg.SenderName
+}
+
+func dedupeMentions(items []Mention) []Mention {
+	if len(items) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]Mention, 0, len(items))
+	for _, m := range items {
+		m.ID = strings.TrimSpace(m.ID)
+		m.Name = strings.TrimSpace(m.Name)
+		if m.ID == "" || seen[m.ID] {
+			continue
+		}
+		seen[m.ID] = true
+		out = append(out, m)
+	}
+	return out
 }
 
 func (s *Scheduler) notifyIssue(ctx context.Context, p *Project, w *Worker, text string) {

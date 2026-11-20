@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"smartpipe/backend/internal/bridge"
 	"smartpipe/backend/internal/releasesvc"
 	"smartpipe/backend/internal/releasev2"
 	"smartpipe/backend/internal/secretbox"
@@ -56,7 +57,21 @@ func main() {
 	}
 	log.Printf("制品存储模式: %s", mode)
 	maxAttempts := targetMaxAttempts()
-	handler := &releasesvc.HTTPHandler{Store: st, Objects: objects, Token: token, MaxTargetAttempts: maxAttempts}
+	handler := &releasesvc.HTTPHandler{
+		Store: st, Objects: objects, Token: token, MaxTargetAttempts: maxAttempts,
+		// 本地镜像拉取私有仓库时用项目凭据鉴权；GitHub App token 会过期，
+		// 每次 fetch 前现取。
+		GitToken: func(ctx context.Context, project *store.Project, repo string) (string, error) {
+			client, err := bridge.ClientForRepo(ctx, st, &project.ID, repo)
+			if err != nil {
+				return "", err
+			}
+			if client == nil {
+				return "", nil
+			}
+			return client.Token, nil
+		},
+	}
 	log.Printf("release service: max target attempts=%d (retryable failures)", maxAttempts)
 	srv := &http.Server{Addr: addr, Handler: handler.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {

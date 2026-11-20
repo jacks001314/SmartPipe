@@ -79,7 +79,7 @@ export function LanxinBotDetailPage({
   const [saving, setSaving] = useState(false);
   const [policyGroup, setPolicyGroup] = useState<LanxinGroup | null>(null);
   const [policyForm, setPolicyForm] = useState<GroupPolicyForm>({
-    response_mode: "smart", shadow_mode: false, reply_cooldown_seconds: 30, hourly_reply_limit: 6,
+    response_mode: "smart", shadow_mode: false, reply_cooldown_seconds: 0, hourly_reply_limit: 0,
     auto_issue_enabled: false, auto_issue_confidence: 0.85, daily_auto_issue_limit: 3, answer_confidence: 0.55,
   });
   const [savingPolicy, setSavingPolicy] = useState(false);
@@ -291,7 +291,11 @@ export function LanxinBotDetailPage({
                       <div>{MODE_LABEL[g.response_mode] || g.response_mode}{g.shadow_mode && <span className="chip warn" style={{ marginLeft: 6 }}>影子</span>}</div>
                       <button className="btn" style={{ marginTop: 4 }} onClick={() => openPolicy(g)}>编辑策略</button>
                     </td>
-                    <td className="tiny">{g.hourly_reply_limit} 条/小时<br />冷却 {g.reply_cooldown_seconds}s<br />自动建单 {g.daily_auto_issue_limit}/日</td>
+                    <td className="tiny">
+                      {g.hourly_reply_limit > 0 ? `${g.hourly_reply_limit} 条/小时` : "每小时不限制"}<br />
+                      {g.reply_cooldown_seconds > 0 ? `冷却 ${g.reply_cooldown_seconds}s` : "无回复冷却"}<br />
+                      自动建单 {g.daily_auto_issue_limit}/日
+                    </td>
                     <td className="tiny">{new Date(g.synced_at).toLocaleString()}</td>
                   </tr>
                 ))}
@@ -373,8 +377,8 @@ export function LanxinBotDetailPage({
               <div className="field"><label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 400 }}><input type="checkbox" checked={policyForm.shadow_mode} onChange={(e) => setPolicyForm((p) => ({ ...p, shadow_mode: e.target.checked }))} />影子模式：只记录判断，不回复</label></div>
               <div className="field"><label>回答置信度阈值</label><input type="number" min="0" max="1" step="0.05" value={policyForm.answer_confidence} onChange={(e) => setPolicyForm((p) => ({ ...p, answer_confidence: Number(e.target.value) }))} /></div>
               <div className="field"><label>自动建单置信度阈值</label><input type="number" min="0" max="1" step="0.05" value={policyForm.auto_issue_confidence} onChange={(e) => setPolicyForm((p) => ({ ...p, auto_issue_confidence: Number(e.target.value) }))} /></div>
-              <div className="field"><label>每小时回复上限</label><input type="number" min="1" value={policyForm.hourly_reply_limit} onChange={(e) => setPolicyForm((p) => ({ ...p, hourly_reply_limit: Number(e.target.value) }))} /></div>
-              <div className="field"><label>回复冷却（秒）</label><input type="number" min="0" value={policyForm.reply_cooldown_seconds} onChange={(e) => setPolicyForm((p) => ({ ...p, reply_cooldown_seconds: Number(e.target.value) }))} /></div>
+              <div className="field"><label>每小时回复上限（0=不限制）</label><input type="number" min="0" value={policyForm.hourly_reply_limit} onChange={(e) => setPolicyForm((p) => ({ ...p, hourly_reply_limit: Number(e.target.value) }))} /></div>
+              <div className="field"><label>回复冷却（秒，0=不限制）</label><input type="number" min="0" value={policyForm.reply_cooldown_seconds} onChange={(e) => setPolicyForm((p) => ({ ...p, reply_cooldown_seconds: Number(e.target.value) }))} /></div>
               <div className="field"><label>每日自动建单草稿上限</label><input type="number" min="0" value={policyForm.daily_auto_issue_limit} onChange={(e) => setPolicyForm((p) => ({ ...p, daily_auto_issue_limit: Number(e.target.value) }))} /></div>
               <div className="field"><label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 400 }}><input type="checkbox" checked={policyForm.auto_issue_enabled} onChange={(e) => setPolicyForm((p) => ({ ...p, auto_issue_enabled: e.target.checked }))} />允许高置信度非 @ 消息自动建单草稿</label><div className="tiny">开启后，高置信度的非 @ 消息会直接建单并派发 worker；建单失败时草稿保留，可在群里回复“确认建单”重试。</div></div>
             </div>

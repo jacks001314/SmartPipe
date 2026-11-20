@@ -102,6 +102,25 @@ func (r *MemoryRepo) RecentChat(ctx context.Context, chatID string, limit int) (
 	return out, nil
 }
 
+func (r *MemoryRepo) ChatParticipants(ctx context.Context, chatID string, limit int) ([]Participant, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if limit <= 0 {
+		limit = 50
+	}
+	seen := map[string]bool{}
+	out := make([]Participant, 0, limit)
+	for i := len(r.messages) - 1; i >= 0 && len(out) < limit; i-- {
+		m := r.messages[i]
+		if m.ChatID != chatID || m.SenderID == "" || seen[m.SenderID] {
+			continue
+		}
+		seen[m.SenderID] = true
+		out = append(out, Participant{ID: m.SenderID, Name: m.SenderName})
+	}
+	return out, nil
+}
+
 func (r *MemoryRepo) RecordMessage(ctx context.Context, m MessageRecord) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

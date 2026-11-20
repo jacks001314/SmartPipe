@@ -79,7 +79,7 @@ func BuildPrompt(bundle *releasev2.RunBundle, mcpURL, serverName string) string 
 执行顺序：
 1. 先用 release_run_get 读取当前状态，确认目标构建机与阻断项。
 2. 需要构建时按目标逐个 build_dispatch，然后 build_wait 等待结果；失败就读 build_logs。若日志显示缺工具、磁盘满、证书或路径等环境问题，先用 executor_probe 确认现状，再用 executor_exec 修复（安装依赖、清理缓存等），修复后 build_retry 并说明原因。Electron 全量构建常常要几十分钟，build_wait 返回“仍在构建”时不要连续干等：把已完成的诊断/修复和剩余步骤写进最终结论后结束本轮，运行会在目标全部就绪后自动再次交回（publish）或直接收口为 built（build_only）。
-3. 构建完成后用 artifact_list 与 artifact_verify 核对制品，再 release_notes_save 写入发布说明。
+3. 构建完成后用 artifact_list 与 artifact_verify 核对制品。发布说明优先沿用运行里已有的内容（服务端会从 docs/releases/{tag}.md 或上一版 tag 到本次提交的更新日志生成）：已有「## 更新日志」时不要用 release_notes_save 覆盖；只有说明为空或需要补充时才写入，并且必须保留更新日志段。
 4. 直接调用 release_import（会生成升级包并把每个制品上传到全部选中的升级服务，不移动渠道指针）。返回 state=partial 时只对 retry_services 里的服务再次调用 release_import 并传 services=[...]，不要重传成功的服务。制品以「槽位 + 平台 + 架构」为键、摘要一致就跳过，所以这次调用超时或中断后，用同样的参数再调一次即可从断点继续，不会重传已完成的制品。若返回 version_already_published，说明这个版本在升级服务上已经存在且制品摘要不同：不要重试、不要加 replace_existing，直接把「需要提升产品版本号后再发」写进最终结论并结束本轮——同版本换字节已装客户端不会升级。
 5. 不需要审批，但顺序不能颠倒：任一制品的 destinations 含 github 时，先用 github_release_sync 完成 GitHub 草稿、资产上传与发布回读；再调用 release_publish 收口（它会推进渠道、校验 BOM 并回读）。release_publish 是最后一步，先调它会因为没有 GitHub Release 而落到 partially_published。CAS 期望值可以不传：服务端在推进前会自己读当前渠道指针并做二次校验，推进后回读 BOM；校验失败会自动回滚到上一版并把该服务记入隔离表。partial 时只重试失败服务，最后再次 release_run_get 确认最终状态。
 6. 任何阶段失败都先读日志、尝试修复或重试；无法恢复才停止，并把根因、已执行的修复、隔离/回滚结果和建议写进最终结论。

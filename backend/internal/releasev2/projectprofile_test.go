@@ -12,8 +12,8 @@ import (
 
 // TestBundledProjectProfilesProduceCompleteBundles 校验仓库里随附的项目配置：
 // 一、能被 ProjectReleaseConfig 解析；二、按配置声明的制品规则，一次发布能
-// 覆盖升级服务的全部产品槽位与内容组件。Syntropy 的 product 组件有 27 个
-// 槽位，少一个槽位就会把线上渠道指针里的成员抹掉。
+// 覆盖升级服务的全部产品槽位与内容组件。Syntropy 的 product 组件有 30 个
+// 槽位单元，少一个槽位就会把线上渠道指针里的成员抹掉。
 func TestBundledProjectProfilesProduceCompleteBundles(t *testing.T) {
 	paths, err := filepath.Glob(filepath.Join("..", "..", "..", "deploy", "profiles", "*.json"))
 	if err != nil {
@@ -55,6 +55,38 @@ func TestBundledProjectProfilesProduceCompleteBundles(t *testing.T) {
 				t.Fatalf("product slots = %d, want %d (%+v)", got, want, bundle.Components["product"].Slots)
 			}
 		})
+	}
+}
+
+// TestSyntropyProfileCarriesWindowsComputerUse 防止 Windows 原生电脑操控两件从
+// 发布配置里悄悄消失：升级服务把它们当成两个独立的产品槽位，漏掉任何一条，
+// 新版本 Windows 更新就会少下发 helper 或 NOTICES。
+func TestSyntropyProfileCarriesWindowsComputerUse(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "deploy", "profiles", "syntropy-release-config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg ProjectReleaseConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatalf("decode syntropy profile: %v", err)
+	}
+	cfg.ProjectID = "prj_profile_test"
+	if err := cfg.Normalize(); err != nil {
+		t.Fatalf("normalize syntropy profile: %v", err)
+	}
+	bundle := bundleFromProfile(t, &cfg)
+	got := map[string]BundleSlot{}
+	for _, slot := range bundle.Components["product"].Slots {
+		got[slot.Slot] = slot
+	}
+	for _, name := range []string{"computer-use", "computer-use-notices"} {
+		slot, ok := got[name]
+		if !ok {
+			t.Fatalf("product bundle is missing slot %s", name)
+		}
+		if slot.OS != "windows" || slot.Arch != "amd64" {
+			t.Fatalf("slot %s = %s/%s, want windows/amd64", name, slot.OS, slot.Arch)
+		}
 	}
 }
 

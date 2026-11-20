@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/kataras/iris/v12"
 	"net/http"
+	"smartpipe/backend/internal/store"
 	"smartpipe/backend/internal/testlab"
 )
 
@@ -38,6 +39,16 @@ func (a *API) testLabError(c iris.Context, err error) {
 	if errors.Is(err, testlab.ErrState) {
 		c.StatusCode(http.StatusConflict)
 		_ = c.JSON(envelope{Err: &apiError{Code: "test_run_state", Message: err.Error()}})
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		c.StatusCode(http.StatusNotFound)
+		_ = c.JSON(envelope{Err: &apiError{Code: "not_found", Message: err.Error()}})
+		return
+	}
+	if errors.Is(err, store.ErrConflict) {
+		c.StatusCode(http.StatusConflict)
+		_ = c.JSON(envelope{Err: &apiError{Code: "conflict", Message: err.Error()}})
 		return
 	}
 	a.fail(c, err)

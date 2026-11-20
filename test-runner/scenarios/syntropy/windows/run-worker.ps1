@@ -69,6 +69,20 @@ try {
       if (-not (Test-LocalPort ([int]$t.localPort))) { throw 'SSH tunnel did not become ready' }
     }
   }
+  # Optional: bring up the desktop product under test so a screenshot has a
+  # live UI. The engine uses the app's DevTools port when one is configured,
+  # because a disconnected RDP desktop paints Electron windows as flat grey.
+  $app = $settings.desktopApp
+  if ($app -and $app.executable) {
+    $processName = if ($app.processName) { [string]$app.processName } else { [IO.Path]::GetFileNameWithoutExtension([string]$app.executable) }
+    if (-not (Get-Process -Name $processName -ErrorAction SilentlyContinue)) {
+      Write-Host "Starting desktop app $($app.executable)"
+      $appArgs = @()
+      if ($app.args) { $appArgs = @($app.args) }
+      Start-Process -FilePath $app.executable -ArgumentList $appArgs
+      if ($app.waitSec) { Start-Sleep -Seconds ([int]$app.waitSec) }
+    }
+  }
   do {
     & $NodeExe $cli $Config
     $exitCode = $LASTEXITCODE
